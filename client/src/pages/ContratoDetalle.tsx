@@ -7,8 +7,9 @@ import {
   ArrowLeft, Building2, User, FileText, Users, ClipboardCheck,
   Gavel, PenTool, Banknote, CheckCircle2, ChevronRight, Send,
   StickyNote, Info, History, AlertTriangle, XCircle,
-  Table2, Coins, X, TrendingDown,
+  Table2, Coins, X, TrendingDown, Download,
 } from 'lucide-react';
+import { generateEstadoCuentaPDF } from '@/lib/estadoCuentaPDF';
 
 interface StageHistoryEntry {
   id: string;
@@ -204,6 +205,21 @@ export default function ContratoDetalle() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
+  const [downloadingEdoCta, setDownloadingEdoCta] = useState(false);
+  const handleDownloadEstadoCuenta = async () => {
+    if (!id) return;
+    setDownloadingEdoCta(true);
+    try {
+      const res = await api.get(`/cobranza/estado-cuenta/${id}`);
+      generateEstadoCuentaPDF(res.data);
+    } catch (err) {
+      console.error('Error generando estado de cuenta:', err);
+      alert('No se pudo generar el estado de cuenta. Verifica que el contrato esté activo.');
+    } finally {
+      setDownloadingEdoCta(false);
+    }
+  };
+
   const submitExtraPayment = async () => {
     const monto = Number(extraMonto);
     if (!monto || monto <= 0) {
@@ -307,13 +323,24 @@ export default function ContratoDetalle() {
             </p>
           </div>
         </div>
-        <Link
-          to={`/clientes/${c.client.id}`}
-          className="text-xs text-inyecta-600 hover:underline flex items-center gap-1 mt-1"
-        >
-          {c.client.tipo === 'PM' ? <Building2 size={12} /> : <User size={12} />}
-          {clientName(c.client)}
-        </Link>
+        <div className="flex flex-col items-end gap-2 mt-1">
+          <Link
+            to={`/clientes/${c.client.id}`}
+            className="text-xs text-inyecta-600 hover:underline flex items-center gap-1"
+          >
+            {c.client.tipo === 'PM' ? <Building2 size={12} /> : <User size={12} />}
+            {clientName(c.client)}
+          </Link>
+          {c.estatus === 'VIGENTE' && (
+            <button
+              onClick={handleDownloadEstadoCuenta}
+              disabled={downloadingEdoCta}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-inyecta-600 hover:bg-inyecta-700 text-white rounded-lg text-xs font-medium shadow-sm disabled:opacity-50"
+            >
+              <Download size={12} /> {downloadingEdoCta ? 'Generando…' : 'Estado de Cuenta PDF'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Pipeline Progress */}
