@@ -83,6 +83,9 @@ model Client {
   sector          String?
   actividadEconomica String?
   activo          Boolean  @default(true)
+  // Portal del Arrendatario (acceso vía token único)
+  portalToken     String?  @unique
+  portalUltimoAcceso DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

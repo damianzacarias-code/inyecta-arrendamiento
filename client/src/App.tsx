@@ -21,6 +21,7 @@ import Documentos from '@/pages/Documentos';
 import CirculoCredito from '@/pages/CirculoCredito';
 import Reportes from '@/pages/Reportes';
 import Facturas from '@/pages/Facturas';
+import Portal from '@/pages/Portal';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -35,6 +36,7 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/portal/:token" element={<Portal />} />
             <Route
               element={
                 <ProtectedRoute>

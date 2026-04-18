@@ -5,7 +5,7 @@ import { formatDate, formatCurrency } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
 import {
   ArrowLeft, Building2, User, FileCheck, FileX, Clock, AlertTriangle,
-  CheckCircle2, XCircle, Send, StickyNote, FileText, Eye,
+  CheckCircle2, XCircle, Send, StickyNote, FileText, Eye, ExternalLink, Copy,
 } from 'lucide-react';
 
 interface Doc {
@@ -151,17 +151,39 @@ export default function ClienteDetalle() {
             </p>
           </div>
         </div>
-        <div className="text-right">
-          <div className="text-xs text-gray-500 mb-1">Documentos requeridos</div>
-          <div className="flex items-center gap-2">
-            <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all ${pct === 100 ? 'bg-emerald-500' : pct > 50 ? 'bg-amber-500' : 'bg-red-400'}`}
-                style={{ width: `${pct}%` }}
-              />
+        <div className="text-right space-y-2">
+          <div>
+            <div className="text-xs text-gray-500 mb-1">Documentos requeridos</div>
+            <div className="flex items-center gap-2 justify-end">
+              <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${pct === 100 ? 'bg-emerald-500' : pct > 50 ? 'bg-amber-500' : 'bg-red-400'}`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <span className="text-sm font-medium text-gray-700">{recibidosReq}/{totalReq}</span>
             </div>
-            <span className="text-sm font-medium text-gray-700">{recibidosReq}/{totalReq}</span>
           </div>
+          <button
+            onClick={async () => {
+              try {
+                const res = await api.post(`/portal/regenerate-token/${client.id}`);
+                const url = `${window.location.origin}${res.data.portalUrl}`;
+                if (navigator.clipboard) {
+                  await navigator.clipboard.writeText(url);
+                  alert(`Portal del Arrendatario\n\nURL copiada al portapapeles:\n${url}\n\nEnvíela al cliente para que consulte sus contratos, pagos y facturas.`);
+                } else {
+                  prompt('Copia esta URL para el cliente:', url);
+                }
+              } catch (err: any) {
+                alert('Error: ' + (err?.response?.data?.error || err.message));
+              }
+            }}
+            className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 border border-inyecta-200 text-inyecta-700 rounded-lg hover:bg-inyecta-50"
+            title="Generar URL del portal del arrendatario"
+          >
+            <ExternalLink size={12} /> Generar acceso a Portal
+          </button>
         </div>
       </div>
 

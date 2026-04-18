@@ -15,6 +15,7 @@ import circuloCreditoRoutes from './routes/circuloCredito';
 import reportsRoutes from './routes/reports';
 import contractDocumentsRoutes from './routes/contractDocuments';
 import invoicesRoutes from './routes/invoices';
+import portalRoutes from './routes/portal';
 
 const app = express();
 
@@ -44,6 +45,7 @@ app.use('/api/circulo-credito', circuloCreditoRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/contract-documents', contractDocumentsRoutes);
 app.use('/api/invoices', invoicesRoutes);
+app.use('/api/portal', portalRoutes);
 
 // Start
 app.listen(config.port, () => {
