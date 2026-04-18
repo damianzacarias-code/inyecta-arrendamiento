@@ -6,7 +6,7 @@ import {
   CalendarDays, ChevronLeft, ChevronRight, CheckCircle2, Clock,
   AlertTriangle, Building2, User, DollarSign, TrendingUp,
   Phone, CreditCard, Filter, ChevronDown, ChevronUp,
-  ArrowRightLeft, FastForward, X, FileText, CircleDot, Receipt,
+  ArrowRightLeft, FastForward, X, FileText, CircleDot, Receipt, FileCheck2,
 } from 'lucide-react';
 import { generateReciboPDF } from '@/lib/reciboPDF';
 
@@ -545,6 +545,26 @@ export default function Cobranza() {
                                   className="text-inyecta-600 hover:text-inyecta-800 inline-flex items-center gap-0.5"
                                 >
                                   <Receipt size={10} /> Recibo
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    if (!confirm('¿Generar factura CFDI 4.0 para este pago?\n\n(Provider: ' + (import.meta.env.VITE_CFDI_PROVIDER || 'MOCK') + ')')) return;
+                                    try {
+                                      const res = await api.post('/invoices/facturar', { paymentId: p.id });
+                                      alert(`Factura timbrada\n\nFolio: ${res.data.invoice.serie}-${res.data.invoice.folio}\nUUID: ${res.data.uuid}\nProvider: ${res.data.provider}`);
+                                    } catch (err: any) {
+                                      const data = err?.response?.data;
+                                      if (data?.factura) {
+                                        alert(`Este pago ya fue facturado\n\nFolio: ${data.factura.folio}\nUUID: ${data.factura.uuid}`);
+                                      } else {
+                                        alert('Error al timbrar: ' + (data?.error || err.message));
+                                      }
+                                    }
+                                  }}
+                                  title="Timbrar CFDI"
+                                  className="text-purple-600 hover:text-purple-800 inline-flex items-center gap-0.5"
+                                >
+                                  <FileCheck2 size={10} /> Facturar
                                 </button>
                               </div>
                             ))}

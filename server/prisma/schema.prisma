@@ -92,6 +92,7 @@ model Client {
   cotizaciones  Quotation[]
   contratos     Contract[]
   notas         Note[]
+  facturas      Invoice[]
 
   @@map("clients")
 }
@@ -383,6 +384,7 @@ model Contract {
   notas           Note[]
   stageHistory    StageHistory[]
   documentos      ContractDocument[]
+  facturas        Invoice[]
 
   @@map("contracts")
 }
@@ -497,10 +499,81 @@ model Payment {
   referencia      String?       // referencia bancaria / comprobante
   observaciones   String?
 
+  factura         Invoice?
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@map("payments")
+}
+
+// ============================================================
+// FACTURACIÓN ELECTRÓNICA (CFDI 4.0)
+// ============================================================
+
+model Invoice {
+  id             String        @id @default(cuid())
+  // Vínculo
+  paymentId      String?       @unique
+  payment        Payment?      @relation(fields: [paymentId], references: [id])
+  contractId     String
+  contract       Contract      @relation(fields: [contractId], references: [id])
+  clientId       String
+  client         Client        @relation(fields: [clientId], references: [id])
+
+  // CFDI
+  tipo           InvoiceType   @default(INGRESO)        // INGRESO / EGRESO / PAGO
+  serie          String        @default("A")
+  folio          Int
+  uuid           String?       @unique                  // SAT
+  fechaTimbrado  DateTime?
+  status         InvoiceStatus @default(BORRADOR)
+
+  // Importes
+  subtotal       Decimal
+  iva            Decimal       @default(0)
+  retenciones    Decimal       @default(0)
+  total          Decimal
+
+  // Datos receptor (snapshot al momento de timbrado)
+  rfcReceptor    String
+  nombreReceptor String
+  usoCfdi        String        @default("G03")          // Gastos en general
+  metodoPago     String        @default("PUE")
+  formaPago      String        @default("03")           // Transferencia
+  regimenFiscal  String        @default("601")
+
+  // Archivos
+  xmlUrl         String?
+  pdfUrl         String?
+
+  // Cancelación
+  motivoCancelacion String?
+  fechaCancelacion  DateTime?
+
+  // Provider
+  provider       String        @default("MOCK")         // MOCK | FACTURAMA | SW
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([contractId])
+  @@index([clientId])
+  @@index([status])
+  @@map("invoices")
+}
+
+enum InvoiceType {
+  INGRESO
+  EGRESO
+  PAGO
+}
+
+enum InvoiceStatus {
+  BORRADOR
+  TIMBRADO
+  CANCELADO
+  ERROR
 }
 
 enum PaymentType {
