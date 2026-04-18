@@ -55,11 +55,12 @@ interface QuotationDetail {
   amortizacion?: Array<{
     periodo: number;
     saldoInicial: number;
-    capital: number;
-    interes: number;
+    pagoCapital: number;
+    intereses: number;
     renta: number;
     iva: number;
-    rentaConIVA: number;
+    seguro: number;
+    pagoTotal: number;
     saldoFinal: number;
   }>;
 }
@@ -189,13 +190,13 @@ export default function CotizacionDetalle() {
                   {q.amortizacion.map((row) => (
                     <tr key={row.periodo} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="py-2 px-3 text-gray-600">{row.periodo}</td>
-                      <td className="py-2 px-3 text-right text-gray-600">{formatCurrency(row.saldoInicial)}</td>
-                      <td className="py-2 px-3 text-right text-gray-700">{formatCurrency(row.capital)}</td>
-                      <td className="py-2 px-3 text-right text-gray-700">{formatCurrency(row.interes)}</td>
-                      <td className="py-2 px-3 text-right text-gray-700">{formatCurrency(row.renta)}</td>
-                      <td className="py-2 px-3 text-right text-gray-500">{formatCurrency(row.iva)}</td>
-                      <td className="py-2 px-3 text-right font-medium text-gray-900">{formatCurrency(row.rentaConIVA)}</td>
-                      <td className="py-2 px-3 text-right text-gray-500">{formatCurrency(row.saldoFinal)}</td>
+                      <td className="py-2 px-3 text-right text-gray-600">{formatCurrency(Number(row.saldoInicial))}</td>
+                      <td className="py-2 px-3 text-right text-gray-700">{formatCurrency(Number(row.pagoCapital))}</td>
+                      <td className="py-2 px-3 text-right text-gray-700">{formatCurrency(Number(row.intereses))}</td>
+                      <td className="py-2 px-3 text-right text-gray-700">{formatCurrency(Number(row.renta))}</td>
+                      <td className="py-2 px-3 text-right text-gray-500">{formatCurrency(Number(row.iva))}</td>
+                      <td className="py-2 px-3 text-right font-medium text-gray-900">{formatCurrency(Number(row.renta) + Number(row.iva))}</td>
+                      <td className="py-2 px-3 text-right text-gray-500">{formatCurrency(Number(row.saldoFinal))}</td>
                     </tr>
                   ))}
                 </tbody>
