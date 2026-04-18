@@ -12,6 +12,7 @@ import gpsRoutes from './routes/gps';
 import documentsRoutes from './routes/documents';
 import circuloCreditoRoutes from './routes/circuloCredito';
 import reportsRoutes from './routes/reports';
+import contractDocumentsRoutes from './routes/contractDocuments';
 
 const app = express();
 
@@ -36,6 +37,7 @@ app.use('/api/gps', gpsRoutes);
 app.use('/api/documents', documentsRoutes);
 app.use('/api/circulo-credito', circuloCreditoRoutes);
 app.use('/api/reports', reportsRoutes);
+app.use('/api/contract-documents', contractDocumentsRoutes);
 
 // Start
 app.listen(config.port, () => {

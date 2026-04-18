@@ -26,6 +26,7 @@ model User {
   contratos     Contract[]
   pagosRegistrados Payment[]
   notas         Note[]
+  documentosSubidos ContractDocument[]
 
   @@map("users")
 }
@@ -381,8 +382,30 @@ model Contract {
   mantenimientos  MaintenanceRecord[]
   notas           Note[]
   stageHistory    StageHistory[]
+  documentos      ContractDocument[]
 
   @@map("contracts")
+}
+
+model ContractDocument {
+  id            String         @id @default(cuid())
+  contractId    String
+  contract      Contract       @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  etapa         ContractStage  // etapa donde se requiere el documento
+  tipo          String         // p.ej. "CONTRATO_FIRMADO", "PAGARE", "ACTA_ENTREGA"
+  nombre        String         // descripción humana
+  requerido     Boolean        @default(true)
+  estado        DocumentStatus @default(PENDIENTE)
+  archivoUrl    String?
+  archivoNombre String?
+  fechaRecepcion DateTime?
+  observaciones String?
+  uploadedBy    String?
+  uploadedByUser User?         @relation(fields: [uploadedBy], references: [id])
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@map("contract_documents")
 }
 
 enum ContractStage {

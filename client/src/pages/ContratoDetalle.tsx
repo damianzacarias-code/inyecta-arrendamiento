@@ -113,6 +113,7 @@ const ESTATUS_LABELS: Record<string, { label: string; color: string }> = {
 const tabs = [
   { id: 'pipeline', label: 'Pipeline', icon: History },
   { id: 'info', label: 'Informacion', icon: Info },
+  { id: 'documentos', label: 'Documentos', icon: ClipboardCheck },
   { id: 'amortizacion', label: 'Amortizacion', icon: Table2 },
   { id: 'notas', label: 'Bitacora', icon: StickyNote },
 ];
@@ -158,6 +159,8 @@ export default function ContratoDetalle() {
   const [contract, setContract] = useState<ContractDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('pipeline');
+  const [docsData, setDocsData] = useState<any | null>(null);
+  const [loadingDocs, setLoadingDocs] = useState(false);
   const [advancing, setAdvancing] = useState(false);
   const [advanceObs, setAdvanceObs] = useState('');
   const [comiteRes, setComiteRes] = useState('');
@@ -202,8 +205,26 @@ export default function ContratoDetalle() {
     if (tab === 'amortizacion' && !schedule && !loadingSchedule) {
       fetchSchedule();
     }
+    if (tab === 'documentos' && !docsData && !loadingDocs) {
+      setLoadingDocs(true);
+      api.get(`/contract-documents/contract/${id}`)
+        .then(r => setDocsData(r.data))
+        .catch(() => {})
+        .finally(() => setLoadingDocs(false));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
+
+  const updateDoc = async (docId: string, payload: { estado?: string; archivoUrl?: string | null; archivoNombre?: string | null; observaciones?: string | null }) => {
+    try {
+      await api.patch(`/contract-documents/${docId}`, payload);
+      const r = await api.get(`/contract-documents/contract/${id}`);
+      setDocsData(r.data);
+    } catch (err) {
+      console.error(err);
+      alert('Error al actualizar documento');
+    }
+  };
 
   const [downloadingEdoCta, setDownloadingEdoCta] = useState(false);
   const handleDownloadEstadoCuenta = async () => {
@@ -610,6 +631,121 @@ export default function ContratoDetalle() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Tab: Documentos por Etapa */}
+      {tab === 'documentos' && (
+        <div className="space-y-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
+            <strong>Documentos por etapa:</strong> Cada etapa del pipeline requiere ciertos documentos. Marca como recibido conforme los obtengas. El avance de etapa requiere completar los documentos requeridos (puedes anular el bloqueo agregando una observación).
+          </div>
+
+          {loadingDocs && (
+            <div className="flex items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-6 w-6 border-2 border-inyecta-600 border-t-transparent" />
+            </div>
+          )}
+
+          {!loadingDocs && docsData && docsData.etapas.map((et: any) => (
+            <div key={et.etapa} className={`bg-white rounded-xl border p-4 ${
+              et.currentStage ? 'border-inyecta-300 ring-1 ring-inyecta-100' :
+              et.pasada ? 'border-gray-200 opacity-90' : 'border-gray-200'
+            }`}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <h3 className={`font-semibold ${
+                    et.currentStage ? 'text-inyecta-700' :
+                    et.pasada ? 'text-gray-700' : 'text-gray-500'
+                  }`}>
+                    {et.etapa.replace('_', ' ')}
+                  </h3>
+                  {et.currentStage && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-inyecta-100 text-inyecta-700">ETAPA ACTUAL</span>
+                  )}
+                  {et.pasada && (
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-100 text-emerald-700">COMPLETADA</span>
+                  )}
+                </div>
+                <div className="text-xs text-gray-500">
+                  {et.completos} / {et.total} requeridos · {et.progreso}%
+                </div>
+              </div>
+              {et.total > 0 && (
+                <div className="w-full bg-gray-100 rounded-full h-1.5 mb-3">
+                  <div className={`h-1.5 rounded-full transition-all ${
+                    et.progreso === 100 ? 'bg-emerald-500' :
+                    et.progreso >= 50 ? 'bg-amber-500' : 'bg-red-400'
+                  }`} style={{ width: `${et.progreso}%` }} />
+                </div>
+              )}
+              <div className="space-y-1.5">
+                {et.documentos.map((d: any) => {
+                  const recibido = d.estado === 'RECIBIDO';
+                  const rechazado = d.estado === 'RECHAZADO';
+                  return (
+                    <div key={d.id} className={`flex items-start justify-between gap-2 p-2 rounded border text-sm ${
+                      recibido ? 'border-emerald-200 bg-emerald-50' :
+                      rechazado ? 'border-red-200 bg-red-50' : 'border-gray-100 hover:bg-gray-50'
+                    }`}>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`font-medium ${recibido ? 'text-emerald-800' : rechazado ? 'text-red-800' : 'text-gray-800'}`}>
+                            {d.nombre}
+                          </span>
+                          {d.requerido && !recibido && (
+                            <span className="text-[10px] font-bold text-red-600">REQUERIDO</span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                          {d.tipo}
+                          {d.fechaRecepcion && (
+                            <> · Recibido {formatDate(d.fechaRecepcion)}{d.uploadedByUser && ` por ${d.uploadedByUser.nombre}`}</>
+                          )}
+                          {d.archivoNombre && <> · 📎 {d.archivoNombre}</>}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        {!recibido && (
+                          <button
+                            onClick={() => {
+                              const nombre = prompt('Nombre del archivo (opcional):') || undefined;
+                              updateDoc(d.id, { estado: 'RECIBIDO', archivoNombre: nombre || null });
+                            }}
+                            className="text-[10px] px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium"
+                          >
+                            Marcar recibido
+                          </button>
+                        )}
+                        {recibido && (
+                          <button
+                            onClick={() => updateDoc(d.id, { estado: 'PENDIENTE', archivoNombre: null })}
+                            className="text-[10px] px-2 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded"
+                          >
+                            Quitar
+                          </button>
+                        )}
+                        {!rechazado && !recibido && (
+                          <button
+                            onClick={() => {
+                              const obs = prompt('Motivo del rechazo:');
+                              if (obs) updateDoc(d.id, { estado: 'RECHAZADO', observaciones: obs });
+                            }}
+                            className="text-[10px] px-2 py-1 text-red-600 hover:bg-red-50 rounded"
+                          >
+                            Rechazar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {et.documentos.length === 0 && (
+                  <p className="text-xs text-gray-400 italic">Sin documentos definidos para esta etapa.</p>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
