@@ -69,7 +69,7 @@ const TIPO_LABELS: Record<string, string> = {
 
 function getClienteNombre(c: ReciboData['contrato']['client']): string {
   if (!c) return 'Cliente';
-  if (c.tipo === 'PERSONA_MORAL' && c.razonSocial) return c.razonSocial;
+  if ((c.tipo === 'PM' || c.tipo === 'PERSONA_MORAL') && c.razonSocial) return c.razonSocial;
   return [c.nombre, c.apellidoPaterno, c.apellidoMaterno].filter(Boolean).join(' ') || c.razonSocial || 'Cliente';
 }
 

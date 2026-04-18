@@ -19,6 +19,7 @@ import Seguros from '@/pages/Seguros';
 import GPS from '@/pages/GPS';
 import Documentos from '@/pages/Documentos';
 import CirculoCredito from '@/pages/CirculoCredito';
+import Reportes from '@/pages/Reportes';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -55,6 +56,7 @@ export default function App() {
               <Route path="gps" element={<GPS />} />
               <Route path="documentos" element={<Documentos />} />
               <Route path="circulo-credito" element={<CirculoCredito />} />
+              <Route path="reportes" element={<Reportes />} />
             </Route>
           </Routes>
         </BrowserRouter>

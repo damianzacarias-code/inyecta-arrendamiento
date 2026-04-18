@@ -18,6 +18,7 @@ import {
   Menu,
   X,
   ChevronDown,
+  FileBarChart,
 } from 'lucide-react';
 
 const navigation = [
@@ -31,6 +32,7 @@ const navigation = [
   { name: 'GPS', href: '/gps', icon: MapPin },
   { name: 'Documentos', href: '/documentos', icon: ClipboardList },
   { name: 'Círculo de Crédito', href: '/circulo-credito', icon: BadgeCheck },
+  { name: 'Reportes', href: '/reportes', icon: FileBarChart },
 ];
 
 export default function Layout() {
