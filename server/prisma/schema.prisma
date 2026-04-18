@@ -511,6 +511,52 @@ model Payment {
 }
 
 // ============================================================
+// CONCILIACIÓN BANCARIA
+// ============================================================
+
+model BankStatement {
+  id           String            @id @default(cuid())
+  banco        String                                       // BBVA, Santander, Banamex, ...
+  cuenta       String?                                      // CLABE o nº cuenta
+  fileName     String
+  fechaInicio  DateTime?
+  fechaFin     DateTime?
+  totalAbonos  Decimal           @default(0)
+  totalCargos  Decimal           @default(0)
+  uploadedBy   String?
+  createdAt    DateTime          @default(now())
+
+  transacciones BankTransaction[]
+
+  @@map("bank_statements")
+}
+
+model BankTransaction {
+  id            String         @id @default(cuid())
+  statementId   String
+  statement     BankStatement  @relation(fields: [statementId], references: [id], onDelete: Cascade)
+
+  fecha         DateTime
+  descripcion   String
+  referencia    String?
+  monto         Decimal                                    // positivo = abono (depósito a Inyecta)
+  tipo          String                                     // ABONO | CARGO
+
+  // Conciliación
+  matched       Boolean        @default(false)
+  paymentId     String?                                    // referencia (sin FK estricto)
+  matchScore    Int?                                       // 0-100 (qué tan confiable fue el match)
+  matchedBy     String?                                    // userId o "AUTO"
+  matchedAt     DateTime?
+
+  createdAt     DateTime       @default(now())
+
+  @@index([statementId])
+  @@index([matched])
+  @@map("bank_transactions")
+}
+
+// ============================================================
 // FACTURACIÓN ELECTRÓNICA (CFDI 4.0)
 // ============================================================
 

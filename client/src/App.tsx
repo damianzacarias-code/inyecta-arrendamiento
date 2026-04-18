@@ -22,6 +22,7 @@ import CirculoCredito from '@/pages/CirculoCredito';
 import Reportes from '@/pages/Reportes';
 import Facturas from '@/pages/Facturas';
 import Portal from '@/pages/Portal';
+import Conciliacion from '@/pages/Conciliacion';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -61,6 +62,7 @@ export default function App() {
               <Route path="circulo-credito" element={<CirculoCredito />} />
               <Route path="reportes" element={<Reportes />} />
               <Route path="facturas" element={<Facturas />} />
+              <Route path="conciliacion" element={<Conciliacion />} />
             </Route>
           </Routes>
         </BrowserRouter>

@@ -20,6 +20,7 @@ import {
   ChevronDown,
   FileBarChart,
   Receipt,
+  Banknote,
 } from 'lucide-react';
 
 const navigation = [
@@ -30,6 +31,7 @@ const navigation = [
   { name: 'Contratos', href: '/contratos', icon: FolderOpen },
   { name: 'Cobranza', href: '/cobranza', icon: CalendarDays },
   { name: 'Facturas', href: '/facturas', icon: Receipt },
+  { name: 'Conciliación', href: '/conciliacion', icon: Banknote },
   { name: 'Seguros', href: '/seguros', icon: Shield },
   { name: 'GPS', href: '/gps', icon: MapPin },
   { name: 'Documentos', href: '/documentos', icon: ClipboardList },
