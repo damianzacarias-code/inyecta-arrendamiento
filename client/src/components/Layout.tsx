@@ -21,7 +21,9 @@ import {
   FileBarChart,
   Receipt,
   Banknote,
+  Search,
 } from 'lucide-react';
+import CommandPalette from './CommandPalette';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -163,8 +165,28 @@ export default function Layout() {
           >
             <Menu size={20} />
           </button>
+          <button
+            onClick={() => {
+              // Dispara el mismo Cmd+K que escucha el palette global
+              const evt = new KeyboardEvent('keydown', {
+                key: 'k',
+                metaKey: true,
+                ctrlKey: true,
+                bubbles: true,
+              });
+              window.dispatchEvent(evt);
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm text-gray-500 transition-colors w-full max-w-md"
+          >
+            <Search size={14} />
+            <span>Buscar...</span>
+            <span className="ml-auto text-[10px] font-medium text-gray-400 bg-white px-1.5 py-0.5 rounded border border-gray-200">
+              ⌘K
+            </span>
+          </button>
           <div className="flex-1" />
         </header>
+        <CommandPalette />
 
         {/* Page content */}
         <main className="flex-1 p-4 lg:p-6 overflow-y-auto">
