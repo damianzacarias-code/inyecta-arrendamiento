@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Env / secretos
+.env
+.env.local
+.env.*.local
+*.key
+*.cer
+*.pem
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Vite cache
+.vite/
+client/.vite/
+
+# Prisma generated
+server/node_modules/.prisma/
+
+# Coverage
+coverage/
+
+# Misc
+*.tmp
+.cache/

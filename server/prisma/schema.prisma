@@ -1,0 +1,599 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// AUTENTICACIÓN Y USUARIOS
+// ============================================================
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  nombre    String
+  apellidos String
+  rol       UserRole @default(ANALISTA)
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cotizaciones  Quotation[]
+  contratos     Contract[]
+  pagosRegistrados Payment[]
+  notas         Note[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  DIRECTOR
+  ANALISTA
+  COBRANZA
+  OPERACIONES
+}
+
+// ============================================================
+// CLIENTES
+// ============================================================
+
+model Client {
+  id              String     @id @default(cuid())
+  tipo            ClientType
+  // Persona Física
+  nombre          String?
+  apellidoPaterno String?
+  apellidoMaterno String?
+  curp            String?
+  // Persona Moral
+  razonSocial     String?
+  // Compartidos
+  rfc             String?    @unique
+  email           String?
+  telefono        String?
+  // Domicilio fiscal
+  calle           String?
+  numExterior     String?
+  numInterior     String?
+  colonia         String?
+  municipio       String?
+  ciudad          String?
+  estado          String?
+  cp              String?
+  // Domicilio de operación (puede diferir del fiscal)
+  calleOp         String?
+  numExteriorOp   String?
+  numInteriorOp   String?
+  coloniaOp       String?
+  municipioOp     String?
+  ciudadOp        String?
+  estadoOp        String?
+  cpOp            String?
+  // PM específicos
+  actaConstitutiva     String?
+  registroPublico      String?
+  representanteLegal   String?
+  // Metadata
+  sector          String?
+  actividadEconomica String?
+  activo          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  documentos    ClientDocument[]
+  avales        Guarantor[]
+  socios        Shareholder[]
+  cotizaciones  Quotation[]
+  contratos     Contract[]
+  notas         Note[]
+
+  @@map("clients")
+}
+
+enum ClientType {
+  PFAE
+  PM
+}
+
+model ClientDocument {
+  id          String         @id @default(cuid())
+  clientId    String
+  client      Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  tipo        String         // e.g. "INE", "CSF", "ESTADOS_FINANCIEROS"
+  nombre      String         // nombre descriptivo
+  requerido   Boolean        @default(true)
+  estado      DocumentStatus @default(PENDIENTE)
+  archivoUrl  String?
+  fechaRecepcion DateTime?
+  fechaVencimiento DateTime?
+  observaciones String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@map("client_documents")
+}
+
+enum DocumentStatus {
+  PENDIENTE
+  RECIBIDO
+  VENCIDO
+  RECHAZADO
+}
+
+model Guarantor {
+  id              String   @id @default(cuid())
+  clientId        String
+  client          Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  nombre          String
+  apellidoPaterno String
+  apellidoMaterno String?
+  rfc             String?
+  curp            String?
+  telefono        String?
+  email           String?
+  domicilio       String?
+  relacion        String?  // relación con el solicitante
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  documentos GarantorDocument[]
+
+  @@map("guarantors")
+}
+
+model GarantorDocument {
+  id          String         @id @default(cuid())
+  guarantorId String
+  guarantor   Guarantor      @relation(fields: [guarantorId], references: [id], onDelete: Cascade)
+  tipo        String
+  nombre      String
+  estado      DocumentStatus @default(PENDIENTE)
+  archivoUrl  String?
+  fechaRecepcion DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@map("guarantor_documents")
+}
+
+model Shareholder {
+  id              String  @id @default(cuid())
+  clientId        String
+  client          Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  nombre          String
+  apellidoPaterno String
+  apellidoMaterno String?
+  rfc             String?
+  porcentaje      Decimal // porcentaje de participación accionaria
+  esRepLegal      Boolean @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("shareholders")
+}
+
+// ============================================================
+// CATÁLOGOS
+// ============================================================
+
+model AssetCategory {
+  id          String   @id @default(cuid())
+  nombre      String   @unique
+  descripcion String?
+  productos   String?  // ejemplos de productos (texto)
+  tipoSeguro  String?  // tipo de cobertura requerida
+  requiereGPS Boolean  @default(false)
+  activo      Boolean  @default(true)
+  orden       Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  cotizaciones Quotation[]
+  contratos    Contract[]
+
+  @@map("asset_categories")
+}
+
+// ============================================================
+// COTIZACIONES
+// ============================================================
+
+model Quotation {
+  id              String         @id @default(cuid())
+  folio           String         @unique
+  clientId        String?
+  client          Client?        @relation(fields: [clientId], references: [id])
+  nombreCliente   String         // puede ser prospecto sin client registrado
+  userId          String
+  user            User           @relation(fields: [userId], references: [id])
+  categoriaId     String?
+  categoria       AssetCategory? @relation(fields: [categoriaId], references: [id])
+
+  // Datos del bien
+  bienDescripcion String?
+  bienMarca       String?
+  bienModelo      String?
+  bienAnio        Int?
+  bienNuevo       Boolean        @default(true)
+  bienNumSerie    String?
+
+  // Parámetros financieros
+  producto        LeaseType
+  valorBien       Decimal        // sin IVA
+  valorBienIVA    Decimal?       // con IVA (calculado)
+  plazo           Int            // meses (12-48)
+  tasaAnual       Decimal        // e.g. 0.36
+  nivelRiesgo     RiskLevel      @default(A)
+
+  // Montos calculados
+  enganche           Decimal   @default(0)
+  enganchePorcentaje  Decimal   @default(0)
+  depositoGarantia       Decimal   @default(0)
+  depositoGarantiaPct    Decimal   @default(0)
+  comisionApertura       Decimal   @default(0)
+  comisionAperturaPct    Decimal   @default(0.05)
+  comisionAperturaFinanciada Boolean @default(true)
+  rentaInicial           Decimal   @default(0)
+  gpsInstalacion         Decimal   @default(0)
+  gpsFinanciado          Boolean   @default(true)
+  seguroAnual            Decimal   @default(0)
+  seguroFinanciado       Boolean   @default(true)
+  valorResidual          Decimal   @default(0)
+  valorResidualPct       Decimal   @default(0)
+
+  // Resultados
+  montoFinanciar    Decimal?
+  rentaMensual      Decimal?
+  rentaMensualIVA   Decimal?
+  totalRentas       Decimal?
+  totalPagar        Decimal?
+  ganancia          Decimal?
+
+  // Estado
+  estado          QuotationStatus @default(VIGENTE)
+  fechaCotizacion DateTime        @default(now())
+  vigenciaHasta   DateTime?
+  observaciones   String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  opciones  QuotationOption[]
+  contrato  Contract?
+
+  @@map("quotations")
+}
+
+enum LeaseType {
+  PURO
+  FINANCIERO
+}
+
+enum RiskLevel {
+  A  // bajo - 16%
+  B  // medio - 21%
+  C  // alto - 26%
+}
+
+enum QuotationStatus {
+  VIGENTE
+  VENCIDA
+  APROBADA
+  RECHAZADA
+  CONVERTIDA  // se convirtió en contrato
+}
+
+model QuotationOption {
+  id            String    @id @default(cuid())
+  quotationId   String
+  quotation     Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  nombre        String    // "Opción A - Riesgo bajo", etc.
+  producto      LeaseType
+  nivelRiesgo   RiskLevel
+  enganche      Decimal
+  rentaInicial  Decimal
+  depositoGarantia  Decimal
+  rentaMensualIVA   Decimal
+  valorResidual     Decimal
+  totalPagar        Decimal
+  ganancia          Decimal
+  descripcion   String?   // descripción de la estructura
+
+  @@map("quotation_options")
+}
+
+// ============================================================
+// CONTRATOS
+// ============================================================
+
+model Contract {
+  id              String          @id @default(cuid())
+  folio           String          @unique  // e.g. ARR-001-2026
+  quotationId     String?         @unique
+  quotation       Quotation?      @relation(fields: [quotationId], references: [id])
+  clientId        String
+  client          Client          @relation(fields: [clientId], references: [id])
+  userId          String          // analista que registró
+  user            User            @relation(fields: [userId], references: [id])
+  categoriaId     String?
+  categoria       AssetCategory?  @relation(fields: [categoriaId], references: [id])
+
+  // Pipeline
+  etapa           ContractStage   @default(SOLICITUD)
+  etapaFecha      DateTime        @default(now())
+  comiteResolucion String?        // APROBADO, APROBADO_CONDICIONES, RECHAZADO
+
+  // Datos del bien
+  bienDescripcion String
+  bienMarca       String?
+  bienModelo      String?
+  bienAnio        Int?
+  bienNumSerie    String?
+  bienEstado      String?         // nuevo/seminuevo
+  proveedor       String?
+
+  // Parámetros financieros
+  producto        LeaseType
+  valorBien       Decimal
+  valorBienIVA    Decimal
+  plazo           Int
+  tasaAnual       Decimal
+  tasaMoratoria   Decimal?        // default: 2x tasa ordinaria
+  nivelRiesgo     RiskLevel
+
+  // Montos
+  enganche              Decimal  @default(0)
+  depositoGarantia      Decimal  @default(0)
+  comisionApertura      Decimal  @default(0)
+  rentaInicial          Decimal  @default(0)
+  gpsInstalacion        Decimal  @default(0)
+  seguroAnual           Decimal  @default(0)
+  valorResidual         Decimal  @default(0)
+  montoFinanciar        Decimal
+  rentaMensual          Decimal
+  rentaMensualIVA       Decimal
+
+  // Fechas
+  fechaFirma            DateTime?
+  fechaInicio           DateTime?    // fecha de primera renta
+  fechaEntregaBien      DateTime?
+  fechaVencimiento      DateTime?
+  fechaTerminacion      DateTime?
+
+  // Estado del contrato
+  estatus         ContractStatus   @default(EN_PROCESO)
+  motivoTerminacion String?
+
+  // Opción al vencimiento
+  opcionVencimiento EndOption?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  amortizacion    AmortizationEntry[]
+  pagos           Payment[]
+  seguros         InsurancePolicy[]
+  gps             GPSDevice[]
+  mantenimientos  MaintenanceRecord[]
+  notas           Note[]
+  stageHistory    StageHistory[]
+
+  @@map("contracts")
+}
+
+enum ContractStage {
+  SOLICITUD
+  ANALISIS_CLIENTE
+  ANALISIS_BIEN
+  COMITE
+  FORMALIZACION
+  DESEMBOLSO
+  ACTIVO
+}
+
+enum ContractStatus {
+  EN_PROCESO    // aún en pipeline
+  VIGENTE       // contrato activo
+  VENCIDO       // pasó fecha de vencimiento sin formalizar cierre
+  TERMINADO     // terminación normal
+  RESCINDIDO    // rescisión por incumplimiento
+  REESTRUCTURADO
+}
+
+enum EndOption {
+  DEVOLUCION
+  RENOVACION
+  RESCATE        // Puro: paga valor residual
+  OPCION_COMPRA  // Financiero: paga 2% simbólico
+}
+
+model StageHistory {
+  id          String        @id @default(cuid())
+  contractId  String
+  contract    Contract      @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  etapa       ContractStage
+  fecha       DateTime      @default(now())
+  observacion String?
+  usuarioId   String?
+
+  @@map("stage_history")
+}
+
+// ============================================================
+// AMORTIZACIÓN
+// ============================================================
+
+model AmortizationEntry {
+  id            String   @id @default(cuid())
+  contractId    String
+  contract      Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  periodo       Int
+  fechaPago     DateTime
+  saldoInicial  Decimal
+  intereses     Decimal  @default(0)  // solo financiero
+  pagoCapital   Decimal  @default(0)  // solo financiero
+  renta         Decimal
+  iva           Decimal
+  seguro        Decimal  @default(0)
+  pagoTotal     Decimal
+  saldoFinal    Decimal
+
+  @@unique([contractId, periodo])
+  @@map("amortization_entries")
+}
+
+// ============================================================
+// PAGOS Y COBRANZA
+// ============================================================
+
+model Payment {
+  id              String        @id @default(cuid())
+  contractId      String
+  contract        Contract      @relation(fields: [contractId], references: [id])
+  userId          String?       // quien registró el pago
+  user            User?         @relation(fields: [userId], references: [id])
+
+  periodo         Int?          // número de renta que cubre
+  tipo            PaymentType
+  fechaPago       DateTime
+  fechaVencimiento DateTime?
+
+  montoRenta      Decimal       @default(0)
+  montoIVA        Decimal       @default(0)
+  montoSeguro     Decimal       @default(0)
+  montoMoratorio  Decimal       @default(0)
+  montoIVAMoratorio Decimal     @default(0)
+  montoCapitalExtra Decimal     @default(0) // abono a capital (financiero)
+  montoTotal      Decimal
+
+  diasAtraso      Int           @default(0)
+  referencia      String?       // referencia bancaria / comprobante
+  observaciones   String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("payments")
+}
+
+enum PaymentType {
+  RENTA_ORDINARIA
+  RENTA_ADELANTADA
+  ABONO_CAPITAL       // solo financiero
+  LIQUIDACION_ANTICIPADA
+  MORATORIO
+  RENTA_EXTRAORDINARIA  // post-vencimiento sin formalizar
+  ENGANCHE
+  DEPOSITO_GARANTIA
+  COMISION_APERTURA
+  SEGURO
+  GPS
+  OTRO
+}
+
+// ============================================================
+// SEGUROS
+// ============================================================
+
+model InsurancePolicy {
+  id              String   @id @default(cuid())
+  contractId      String
+  contract        Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  aseguradora     String?  // "Seguros El Potosí", etc.
+  numPoliza       String?
+  tipoCobertura   String?
+  montoAsegurado  Decimal?
+  primaAnual      Decimal?
+  fechaInicio     DateTime?
+  fechaVencimiento DateTime?
+  endosoPref      Boolean  @default(true)  // endoso preferente a Inyecta
+  vigente         Boolean  @default(true)
+  observaciones   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("insurance_policies")
+}
+
+// ============================================================
+// GPS
+// ============================================================
+
+model GPSDevice {
+  id              String   @id @default(cuid())
+  contractId      String
+  contract        Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  marca           String?
+  modelo          String?
+  numSerie        String?
+  proveedor       String?
+  fechaInstalacion DateTime?
+  activo          Boolean  @default(true)
+  costoInstalacion Decimal? @default(0)
+  observaciones   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("gps_devices")
+}
+
+// ============================================================
+// MANTENIMIENTO
+// ============================================================
+
+model MaintenanceRecord {
+  id              String          @id @default(cuid())
+  contractId      String
+  contract        Contract        @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  tipo            MaintenanceType
+  fecha           DateTime
+  descripcion     String?
+  taller          String?         // agencia/taller
+  costo           Decimal?        @default(0)
+  comprobanteUrl  String?
+  observaciones   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("maintenance_records")
+}
+
+enum MaintenanceType {
+  PREVENTIVO
+  CORRECTIVO
+  REVISION_ANUAL
+  REVISION_ATRASO   // revisión por atraso en pagos
+  SINIESTRO
+}
+
+// ============================================================
+// NOTAS / BITÁCORA
+// ============================================================
+
+model Note {
+  id          String   @id @default(cuid())
+  contractId  String?
+  contract    Contract? @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  clientId    String?
+  client      Client?  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  contenido   String
+  tipo        NoteType @default(GENERAL)
+  createdAt   DateTime @default(now())
+
+  @@map("notes")
+}
+
+enum NoteType {
+  GENERAL
+  COBRANZA
+  COMITE
+  LEGAL
+  MANTENIMIENTO
+  ALERTA
+}

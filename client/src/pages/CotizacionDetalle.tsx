@@ -1,0 +1,281 @@
+import { useState, useEffect } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import api from '@/lib/api';
+import { formatCurrency, formatPercent, formatDate } from '@/lib/utils';
+import { ArrowLeft, FileDown, Printer } from 'lucide-react';
+import { generateQuotationPDF } from '@/lib/pdfGenerator';
+
+interface QuotationDetail {
+  id: string;
+  folio: string;
+  nombreCliente: string;
+  producto: string;
+  valorBien: number;
+  valorBienIVA: number;
+  plazo: number;
+  tasaAnual: number;
+  nivelRiesgo: string;
+  enganche: number;
+  enganchePorcentaje: number;
+  depositoGarantia: number;
+  depositoGarantiaPct: number;
+  comisionApertura: number;
+  comisionAperturaPct: number;
+  comisionAperturaFinanciada: boolean;
+  rentaInicial: number;
+  gpsInstalacion: number;
+  gpsFinanciado: boolean;
+  seguroAnual: number;
+  seguroFinanciado: boolean;
+  valorResidual: number;
+  valorResidualPct: number;
+  montoFinanciar: number;
+  rentaMensual: number;
+  rentaMensualIVA: number;
+  totalRentas: number;
+  totalPagar: number;
+  ganancia: number;
+  estado: string;
+  vigenciaHasta: string;
+  observaciones?: string;
+  createdAt: string;
+  user?: { nombre: string; apellidos: string; email: string };
+  client?: { rfc: string; tipo: string };
+  opciones?: Array<{
+    nombre: string;
+    producto: string;
+    nivelRiesgo: string;
+    enganche: number;
+    depositoGarantia: number;
+    rentaMensualIVA: number;
+    valorResidual: number;
+    totalPagar: number;
+    ganancia: number;
+  }>;
+  amortizacion?: Array<{
+    periodo: number;
+    saldoInicial: number;
+    capital: number;
+    interes: number;
+    renta: number;
+    iva: number;
+    rentaConIVA: number;
+    saldoFinal: number;
+  }>;
+}
+
+export default function CotizacionDetalle() {
+  const { id } = useParams();
+  const [quotation, setQuotation] = useState<QuotationDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get(`/quotations/${id}`)
+      .then((res) => setQuotation(res.data))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-inyecta-600 border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (!quotation) {
+    return (
+      <div className="text-center py-20">
+        <p className="text-gray-500">Cotizacion no encontrada</p>
+        <Link to="/cotizaciones" className="text-inyecta-600 hover:underline text-sm mt-2 inline-block">
+          Volver a cotizaciones
+        </Link>
+      </div>
+    );
+  }
+
+  const q = quotation;
+
+  return (
+    <div className="max-w-4xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <Link to="/cotizaciones" className="text-gray-400 hover:text-gray-600">
+            <ArrowLeft size={20} />
+          </Link>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">{q.folio}</h1>
+            <p className="text-gray-500 text-sm">{q.nombreCliente} | {formatDate(q.createdAt)}</p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => window.print()}
+            className="flex items-center gap-1.5 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
+          >
+            <Printer size={14} /> Imprimir
+          </button>
+          <button
+            onClick={() => generateQuotationPDF(q as any)}
+            className="flex items-center gap-1.5 px-3 py-2 bg-inyecta-600 hover:bg-inyecta-700 rounded-lg text-sm text-white font-medium shadow-sm"
+          >
+            <FileDown size={14} /> Descargar PDF
+          </button>
+        </div>
+      </div>
+
+      {/* Print-optimized content */}
+      <div className="print:p-0" id="quotation-print">
+        {/* Summary cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <SummaryCard label="Producto" value={q.producto === 'PURO' ? 'Puro' : 'Financiero'} />
+          <SummaryCard label="Valor del Bien" value={formatCurrency(Number(q.valorBien))} />
+          <SummaryCard label="Renta Mensual + IVA" value={formatCurrency(Number(q.rentaMensualIVA))} highlight />
+          <SummaryCard label="Plazo" value={`${q.plazo} meses`} />
+        </div>
+
+        {/* Financial details */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h3 className="font-semibold text-gray-900 mb-4">Parametros</h3>
+            <div className="space-y-2.5">
+              <DetailRow label="Tasa Anual" value={formatPercent(Number(q.tasaAnual))} />
+              <DetailRow label="Nivel de Riesgo" value={q.nivelRiesgo} />
+              <DetailRow label="Enganche" value={`${formatCurrency(Number(q.enganche))} (${(Number(q.enganchePorcentaje) * 100).toFixed(0)}%)`} />
+              <DetailRow label="Deposito Garantia" value={`${formatCurrency(Number(q.depositoGarantia))} (${(Number(q.depositoGarantiaPct) * 100).toFixed(0)}%)`} />
+              <DetailRow label="Comision Apertura" value={`${formatCurrency(Number(q.comisionApertura))} (${(Number(q.comisionAperturaPct) * 100).toFixed(0)}%)`} />
+              <DetailRow label="Valor Residual" value={`${formatCurrency(Number(q.valorResidual))} (${(Number(q.valorResidualPct) * 100).toFixed(0)}%)`} />
+              <DetailRow label="GPS" value={`${formatCurrency(Number(q.gpsInstalacion))} ${q.gpsFinanciado ? '(financiado)' : ''}`} />
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h3 className="font-semibold text-gray-900 mb-4">Resumen Financiero</h3>
+            <div className="space-y-2.5">
+              <DetailRow label="Valor + IVA" value={formatCurrency(Number(q.valorBienIVA))} />
+              <DetailRow label="Monto a Financiar" value={formatCurrency(Number(q.montoFinanciar))} />
+              <DetailRow label="Renta Mensual" value={formatCurrency(Number(q.rentaMensual))} />
+              <DetailRow label="Renta + IVA" value={formatCurrency(Number(q.rentaMensualIVA))} bold />
+              <div className="border-t border-gray-100 pt-2.5">
+                <DetailRow label="Total Rentas" value={formatCurrency(Number(q.totalRentas))} />
+                <DetailRow label="Total a Pagar" value={formatCurrency(Number(q.totalPagar))} />
+                <DetailRow label="Ganancia" value={formatCurrency(Number(q.ganancia))} accent />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Amortization table */}
+        {q.amortizacion && q.amortizacion.length > 0 && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+            <h3 className="font-semibold text-gray-900 mb-4">Tabla de Amortizacion</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="py-2 px-3 text-left font-medium text-gray-500">#</th>
+                    <th className="py-2 px-3 text-right font-medium text-gray-500">Saldo Inicial</th>
+                    <th className="py-2 px-3 text-right font-medium text-gray-500">Capital</th>
+                    <th className="py-2 px-3 text-right font-medium text-gray-500">Interes</th>
+                    <th className="py-2 px-3 text-right font-medium text-gray-500">Renta</th>
+                    <th className="py-2 px-3 text-right font-medium text-gray-500">IVA</th>
+                    <th className="py-2 px-3 text-right font-medium text-gray-500">Renta + IVA</th>
+                    <th className="py-2 px-3 text-right font-medium text-gray-500">Saldo Final</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {q.amortizacion.map((row) => (
+                    <tr key={row.periodo} className="border-b border-gray-50 hover:bg-gray-50">
+                      <td className="py-2 px-3 text-gray-600">{row.periodo}</td>
+                      <td className="py-2 px-3 text-right text-gray-600">{formatCurrency(row.saldoInicial)}</td>
+                      <td className="py-2 px-3 text-right text-gray-700">{formatCurrency(row.capital)}</td>
+                      <td className="py-2 px-3 text-right text-gray-700">{formatCurrency(row.interes)}</td>
+                      <td className="py-2 px-3 text-right text-gray-700">{formatCurrency(row.renta)}</td>
+                      <td className="py-2 px-3 text-right text-gray-500">{formatCurrency(row.iva)}</td>
+                      <td className="py-2 px-3 text-right font-medium text-gray-900">{formatCurrency(row.rentaConIVA)}</td>
+                      <td className="py-2 px-3 text-right text-gray-500">{formatCurrency(row.saldoFinal)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Options */}
+        {q.opciones && q.opciones.length > 0 && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h3 className="font-semibold text-gray-900 mb-4">Opciones de Arrendamiento</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="py-2 px-3 text-left font-medium text-gray-500">Opcion</th>
+                    <th className="py-2 px-3 text-center font-medium text-gray-500">Producto</th>
+                    <th className="py-2 px-3 text-center font-medium text-gray-500">Riesgo</th>
+                    <th className="py-2 px-3 text-right font-medium text-gray-500">Enganche</th>
+                    <th className="py-2 px-3 text-right font-medium text-gray-500">Deposito</th>
+                    <th className="py-2 px-3 text-right font-medium text-gray-500">Renta + IVA</th>
+                    <th className="py-2 px-3 text-right font-medium text-gray-500">Residual</th>
+                    <th className="py-2 px-3 text-right font-medium text-gray-500">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {q.opciones.map((op, i) => (
+                    <tr key={i} className="border-b border-gray-50">
+                      <td className="py-2 px-3 text-gray-700">{op.nombre}</td>
+                      <td className="py-2 px-3 text-center text-gray-600">{op.producto}</td>
+                      <td className="py-2 px-3 text-center">
+                        <span className="text-xs bg-inyecta-100 text-inyecta-700 px-2 py-0.5 rounded">{op.nivelRiesgo}</span>
+                      </td>
+                      <td className="py-2 px-3 text-right text-gray-700">{formatCurrency(Number(op.enganche))}</td>
+                      <td className="py-2 px-3 text-right text-gray-700">{formatCurrency(Number(op.depositoGarantia))}</td>
+                      <td className="py-2 px-3 text-right font-medium text-gray-900">{formatCurrency(Number(op.rentaMensualIVA))}</td>
+                      <td className="py-2 px-3 text-right text-gray-700">{formatCurrency(Number(op.valorResidual))}</td>
+                      <td className="py-2 px-3 text-right text-gray-700">{formatCurrency(Number(op.totalPagar))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {q.observaciones && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6 mt-6">
+            <h3 className="font-semibold text-gray-900 mb-2">Observaciones</h3>
+            <p className="text-sm text-gray-600">{q.observaciones}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="text-center text-xs text-gray-400 mt-8 print:mt-4">
+        <p>FSMP Soluciones de Capital, S.A. de C.V., SOFOM, E.N.R.</p>
+        <p>Vigencia: {formatDate(q.vigenciaHasta)} | Elaborado por: {q.user?.nombre} {q.user?.apellidos}</p>
+      </div>
+    </div>
+  );
+}
+
+function SummaryCard({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <p className="text-xs text-gray-500">{label}</p>
+      <p className={`text-lg font-bold mt-1 ${highlight ? 'text-inyecta-700' : 'text-gray-900'}`}>{value}</p>
+    </div>
+  );
+}
+
+function DetailRow({ label, value, bold, accent }: { label: string; value: string; bold?: boolean; accent?: boolean }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-sm text-gray-500">{label}</span>
+      <span className={`text-sm ${accent ? 'text-accent font-semibold' : bold ? 'font-semibold text-inyecta-700' : 'text-gray-900'}`}>
+        {value}
+      </span>
+    </div>
+  );
+}

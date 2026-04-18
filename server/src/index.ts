@@ -1,0 +1,44 @@
+import express from 'express';
+import cors from 'cors';
+import { config } from './config/env';
+import authRoutes from './routes/auth';
+import catalogRoutes from './routes/catalogs';
+import quotationRoutes from './routes/quotations';
+import clientRoutes from './routes/clients';
+import contractRoutes from './routes/contracts';
+import cobranzaRoutes from './routes/cobranza';
+import insuranceRoutes from './routes/insurance';
+import gpsRoutes from './routes/gps';
+import documentsRoutes from './routes/documents';
+import circuloCreditoRoutes from './routes/circuloCredito';
+
+const app = express();
+
+// Middleware
+app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:3000'], credentials: true }));
+app.use(express.json({ limit: '10mb' }));
+
+// Health check
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/catalogs', catalogRoutes);
+app.use('/api/quotations', quotationRoutes);
+app.use('/api/clients', clientRoutes);
+app.use('/api/contracts', contractRoutes);
+app.use('/api/cobranza', cobranzaRoutes);
+app.use('/api/insurance', insuranceRoutes);
+app.use('/api/gps', gpsRoutes);
+app.use('/api/documents', documentsRoutes);
+app.use('/api/circulo-credito', circuloCreditoRoutes);
+
+// Start
+app.listen(config.port, () => {
+  console.log(`🏢 Inyecta Arrendamiento API running on port ${config.port}`);
+  console.log(`   Environment: ${config.nodeEnv}`);
+});
+
+export default app;

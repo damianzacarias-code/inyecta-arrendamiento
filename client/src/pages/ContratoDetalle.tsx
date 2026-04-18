@@ -1,0 +1,571 @@
+import { useState, useEffect } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import api from '@/lib/api';
+import { formatCurrency, formatDate } from '@/lib/utils';
+import { useAuth } from '@/context/AuthContext';
+import {
+  ArrowLeft, Building2, User, FileText, Users, ClipboardCheck,
+  Gavel, PenTool, Banknote, CheckCircle2, ChevronRight, Send,
+  StickyNote, Info, History, AlertTriangle, XCircle,
+} from 'lucide-react';
+
+interface StageHistoryEntry {
+  id: string;
+  etapa: string;
+  fecha: string;
+  observacion?: string;
+  usuarioId?: string;
+}
+
+interface ContractNote {
+  id: string;
+  contenido: string;
+  tipo: string;
+  createdAt: string;
+  user: { nombre: string; apellidos: string };
+}
+
+interface ContractDetail {
+  id: string;
+  folio: string;
+  producto: 'PURO' | 'FINANCIERO';
+  etapa: string;
+  etapaFecha: string;
+  estatus: string;
+  comiteResolucion?: string;
+  bienDescripcion: string;
+  bienMarca?: string;
+  bienModelo?: string;
+  bienAnio?: number;
+  bienNumSerie?: string;
+  bienEstado?: string;
+  proveedor?: string;
+  valorBien: number;
+  valorBienIVA: number;
+  plazo: number;
+  tasaAnual: number;
+  nivelRiesgo: string;
+  enganche: number;
+  depositoGarantia: number;
+  comisionApertura: number;
+  rentaInicial: number;
+  gpsInstalacion: number;
+  seguroAnual: number;
+  valorResidual: number;
+  montoFinanciar: number;
+  rentaMensual: number;
+  rentaMensualIVA: number;
+  fechaFirma?: string;
+  fechaInicio?: string;
+  fechaVencimiento?: string;
+  motivoTerminacion?: string;
+  createdAt: string;
+  client: {
+    id: string;
+    tipo: 'PFAE' | 'PM';
+    nombre?: string;
+    apellidoPaterno?: string;
+    apellidoMaterno?: string;
+    razonSocial?: string;
+    rfc?: string;
+    email?: string;
+    telefono?: string;
+  };
+  user: { nombre: string; apellidos: string; email: string };
+  categoria?: { nombre: string; requiereGPS: boolean };
+  stageHistory: StageHistoryEntry[];
+  notas: ContractNote[];
+}
+
+const STAGE_ORDER = ['SOLICITUD', 'ANALISIS_CLIENTE', 'ANALISIS_BIEN', 'COMITE', 'FORMALIZACION', 'DESEMBOLSO', 'ACTIVO'];
+
+const STAGE_LABELS: Record<string, string> = {
+  SOLICITUD: 'Solicitud',
+  ANALISIS_CLIENTE: 'Analisis Cliente',
+  ANALISIS_BIEN: 'Analisis Bien',
+  COMITE: 'Comite',
+  FORMALIZACION: 'Formalizacion',
+  DESEMBOLSO: 'Desembolso',
+  ACTIVO: 'Activo',
+};
+
+const STAGE_ICONS: Record<string, typeof FileText> = {
+  SOLICITUD: FileText,
+  ANALISIS_CLIENTE: Users,
+  ANALISIS_BIEN: ClipboardCheck,
+  COMITE: Gavel,
+  FORMALIZACION: PenTool,
+  DESEMBOLSO: Banknote,
+  ACTIVO: CheckCircle2,
+};
+
+const ESTATUS_LABELS: Record<string, { label: string; color: string }> = {
+  EN_PROCESO: { label: 'En Proceso', color: 'bg-blue-100 text-blue-700' },
+  VIGENTE: { label: 'Vigente', color: 'bg-emerald-100 text-emerald-700' },
+  VENCIDO: { label: 'Vencido', color: 'bg-red-100 text-red-700' },
+  TERMINADO: { label: 'Terminado', color: 'bg-gray-100 text-gray-700' },
+  RESCINDIDO: { label: 'Rescindido', color: 'bg-red-100 text-red-700' },
+  REESTRUCTURADO: { label: 'Reestructurado', color: 'bg-amber-100 text-amber-700' },
+};
+
+const tabs = [
+  { id: 'pipeline', label: 'Pipeline', icon: History },
+  { id: 'info', label: 'Informacion', icon: Info },
+  { id: 'notas', label: 'Bitacora', icon: StickyNote },
+];
+
+function clientName(c: ContractDetail['client']): string {
+  if (c.tipo === 'PM') return c.razonSocial || '';
+  return [c.nombre, c.apellidoPaterno, c.apellidoMaterno].filter(Boolean).join(' ');
+}
+
+export default function ContratoDetalle() {
+  const { id } = useParams();
+  const { user } = useAuth();
+  const [contract, setContract] = useState<ContractDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState('pipeline');
+  const [advancing, setAdvancing] = useState(false);
+  const [advanceObs, setAdvanceObs] = useState('');
+  const [comiteRes, setComiteRes] = useState('');
+  const [showAdvanceForm, setShowAdvanceForm] = useState(false);
+  const [newNote, setNewNote] = useState('');
+  const [sendingNote, setSendingNote] = useState(false);
+
+  const fetchContract = () => {
+    api.get(`/contracts/${id}`)
+      .then((res) => setContract(res.data))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { fetchContract(); }, [id]);
+
+  const handleAdvance = async () => {
+    if (!contract) return;
+    if (contract.etapa === 'COMITE' && !comiteRes) return;
+    setAdvancing(true);
+    try {
+      await api.put(`/contracts/${id}/advance`, {
+        observacion: advanceObs || undefined,
+        comiteResolucion: contract.etapa === 'COMITE' ? comiteRes : undefined,
+      });
+      setAdvanceObs('');
+      setComiteRes('');
+      setShowAdvanceForm(false);
+      fetchContract();
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Error al avanzar etapa');
+    }
+    setAdvancing(false);
+  };
+
+  const addNote = async () => {
+    if (!newNote.trim()) return;
+    setSendingNote(true);
+    try {
+      await api.post(`/contracts/${id}/notes`, { contenido: newNote });
+      setNewNote('');
+      fetchContract();
+    } catch {}
+    setSendingNote(false);
+  };
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-20">
+      <div className="animate-spin rounded-full h-8 w-8 border-2 border-inyecta-600 border-t-transparent" />
+    </div>
+  );
+
+  if (!contract) return (
+    <div className="text-center py-20">
+      <p className="text-gray-500">Contrato no encontrado</p>
+      <Link to="/contratos" className="text-inyecta-600 hover:underline text-sm mt-2 inline-block">Volver</Link>
+    </div>
+  );
+
+  const c = contract;
+  const currentIdx = STAGE_ORDER.indexOf(c.etapa);
+  const canAdvance = c.estatus === 'EN_PROCESO' && currentIdx < STAGE_ORDER.length - 1;
+  const isTerminal = c.estatus === 'RESCINDIDO' || c.estatus === 'TERMINADO';
+  const nextStage = canAdvance ? STAGE_ORDER[currentIdx + 1] : null;
+  const est = ESTATUS_LABELS[c.estatus] || { label: c.estatus, color: 'bg-gray-100 text-gray-600' };
+
+  return (
+    <div className="max-w-4xl mx-auto">
+      {/* Header */}
+      <div className="flex items-start justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <Link to="/contratos" className="text-gray-400 hover:text-gray-600 mt-1">
+            <ArrowLeft size={20} />
+          </Link>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-xl font-bold text-gray-900">{c.folio}</h1>
+              <span className={`text-xs font-medium px-2 py-0.5 rounded ${est.color}`}>{est.label}</span>
+              <span className={`text-xs px-2 py-0.5 rounded ${
+                c.producto === 'PURO' ? 'bg-cyan-100 text-cyan-700' : 'bg-violet-100 text-violet-700'
+              }`}>
+                {c.producto === 'PURO' ? 'Puro' : 'Financiero'}
+              </span>
+            </div>
+            <p className="text-gray-500 text-sm mt-0.5">
+              {c.bienDescripcion} · Creado {formatDate(c.createdAt)}
+            </p>
+          </div>
+        </div>
+        <Link
+          to={`/clientes/${c.client.id}`}
+          className="text-xs text-inyecta-600 hover:underline flex items-center gap-1 mt-1"
+        >
+          {c.client.tipo === 'PM' ? <Building2 size={12} /> : <User size={12} />}
+          {clientName(c.client)}
+        </Link>
+      </div>
+
+      {/* Pipeline Progress */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
+        <div className="flex items-center gap-0 overflow-x-auto">
+          {STAGE_ORDER.map((stage, i) => {
+            const Icon = STAGE_ICONS[stage];
+            const isCompleted = i < currentIdx;
+            const isCurrent = i === currentIdx;
+            const isFuture = i > currentIdx;
+            return (
+              <div key={stage} className="flex items-center flex-1 min-w-0">
+                <div className="flex flex-col items-center flex-1 min-w-0">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                    isCompleted ? 'bg-emerald-500 text-white' :
+                    isCurrent ? 'bg-inyecta-700 text-white ring-4 ring-inyecta-100' :
+                    'bg-gray-100 text-gray-400'
+                  }`}>
+                    {isCompleted ? <CheckCircle2 size={16} /> : Icon ? <Icon size={14} /> : <span className="text-xs">{i + 1}</span>}
+                  </div>
+                  <span className={`text-[10px] mt-1 text-center leading-tight ${
+                    isCurrent ? 'text-inyecta-700 font-semibold' :
+                    isCompleted ? 'text-emerald-600' :
+                    'text-gray-400'
+                  }`}>
+                    {STAGE_LABELS[stage]}
+                  </span>
+                </div>
+                {i < STAGE_ORDER.length - 1 && (
+                  <div className={`w-6 h-0.5 flex-shrink-0 mx-0.5 ${isCompleted ? 'bg-emerald-400' : 'bg-gray-200'}`} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Advance button */}
+        {canAdvance && !showAdvanceForm && (
+          <div className="mt-4 pt-4 border-t border-gray-100 flex justify-center">
+            <button
+              onClick={() => setShowAdvanceForm(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-inyecta-700 text-white rounded-lg text-sm font-medium hover:bg-inyecta-800 transition-colors"
+            >
+              <ChevronRight size={16} />
+              Avanzar a {STAGE_LABELS[nextStage!]}
+            </button>
+          </div>
+        )}
+
+        {/* Advance form */}
+        {showAdvanceForm && (
+          <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
+            <div className="flex items-center gap-2 text-sm text-gray-700">
+              <ChevronRight size={14} className="text-inyecta-600" />
+              <span>Avanzar de <strong>{STAGE_LABELS[c.etapa]}</strong> a <strong>{STAGE_LABELS[nextStage!]}</strong></span>
+            </div>
+
+            {c.etapa === 'COMITE' && (
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Resolucion del Comite *</label>
+                <div className="flex gap-2">
+                  {[
+                    { value: 'APROBADO', label: 'Aprobado', icon: CheckCircle2, color: 'border-emerald-300 bg-emerald-50 text-emerald-700' },
+                    { value: 'APROBADO_CONDICIONES', label: 'Aprobado c/condiciones', icon: AlertTriangle, color: 'border-amber-300 bg-amber-50 text-amber-700' },
+                    { value: 'RECHAZADO', label: 'Rechazado', icon: XCircle, color: 'border-red-300 bg-red-50 text-red-700' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setComiteRes(opt.value)}
+                      className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border-2 text-xs font-medium transition-colors ${
+                        comiteRes === opt.value ? opt.color : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                      }`}
+                    >
+                      <opt.icon size={14} />
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Observacion (opcional)</label>
+              <textarea
+                value={advanceObs}
+                onChange={(e) => setAdvanceObs(e.target.value)}
+                placeholder="Notas sobre el avance de etapa..."
+                rows={2}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none resize-none"
+              />
+            </div>
+            <div className="flex items-center gap-2 justify-end">
+              <button
+                onClick={() => { setShowAdvanceForm(false); setComiteRes(''); setAdvanceObs(''); }}
+                className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleAdvance}
+                disabled={advancing || (c.etapa === 'COMITE' && !comiteRes)}
+                className="flex items-center gap-1.5 px-4 py-1.5 bg-inyecta-700 text-white rounded-lg text-sm font-medium hover:bg-inyecta-800 disabled:bg-gray-300 transition-colors"
+              >
+                {advancing ? (
+                  <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-white border-t-transparent" />
+                ) : (
+                  <ChevronRight size={14} />
+                )}
+                {comiteRes === 'RECHAZADO' ? 'Rechazar Contrato' : 'Confirmar Avance'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {isTerminal && c.motivoTerminacion && (
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            <div className="flex items-start gap-2 p-3 bg-red-50 rounded-lg">
+              <XCircle size={16} className="text-red-500 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-red-700">Contrato {est.label.toLowerCase()}</p>
+                <p className="text-xs text-red-600 mt-0.5">{c.motivoTerminacion}</p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <SummaryCard label="Valor del Bien" value={formatCurrency(Number(c.valorBien))} />
+        <SummaryCard label="Monto a Financiar" value={formatCurrency(Number(c.montoFinanciar))} />
+        <SummaryCard label="Renta + IVA" value={formatCurrency(Number(c.rentaMensualIVA))} highlight />
+        <SummaryCard label="Plazo" value={`${c.plazo} meses · Riesgo ${c.nivelRiesgo}`} />
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 mb-6 border-b border-gray-200">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+              tab === t.id
+                ? 'border-inyecta-600 text-inyecta-700'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <t.icon size={14} />
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab: Pipeline History */}
+      {tab === 'pipeline' && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <h3 className="font-semibold text-gray-900 mb-4">Historial de Etapas</h3>
+          {c.stageHistory.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-4">Sin historial</p>
+          ) : (
+            <div className="relative">
+              <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200" />
+              <div className="space-y-4">
+                {c.stageHistory.map((entry, i) => {
+                  const Icon = STAGE_ICONS[entry.etapa] || History;
+                  const isFirst = i === 0;
+                  return (
+                    <div key={entry.id} className="relative flex items-start gap-4 pl-2">
+                      <div className={`relative z-10 w-5 h-5 rounded-full flex items-center justify-center ${
+                        isFirst ? 'bg-inyecta-700 text-white' : 'bg-white border-2 border-gray-300 text-gray-400'
+                      }`}>
+                        <Icon size={10} />
+                      </div>
+                      <div className="flex-1 pb-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-sm font-medium ${isFirst ? 'text-inyecta-700' : 'text-gray-700'}`}>
+                            {STAGE_LABELS[entry.etapa] || entry.etapa}
+                          </span>
+                          <span className="text-xs text-gray-400">{formatDate(entry.fecha)}</span>
+                        </div>
+                        {entry.observacion && (
+                          <p className="text-xs text-gray-500 mt-0.5">{entry.observacion}</p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab: Contract Info */}
+      {tab === 'info' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h3 className="font-semibold text-gray-900 mb-4">Datos del Bien</h3>
+            <div className="space-y-2.5">
+              <InfoRow label="Descripcion" value={c.bienDescripcion} />
+              <InfoRow label="Marca" value={c.bienMarca} />
+              <InfoRow label="Modelo" value={c.bienModelo} />
+              <InfoRow label="Anio" value={c.bienAnio ? String(c.bienAnio) : undefined} />
+              <InfoRow label="No. Serie" value={c.bienNumSerie} mono />
+              <InfoRow label="Estado" value={c.bienEstado} />
+              <InfoRow label="Proveedor" value={c.proveedor} />
+              {c.categoria && <InfoRow label="Categoria" value={c.categoria.nombre} />}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h3 className="font-semibold text-gray-900 mb-4">Parametros Financieros</h3>
+            <div className="space-y-2.5">
+              <InfoRow label="Valor del Bien" value={formatCurrency(Number(c.valorBien))} />
+              <InfoRow label="Valor + IVA" value={formatCurrency(Number(c.valorBienIVA))} />
+              <InfoRow label="Tasa Anual" value={`${(Number(c.tasaAnual) * 100).toFixed(0)}%`} />
+              <InfoRow label="Nivel de Riesgo" value={c.nivelRiesgo} />
+              <div className="border-t border-gray-100 pt-2.5">
+                <InfoRow label="Enganche" value={formatCurrency(Number(c.enganche))} />
+                <InfoRow label="Deposito Garantia" value={formatCurrency(Number(c.depositoGarantia))} />
+                <InfoRow label="Comision Apertura" value={formatCurrency(Number(c.comisionApertura))} />
+                <InfoRow label="Renta Inicial" value={formatCurrency(Number(c.rentaInicial))} />
+                <InfoRow label="GPS Instalacion" value={formatCurrency(Number(c.gpsInstalacion))} />
+                <InfoRow label="Seguro Anual" value={formatCurrency(Number(c.seguroAnual))} />
+                <InfoRow label="Valor Residual" value={formatCurrency(Number(c.valorResidual))} />
+              </div>
+              <div className="border-t border-gray-100 pt-2.5">
+                <InfoRow label="Monto a Financiar" value={formatCurrency(Number(c.montoFinanciar))} bold />
+                <InfoRow label="Renta Mensual" value={formatCurrency(Number(c.rentaMensual))} />
+                <InfoRow label="Renta + IVA" value={formatCurrency(Number(c.rentaMensualIVA))} accent />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h3 className="font-semibold text-gray-900 mb-4">Cliente</h3>
+            <div className="space-y-2.5">
+              <InfoRow label="Tipo" value={c.client.tipo} />
+              <InfoRow label="Nombre" value={clientName(c.client)} />
+              <InfoRow label="RFC" value={c.client.rfc} mono />
+              <InfoRow label="Email" value={c.client.email} />
+              <InfoRow label="Telefono" value={c.client.telefono} />
+            </div>
+            <Link
+              to={`/clientes/${c.client.id}`}
+              className="inline-flex items-center gap-1 text-xs text-inyecta-600 hover:underline mt-4"
+            >
+              Ver ficha completa del cliente <ChevronRight size={12} />
+            </Link>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h3 className="font-semibold text-gray-900 mb-4">Fechas y Responsable</h3>
+            <div className="space-y-2.5">
+              <InfoRow label="Fecha Creacion" value={formatDate(c.createdAt)} />
+              {c.fechaFirma && <InfoRow label="Fecha Firma" value={formatDate(c.fechaFirma)} />}
+              {c.fechaInicio && <InfoRow label="Fecha Inicio" value={formatDate(c.fechaInicio)} />}
+              {c.fechaVencimiento && <InfoRow label="Fecha Vencimiento" value={formatDate(c.fechaVencimiento)} />}
+              <div className="border-t border-gray-100 pt-2.5">
+                <InfoRow label="Analista" value={`${c.user.nombre} ${c.user.apellidos}`} />
+                <InfoRow label="Email" value={c.user.email} />
+              </div>
+              {c.comiteResolucion && (
+                <div className="border-t border-gray-100 pt-2.5">
+                  <InfoRow label="Resolucion Comite" value={c.comiteResolucion.replace(/_/g, ' ')} />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab: Notes */}
+      {tab === 'notas' && (
+        <div className="space-y-4">
+          {/* New note */}
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex gap-3">
+              <div className="w-8 h-8 rounded-full bg-inyecta-600 flex items-center justify-center text-white text-xs font-medium flex-shrink-0">
+                {user?.nombre?.[0]}{user?.apellidos?.[0]}
+              </div>
+              <div className="flex-1">
+                <textarea
+                  value={newNote}
+                  onChange={(e) => setNewNote(e.target.value)}
+                  placeholder="Agregar nota al contrato..."
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none resize-none"
+                />
+                <div className="flex justify-end mt-2">
+                  <button
+                    onClick={addNote}
+                    disabled={!newNote.trim() || sendingNote}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-inyecta-700 text-white rounded-lg text-xs font-medium hover:bg-inyecta-800 disabled:bg-gray-300 transition-colors"
+                  >
+                    <Send size={12} /> Publicar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Notes list */}
+          {c.notas.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-8">Sin notas en la bitacora</p>
+          ) : (
+            c.notas.map((note) => (
+              <div key={note.id} className="bg-white rounded-xl border border-gray-200 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 text-xs font-medium flex-shrink-0">
+                    {note.user.nombre?.[0]}{note.user.apellidos?.[0]}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-gray-900">{note.user.nombre} {note.user.apellidos}</span>
+                      <span className="text-xs text-gray-400">{formatDate(note.createdAt)}</span>
+                    </div>
+                    <p className="text-sm text-gray-600 mt-1">{note.contenido}</p>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryCard({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <p className="text-xs text-gray-500">{label}</p>
+      <p className={`text-base font-bold mt-1 ${highlight ? 'text-inyecta-700' : 'text-gray-900'}`}>{value}</p>
+    </div>
+  );
+}
+
+function InfoRow({ label, value, mono, bold, accent }: { label: string; value?: string | null; mono?: boolean; bold?: boolean; accent?: boolean }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-sm text-gray-500">{label}</span>
+      <span className={`text-sm ${accent ? 'text-accent font-semibold' : bold ? 'font-semibold text-inyecta-700' : 'text-gray-900'} ${mono ? 'font-mono' : ''}`}>
+        {value || '-'}
+      </span>
+    </div>
+  );
+}
