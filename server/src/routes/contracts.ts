@@ -58,46 +58,85 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
     const valorBienIVA = data.valorBien * 1.16;
 
-    const contract = await prisma.contract.create({
-      data: {
-        folio,
-        clientId: data.clientId,
-        quotationId: data.quotationId || null,
-        userId,
-        categoriaId: data.categoriaId || null,
-        bienDescripcion: data.bienDescripcion,
-        bienMarca: data.bienMarca,
-        bienModelo: data.bienModelo,
-        bienAnio: data.bienAnio,
-        bienNumSerie: data.bienNumSerie,
-        bienEstado: data.bienEstado,
-        proveedor: data.proveedor,
-        producto: data.producto,
-        valorBien: data.valorBien,
-        valorBienIVA,
-        plazo: data.plazo,
-        tasaAnual: data.tasaAnual,
-        nivelRiesgo: data.nivelRiesgo,
-        enganche: data.enganche,
-        depositoGarantia: data.depositoGarantia,
-        comisionApertura: data.comisionApertura,
-        rentaInicial: data.rentaInicial,
-        gpsInstalacion: data.gpsInstalacion,
-        seguroAnual: data.seguroAnual,
-        valorResidual: data.valorResidual,
-        montoFinanciar: data.montoFinanciar,
-        rentaMensual: data.rentaMensual,
-        rentaMensualIVA: data.rentaMensualIVA,
-        etapa: 'SOLICITUD',
-        stageHistory: {
-          create: { etapa: 'SOLICITUD', observacion: 'Contrato creado', usuarioId: userId },
+    // Si viene desde una cotización, validar que no esté ya convertida
+    let cotizacionFolio: string | null = null;
+    if (data.quotationId) {
+      const cotizacion = await prisma.quotation.findUnique({
+        where: { id: data.quotationId },
+        include: { contrato: { select: { id: true, folio: true } } },
+      });
+      if (!cotizacion) return res.status(400).json({ error: 'Cotización no encontrada' });
+      if (cotizacion.contrato) {
+        return res.status(400).json({
+          error: `La cotización ya generó el contrato ${cotizacion.contrato.folio}`,
+          contratoId: cotizacion.contrato.id,
+        });
+      }
+      if (cotizacion.estado === 'RECHAZADA' || cotizacion.estado === 'VENCIDA') {
+        return res.status(400).json({
+          error: `No se puede crear contrato desde una cotización ${cotizacion.estado.toLowerCase()}`,
+        });
+      }
+      cotizacionFolio = cotizacion.folio;
+    }
+
+    const contract = await prisma.$transaction(async (tx) => {
+      const created = await tx.contract.create({
+        data: {
+          folio,
+          clientId: data.clientId,
+          quotationId: data.quotationId || null,
+          userId,
+          categoriaId: data.categoriaId || null,
+          bienDescripcion: data.bienDescripcion,
+          bienMarca: data.bienMarca,
+          bienModelo: data.bienModelo,
+          bienAnio: data.bienAnio,
+          bienNumSerie: data.bienNumSerie,
+          bienEstado: data.bienEstado,
+          proveedor: data.proveedor,
+          producto: data.producto,
+          valorBien: data.valorBien,
+          valorBienIVA,
+          plazo: data.plazo,
+          tasaAnual: data.tasaAnual,
+          nivelRiesgo: data.nivelRiesgo,
+          enganche: data.enganche,
+          depositoGarantia: data.depositoGarantia,
+          comisionApertura: data.comisionApertura,
+          rentaInicial: data.rentaInicial,
+          gpsInstalacion: data.gpsInstalacion,
+          seguroAnual: data.seguroAnual,
+          valorResidual: data.valorResidual,
+          montoFinanciar: data.montoFinanciar,
+          rentaMensual: data.rentaMensual,
+          rentaMensualIVA: data.rentaMensualIVA,
+          etapa: 'SOLICITUD',
+          stageHistory: {
+            create: {
+              etapa: 'SOLICITUD',
+              observacion: cotizacionFolio
+                ? `Contrato creado desde cotización ${cotizacionFolio}`
+                : 'Contrato creado',
+              usuarioId: userId,
+            },
+          },
         },
-      },
-      include: {
-        client: { select: { id: true, tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true, rfc: true } },
-        user: { select: { nombre: true, apellidos: true } },
-        stageHistory: { orderBy: { fecha: 'desc' } },
-      },
+        include: {
+          client: { select: { id: true, tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true, rfc: true } },
+          user: { select: { nombre: true, apellidos: true } },
+          stageHistory: { orderBy: { fecha: 'desc' } },
+        },
+      });
+
+      if (data.quotationId) {
+        await tx.quotation.update({
+          where: { id: data.quotationId },
+          data: { estado: 'CONVERTIDA' },
+        });
+      }
+
+      return created;
     });
 
     return res.status(201).json(contract);

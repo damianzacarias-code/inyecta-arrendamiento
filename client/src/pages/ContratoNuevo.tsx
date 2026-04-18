@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import api from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
-import { ArrowLeft, Save, Building2, User, Search, Calculator } from 'lucide-react';
+import { ArrowLeft, Save, Building2, User, Search, Calculator, FileText } from 'lucide-react';
 
 interface ClientOption {
   id: string;
@@ -28,11 +28,13 @@ export default function ContratoNuevo() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const preClientId = searchParams.get('clientId');
+  const preQuotationId = searchParams.get('quotationId');
 
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [clientSearch, setClientSearch] = useState('');
   const [selectedClient, setSelectedClient] = useState<ClientOption | null>(null);
   const [showClientDropdown, setShowClientDropdown] = useState(false);
+  const [prefillFolio, setPrefillFolio] = useState<string>('');
 
   const [producto, setProducto] = useState<'PURO' | 'FINANCIERO'>('PURO');
   const [nivelRiesgo, setNivelRiesgo] = useState<'A' | 'B' | 'C'>('A');
@@ -55,7 +57,7 @@ export default function ContratoNuevo() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  // Fetch clients
+  // Fetch clients (and resolver de cliente preseleccionado)
   useEffect(() => {
     api.get('/clients?limit=200')
       .then((res) => {
@@ -67,6 +69,39 @@ export default function ContratoNuevo() {
       })
       .catch(() => {});
   }, [preClientId]);
+
+  // Prefill desde cotización
+  useEffect(() => {
+    if (!preQuotationId) return;
+    api.get(`/quotations/${preQuotationId}`)
+      .then((res) => {
+        const q = res.data;
+        setPrefillFolio(q.folio || '');
+        if (q.producto) setProducto(q.producto);
+        if (q.nivelRiesgo) setNivelRiesgo(q.nivelRiesgo);
+        if (q.valorBien) setValorBien(Number(q.valorBien));
+        if (q.plazo) setPlazo(q.plazo);
+        if (q.tasaAnual) setTasaAnual(Number(q.tasaAnual));
+        if (q.bienDescripcion) setBienDescripcion(q.bienDescripcion);
+        if (q.bienMarca) setBienMarca(q.bienMarca);
+        if (q.bienModelo) setBienModelo(q.bienModelo);
+        if (q.bienAnio) setBienAnio(String(q.bienAnio));
+        if (q.bienNumSerie) setBienNumSerie(q.bienNumSerie);
+        setBienEstado(q.bienNuevo === false ? 'Seminuevo' : 'Nuevo');
+        if (q.comisionAperturaPct != null) setComisionAperturaPct(Number(q.comisionAperturaPct));
+        if (q.gpsInstalacion != null) setGpsInstalacion(Number(q.gpsInstalacion));
+        if (q.seguroAnual != null) setSeguroAnual(Number(q.seguroAnual));
+        if (q.valorResidualPct != null) setValorResidualPct(Number(q.valorResidualPct));
+        if (q.rentaInicial != null) setRentaInicial(Number(q.rentaInicial));
+        if (q.clientId && !preClientId) {
+          // resolver el cliente cuando los clientes ya cargaron
+          api.get(`/clients/${q.clientId}`)
+            .then((c) => setSelectedClient(c.data))
+            .catch(() => {});
+        }
+      })
+      .catch(() => setError('No se pudo cargar la cotización para prefill'));
+  }, [preQuotationId, preClientId]);
 
   const filteredClients = useMemo(() => {
     if (!clientSearch) return clients;
@@ -118,6 +153,7 @@ export default function ContratoNuevo() {
     try {
       const res = await api.post('/contracts', {
         clientId: selectedClient.id,
+        quotationId: preQuotationId || undefined,
         producto,
         nivelRiesgo,
         valorBien,
@@ -163,6 +199,19 @@ export default function ContratoNuevo() {
           <p className="text-gray-500 text-sm">Crear contrato de arrendamiento</p>
         </div>
       </div>
+
+      {prefillFolio && (
+        <div className="bg-violet-50 border border-violet-200 text-violet-800 px-4 py-3 rounded-lg text-sm mb-4 flex items-start gap-2">
+          <FileText size={16} className="mt-0.5 flex-shrink-0" />
+          <div>
+            <strong>Datos prellenados</strong> desde la cotización{' '}
+            <Link to={`/cotizaciones/${preQuotationId}`} className="font-mono font-medium underline">
+              {prefillFolio}
+            </Link>
+            . Al guardar, la cotización se marcará como CONVERTIDA.
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm mb-4">

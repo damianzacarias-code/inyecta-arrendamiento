@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { FileText, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
+import { FileText, Eye, ChevronLeft, ChevronRight, FolderOpen } from 'lucide-react';
 
 interface Quotation {
   id: string;
@@ -15,15 +15,28 @@ interface Quotation {
   nivelRiesgo: string;
   estado: string;
   createdAt: string;
+  vigenciaHasta?: string;
   user?: { nombre: string; apellidos: string };
+  contrato?: { id: string; folio: string } | null;
 }
 
+const ESTADOS = ['VIGENTE', 'APROBADA', 'CONVERTIDA', 'VENCIDA', 'RECHAZADA'] as const;
+type Estado = typeof ESTADOS[number] | '';
+
 const estadoColors: Record<string, string> = {
-  BORRADOR: 'bg-gray-100 text-gray-700',
-  ENVIADA: 'bg-blue-100 text-blue-700',
-  APROBADA: 'bg-green-100 text-green-700',
-  RECHAZADA: 'bg-red-100 text-red-700',
-  VENCIDA: 'bg-amber-100 text-amber-700',
+  VIGENTE: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  APROBADA: 'bg-blue-100 text-blue-700 border-blue-200',
+  CONVERTIDA: 'bg-violet-100 text-violet-700 border-violet-200',
+  VENCIDA: 'bg-amber-100 text-amber-700 border-amber-200',
+  RECHAZADA: 'bg-red-100 text-red-700 border-red-200',
+};
+
+const estadoLabels: Record<string, string> = {
+  VIGENTE: 'Vigente',
+  APROBADA: 'Aprobada',
+  CONVERTIDA: 'Convertida',
+  VENCIDA: 'Vencida',
+  RECHAZADA: 'Rechazada',
 };
 
 export default function Cotizaciones() {
@@ -32,10 +45,13 @@ export default function Cotizaciones() {
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [filterEstado, setFilterEstado] = useState<Estado>('');
 
   useEffect(() => {
     setLoading(true);
-    api.get(`/quotations?page=${page}&limit=20`)
+    const params = new URLSearchParams({ page: String(page), limit: '20' });
+    if (filterEstado) params.set('estado', filterEstado);
+    api.get(`/quotations?${params.toString()}`)
       .then((res) => {
         setQuotations(res.data.data);
         setTotal(res.data.total);
@@ -43,7 +59,7 @@ export default function Cotizaciones() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [page]);
+  }, [page, filterEstado]);
 
   return (
     <div>
@@ -58,6 +74,33 @@ export default function Cotizaciones() {
         >
           + Nueva Cotizacion
         </Link>
+      </div>
+
+      {/* Filtro por estado */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        <button
+          onClick={() => { setFilterEstado(''); setPage(1); }}
+          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+            filterEstado === ''
+              ? 'bg-inyecta-700 text-white border-inyecta-700'
+              : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
+          }`}
+        >
+          Todas
+        </button>
+        {ESTADOS.map((e) => (
+          <button
+            key={e}
+            onClick={() => { setFilterEstado(e); setPage(1); }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              filterEstado === e
+                ? estadoColors[e]
+                : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'
+            }`}
+          >
+            {estadoLabels[e]}
+          </button>
+        ))}
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -103,15 +146,26 @@ export default function Cotizaciones() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded ${estadoColors[q.estado] || 'bg-gray-100 text-gray-600'}`}>
-                          {q.estado}
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded border ${estadoColors[q.estado] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                          {estadoLabels[q.estado] || q.estado}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-gray-500 text-xs">{formatDate(q.createdAt)}</td>
                       <td className="px-4 py-3">
-                        <Link to={`/cotizaciones/${q.id}`} className="text-inyecta-600 hover:text-inyecta-800">
-                          <Eye size={16} />
-                        </Link>
+                        <div className="flex items-center gap-2 justify-end">
+                          {q.contrato && (
+                            <Link
+                              to={`/contratos/${q.contrato.id}`}
+                              title={`Ver contrato ${q.contrato.folio}`}
+                              className="text-violet-600 hover:text-violet-800"
+                            >
+                              <FolderOpen size={16} />
+                            </Link>
+                          )}
+                          <Link to={`/cotizaciones/${q.id}`} className="text-inyecta-600 hover:text-inyecta-800">
+                            <Eye size={16} />
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   ))}

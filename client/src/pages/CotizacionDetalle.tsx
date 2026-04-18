@@ -1,8 +1,17 @@
 import { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '@/lib/api';
 import { formatCurrency, formatPercent, formatDate } from '@/lib/utils';
-import { ArrowLeft, FileDown, Printer } from 'lucide-react';
+import {
+  ArrowLeft,
+  FileDown,
+  Printer,
+  CheckCircle2,
+  XCircle,
+  FolderPlus,
+  AlertTriangle,
+  Clock,
+} from 'lucide-react';
 import { generateQuotationPDF } from '@/lib/pdfGenerator';
 
 interface QuotationDetail {
@@ -39,8 +48,10 @@ interface QuotationDetail {
   vigenciaHasta: string;
   observaciones?: string;
   createdAt: string;
+  clientId?: string | null;
   user?: { nombre: string; apellidos: string; email: string };
   client?: { rfc: string; tipo: string };
+  contrato?: { id: string; folio: string; etapa?: string; estatus?: string } | null;
   opciones?: Array<{
     nombre: string;
     producto: string;
@@ -65,17 +76,88 @@ interface QuotationDetail {
   }>;
 }
 
+const estadoBadgeColors: Record<string, string> = {
+  VIGENTE: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  APROBADA: 'bg-blue-100 text-blue-700 border-blue-200',
+  CONVERTIDA: 'bg-violet-100 text-violet-700 border-violet-200',
+  VENCIDA: 'bg-amber-100 text-amber-700 border-amber-200',
+  RECHAZADA: 'bg-red-100 text-red-700 border-red-200',
+};
+
+const estadoLabels: Record<string, string> = {
+  VIGENTE: 'Vigente',
+  APROBADA: 'Aprobada',
+  CONVERTIDA: 'Convertida',
+  VENCIDA: 'Vencida',
+  RECHAZADA: 'Rechazada',
+};
+
 export default function CotizacionDetalle() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [quotation, setQuotation] = useState<QuotationDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionError, setActionError] = useState('');
 
-  useEffect(() => {
+  const reload = () => {
     api.get(`/quotations/${id}`)
       .then((res) => setQuotation(res.data))
       .catch(() => {})
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  const handleEstado = async (estado: 'APROBADA' | 'RECHAZADA') => {
+    if (!quotation) return;
+    const confirmMsg =
+      estado === 'RECHAZADA'
+        ? '¿Marcar esta cotización como RECHAZADA? Esta acción no se puede revertir.'
+        : '¿Marcar esta cotización como APROBADA?';
+    if (!window.confirm(confirmMsg)) return;
+    setActionLoading(estado);
+    setActionError('');
+    try {
+      const res = await api.patch(`/quotations/${quotation.id}/estado`, { estado });
+      setQuotation({ ...quotation, ...res.data });
+    } catch (err: any) {
+      const msg = err.response?.data?.error;
+      setActionError(typeof msg === 'string' ? msg : 'Error al actualizar estado');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleConvert = async () => {
+    if (!quotation) return;
+    if (!quotation.clientId) {
+      // No hay cliente registrado: abrir el wizard de contrato manual con prefill
+      navigate(`/contratos/nuevo?quotationId=${quotation.id}`);
+      return;
+    }
+    if (!window.confirm(`¿Crear contrato a partir de la cotización ${quotation.folio}?`)) return;
+    setActionLoading('CONVERT');
+    setActionError('');
+    try {
+      const res = await api.post(`/quotations/${quotation.id}/convert`);
+      navigate(`/contratos/${res.data.id}`);
+    } catch (err: any) {
+      const msg = err.response?.data?.error;
+      const contratoId = err.response?.data?.contratoId;
+      if (contratoId) {
+        navigate(`/contratos/${contratoId}`);
+        return;
+      }
+      setActionError(typeof msg === 'string' ? msg : 'Error al convertir');
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -97,21 +179,60 @@ export default function CotizacionDetalle() {
   }
 
   const q = quotation;
+  const canConvert = q.estado === 'VIGENTE' || q.estado === 'APROBADA';
+  const canMarkApproved = q.estado === 'VIGENTE';
+  const canReject = q.estado === 'VIGENTE' || q.estado === 'APROBADA';
+  const badgeClass = estadoBadgeColors[q.estado] || 'bg-gray-100 text-gray-700 border-gray-200';
 
   return (
     <div className="max-w-4xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <Link to="/cotizaciones" className="text-gray-400 hover:text-gray-600">
             <ArrowLeft size={20} />
           </Link>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">{q.folio}</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold text-gray-900">{q.folio}</h1>
+              <span className={`text-xs font-medium px-2 py-0.5 rounded border ${badgeClass}`}>
+                {estadoLabels[q.estado] || q.estado}
+              </span>
+            </div>
             <p className="text-gray-500 text-sm">{q.nombreCliente} | {formatDate(q.createdAt)}</p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 print:hidden">
+          {canConvert && (
+            <button
+              onClick={handleConvert}
+              disabled={!!actionLoading}
+              className="flex items-center gap-1.5 px-3 py-2 bg-violet-600 hover:bg-violet-700 disabled:bg-violet-300 rounded-lg text-sm text-white font-medium shadow-sm"
+            >
+              <FolderPlus size={14} />
+              {actionLoading === 'CONVERT' ? 'Convirtiendo...' : 'Crear Contrato'}
+            </button>
+          )}
+          {canMarkApproved && (
+            <button
+              onClick={() => handleEstado('APROBADA')}
+              disabled={!!actionLoading}
+              className="flex items-center gap-1.5 px-3 py-2 border border-blue-300 text-blue-700 hover:bg-blue-50 rounded-lg text-sm font-medium"
+            >
+              <CheckCircle2 size={14} />
+              {actionLoading === 'APROBADA' ? '...' : 'Aprobar'}
+            </button>
+          )}
+          {canReject && (
+            <button
+              onClick={() => handleEstado('RECHAZADA')}
+              disabled={!!actionLoading}
+              className="flex items-center gap-1.5 px-3 py-2 border border-red-300 text-red-700 hover:bg-red-50 rounded-lg text-sm font-medium"
+            >
+              <XCircle size={14} />
+              {actionLoading === 'RECHAZADA' ? '...' : 'Rechazar'}
+            </button>
+          )}
           <button
             onClick={() => window.print()}
             className="flex items-center gap-1.5 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
@@ -126,6 +247,57 @@ export default function CotizacionDetalle() {
           </button>
         </div>
       </div>
+
+      {/* Banners de estado */}
+      {actionError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm mb-4 print:hidden">
+          {actionError}
+        </div>
+      )}
+      {q.estado === 'VENCIDA' && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-lg text-sm mb-4 flex items-start gap-2 print:hidden">
+          <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
+          <div>
+            <strong>Cotización vencida.</strong> La vigencia expiró el {formatDate(q.vigenciaHasta)}. Genera una
+            nueva cotización si el cliente quiere continuar.
+          </div>
+        </div>
+      )}
+      {q.estado === 'VIGENTE' && q.vigenciaHasta && (() => {
+        const dias = Math.ceil((new Date(q.vigenciaHasta).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+        if (dias > 0 && dias <= 7) {
+          return (
+            <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-lg text-sm mb-4 flex items-start gap-2 print:hidden">
+              <Clock size={16} className="mt-0.5 flex-shrink-0" />
+              <div>
+                <strong>Por vencer.</strong> Esta cotización vence en {dias} {dias === 1 ? 'día' : 'días'}
+                ({formatDate(q.vigenciaHasta)}).
+              </div>
+            </div>
+          );
+        }
+        return null;
+      })()}
+      {q.estado === 'CONVERTIDA' && q.contrato && (
+        <div className="bg-violet-50 border border-violet-200 text-violet-800 px-4 py-3 rounded-lg text-sm mb-4 flex items-start gap-2 print:hidden">
+          <CheckCircle2 size={16} className="mt-0.5 flex-shrink-0" />
+          <div className="flex-1">
+            <strong>Convertida en contrato.</strong> Esta cotización generó el contrato{' '}
+            <Link to={`/contratos/${q.contrato.id}`} className="font-mono font-medium underline">
+              {q.contrato.folio}
+            </Link>
+            .
+          </div>
+        </div>
+      )}
+      {q.estado === 'RECHAZADA' && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm mb-4 flex items-start gap-2 print:hidden">
+          <XCircle size={16} className="mt-0.5 flex-shrink-0" />
+          <div>
+            <strong>Cotización rechazada.</strong> Esta cotización fue marcada como rechazada y no puede convertirse en contrato.
+          </div>
+        </div>
+      )}
 
       {/* Print-optimized content */}
       <div className="print:p-0" id="quotation-print">
