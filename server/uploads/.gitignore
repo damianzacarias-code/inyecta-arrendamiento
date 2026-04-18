@@ -1,0 +1,8 @@
+*
+!.gitignore
+!clientes/
+clientes/*
+!clientes/.gitkeep
+!contratos/
+contratos/*
+!contratos/.gitkeep

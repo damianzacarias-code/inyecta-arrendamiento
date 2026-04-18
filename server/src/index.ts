@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
 import { config } from './config/env';
 import authRoutes from './routes/auth';
 import catalogRoutes from './routes/catalogs';
@@ -19,6 +20,9 @@ const app = express();
 // Middleware
 app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:3000'], credentials: true }));
 app.use(express.json({ limit: '10mb' }));
+
+// Servir archivos subidos (PDFs, imágenes de documentos)
+app.use('/uploads', express.static(path.resolve(__dirname, '..', 'uploads')));
 
 // Health check
 app.get('/api/health', (_req, res) => {

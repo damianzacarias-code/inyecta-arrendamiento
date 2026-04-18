@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
+import { uploadContrato, publicUrl, deleteIfExists } from '../middleware/upload';
 
 const router = Router();
 
@@ -179,12 +180,47 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 // ─── DELETE /api/contract-documents/:id ─────────────────────
 router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
+    const existing = await prisma.contractDocument.findUnique({ where: { id: req.params.id } });
+    if (existing?.archivoUrl) deleteIfExists(existing.archivoUrl);
     await prisma.contractDocument.delete({ where: { id: req.params.id } });
     res.json({ ok: true });
   } catch (err) {
     console.error('Delete contract doc error:', err);
     res.status(500).json({ error: 'Error al eliminar documento' });
   }
+});
+
+// ─── POST /api/contract-documents/:id/upload ────────────────
+router.post('/:id/upload', requireAuth, (req: Request, res: Response) => {
+  uploadContrato(req, res, async (err: any) => {
+    if (err) return res.status(400).json({ error: err.message || 'Error al subir archivo' });
+    if (!req.file) return res.status(400).json({ error: 'No se recibió archivo' });
+    try {
+      const docId = req.params.id;
+      const userId = req.user!.userId;
+      const existing = await prisma.contractDocument.findUnique({ where: { id: docId } });
+      if (!existing) {
+        deleteIfExists(`/uploads/contratos/${req.file.filename}`);
+        return res.status(404).json({ error: 'Documento no encontrado' });
+      }
+      if (existing.archivoUrl) deleteIfExists(existing.archivoUrl);
+
+      const doc = await prisma.contractDocument.update({
+        where: { id: docId },
+        data: {
+          archivoUrl: publicUrl(req.file.filename, 'contratos'),
+          archivoNombre: req.file.originalname,
+          estado: 'RECIBIDO',
+          fechaRecepcion: new Date(),
+          uploadedBy: userId,
+        },
+      });
+      res.json({ ok: true, doc });
+    } catch (e) {
+      console.error('Upload contract doc error:', e);
+      res.status(500).json({ error: 'Error al guardar documento' });
+    }
+  });
 });
 
 export default router;

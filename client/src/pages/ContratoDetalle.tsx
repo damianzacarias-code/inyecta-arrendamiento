@@ -226,6 +226,20 @@ export default function ContratoDetalle() {
     }
   };
 
+  const uploadContractDoc = async (docId: string, file: File) => {
+    const fd = new FormData();
+    fd.append('archivo', file);
+    try {
+      await api.post(`/contract-documents/${docId}/upload`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const r = await api.get(`/contract-documents/contract/${id}`);
+      setDocsData(r.data);
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Error al subir el archivo');
+    }
+  };
+
   const [downloadingEdoCta, setDownloadingEdoCta] = useState(false);
   const handleDownloadEstadoCuenta = async () => {
     if (!id) return;
@@ -706,6 +720,30 @@ export default function ContratoDetalle() {
                         </p>
                       </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
+                        <label className="text-[10px] px-2 py-1 bg-inyecta-600 hover:bg-inyecta-700 text-white rounded font-medium cursor-pointer">
+                          📤 Subir
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
+                            className="hidden"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              if (f) uploadContractDoc(d.id, f);
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
+                        {d.archivoUrl && (
+                          <a
+                            href={`${(api.defaults.baseURL || '').replace(/\/api$/, '')}${d.archivoUrl}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[10px] px-2 py-1 text-emerald-700 hover:bg-emerald-100 rounded"
+                            title="Ver archivo"
+                          >
+                            📎
+                          </a>
+                        )}
                         {!recibido && (
                           <button
                             onClick={() => {
@@ -714,7 +752,7 @@ export default function ContratoDetalle() {
                             }}
                             className="text-[10px] px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium"
                           >
-                            Marcar recibido
+                            Marcar
                           </button>
                         )}
                         {recibido && (

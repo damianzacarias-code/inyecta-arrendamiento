@@ -2,8 +2,22 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
+import { uploadCliente, publicUrl, deleteIfExists } from '../middleware/upload';
 
 const router = Router();
+
+// Marca como VENCIDO los documentos cuya fechaVencimiento ya pasó.
+// Se ejecuta al consultar /documents para mantener el estado fresco.
+async function autoVencerDocumentos() {
+  const now = new Date();
+  await prisma.clientDocument.updateMany({
+    where: {
+      estado: 'RECIBIDO',
+      fechaVencimiento: { lt: now, not: null },
+    },
+    data: { estado: 'VENCIDO' },
+  });
+}
 
 // ─── Catálogo de documentos requeridos por tipo de cliente ──
 const DOCS_PFAE = [
@@ -43,6 +57,7 @@ router.get('/catalogo', requireAuth, async (_req: Request, res: Response) => {
 // Dashboard general: todos los clientes con su estado documental
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
+    await autoVencerDocumentos();
     const { clientId, estado, tipo } = req.query;
 
     // Si se pide un cliente específico
@@ -245,12 +260,56 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
 // ─── DELETE /api/documents/:id ──────────────────────────────
 router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
+    const existing = await prisma.clientDocument.findUnique({ where: { id: req.params.id } });
+    if (existing?.archivoUrl) deleteIfExists(existing.archivoUrl);
     await prisma.clientDocument.delete({ where: { id: req.params.id } });
     res.json({ ok: true });
   } catch (error) {
     console.error('Delete document error:', error);
     res.status(500).json({ error: 'Error al eliminar documento' });
   }
+});
+
+// ─── POST /api/documents/:id/upload ─────────────────────────
+// Sube un archivo y lo asocia al documento del cliente.
+// Acepta multipart/form-data con campo 'archivo' + opcional 'fechaVencimiento'.
+router.post('/:id/upload', requireAuth, (req: Request, res: Response) => {
+  uploadCliente(req, res, async (err: any) => {
+    if (err) {
+      return res.status(400).json({ error: err.message || 'Error al subir archivo' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: 'No se recibió archivo' });
+    }
+    try {
+      const docId = req.params.id;
+      const existing = await prisma.clientDocument.findUnique({ where: { id: docId } });
+      if (!existing) {
+        deleteIfExists(`/uploads/clientes/${req.file.filename}`);
+        return res.status(404).json({ error: 'Documento no encontrado' });
+      }
+      // Borrar archivo previo si lo había
+      if (existing.archivoUrl) deleteIfExists(existing.archivoUrl);
+
+      const { fechaVencimiento, observaciones } = req.body;
+      const update: any = {
+        archivoUrl: publicUrl(req.file.filename, 'clientes'),
+        estado: 'RECIBIDO',
+        fechaRecepcion: new Date(),
+      };
+      if (fechaVencimiento) update.fechaVencimiento = new Date(fechaVencimiento);
+      if (observaciones) update.observaciones = observaciones;
+
+      const doc = await prisma.clientDocument.update({
+        where: { id: docId },
+        data: update,
+      });
+      res.json({ ok: true, doc, fileSize: req.file.size, fileName: req.file.originalname });
+    } catch (e) {
+      console.error('Upload doc error:', e);
+      res.status(500).json({ error: 'Error al guardar documento' });
+    }
+  });
 });
 
 export default router;

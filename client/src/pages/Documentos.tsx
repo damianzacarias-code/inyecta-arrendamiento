@@ -5,7 +5,7 @@ import { formatDate } from '@/lib/utils';
 import {
   FolderOpen, Search, CheckCircle2, Clock, AlertTriangle, XCircle,
   Building2, User, ChevronDown, ChevronUp, Plus, Edit2, Trash2,
-  X, Save, FileCheck, FilePlus, BarChart3,
+  X, Save, FileCheck, FilePlus, BarChart3, Upload, Paperclip,
 } from 'lucide-react';
 
 // ─── Types ──────────────────────────────────────────────────
@@ -129,6 +129,22 @@ export default function Documentos() {
     const cat = clientTipo === 'PM' ? catalogo.PM : catalogo.PFAE;
     setModal({ mode: 'edit', clientId, clientTipo, doc, catalogo: cat });
     setForm({ ...doc });
+  };
+
+  const handleUpload = async (docId: string, clientId: string, file: File, fechaVencimiento?: string) => {
+    const fd = new FormData();
+    fd.append('archivo', file);
+    if (fechaVencimiento) fd.append('fechaVencimiento', fechaVencimiento);
+    try {
+      await api.post(`/documents/${docId}/upload`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const r = await api.get(`/documents?clientId=${clientId}`);
+      setExpandedDocs({ docs: r.data.documentos, faltantes: r.data.faltantes, resumen: r.data.resumen });
+      fetchDashboard();
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Error al subir el archivo');
+    }
   };
 
   const handleSave = async () => {
@@ -354,6 +370,32 @@ export default function Documentos() {
                                   <div className="flex items-start justify-between gap-1">
                                     <p className="text-xs font-medium text-gray-800 leading-tight">{doc.nombre}</p>
                                     <div className="flex gap-1 flex-shrink-0">
+                                      <label className="text-gray-400 hover:text-inyecta-600 cursor-pointer" title="Subir archivo">
+                                        <Upload size={11} />
+                                        <input
+                                          type="file"
+                                          accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.doc,.docx,.xls,.xlsx"
+                                          className="hidden"
+                                          onChange={(e) => {
+                                            const f = e.target.files?.[0];
+                                            if (!f) return;
+                                            const venc = prompt('Fecha de vencimiento (YYYY-MM-DD, opcional):') || undefined;
+                                            handleUpload(doc.id, c.id, f, venc);
+                                            e.target.value = '';
+                                          }}
+                                        />
+                                      </label>
+                                      {doc.archivoUrl && (
+                                        <a
+                                          href={`${(api.defaults.baseURL || '').replace(/\/api$/, '')}${doc.archivoUrl}`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-emerald-500 hover:text-emerald-700"
+                                          title="Ver archivo"
+                                        >
+                                          <Paperclip size={11} />
+                                        </a>
+                                      )}
                                       <button onClick={() => openEdit(c.id, clientTipo, doc)} className="text-gray-400 hover:text-inyecta-600">
                                         <Edit2 size={11} />
                                       </button>
@@ -370,9 +412,13 @@ export default function Documentos() {
                                     {doc.fechaRecepcion && (
                                       <span className="text-[10px] text-gray-400">{formatDate(doc.fechaRecepcion)}</span>
                                     )}
-                                    {doc.fechaVencimiento && new Date(doc.fechaVencimiento) < new Date() && (
-                                      <span className="text-[10px] text-red-500">Vence: {formatDate(doc.fechaVencimiento)}</span>
-                                    )}
+                                    {doc.fechaVencimiento && (() => {
+                                      const v = new Date(doc.fechaVencimiento);
+                                      const dias = Math.floor((v.getTime() - Date.now()) / 86400000);
+                                      if (dias < 0) return <span className="text-[10px] text-red-600 font-semibold">Venció: {formatDate(doc.fechaVencimiento)}</span>;
+                                      if (dias <= 30) return <span className="text-[10px] text-amber-600 font-semibold">Vence en {dias}d: {formatDate(doc.fechaVencimiento)}</span>;
+                                      return <span className="text-[10px] text-gray-400">Vence: {formatDate(doc.fechaVencimiento)}</span>;
+                                    })()}
                                   </div>
                                   {doc.observaciones && (
                                     <p className="text-[10px] text-gray-400 mt-0.5 truncate">{doc.observaciones}</p>
