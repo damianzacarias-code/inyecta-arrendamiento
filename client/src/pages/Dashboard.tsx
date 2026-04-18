@@ -8,6 +8,7 @@ import {
   TrendingUp, AlertTriangle, CheckCircle2, Clock, Building2, User,
   ChevronRight, Plus,
 } from 'lucide-react';
+import AlertCenter from '@/components/AlertCenter';
 
 interface DashboardData {
   cotizacionesMes: number;
@@ -116,6 +117,9 @@ export default function Dashboard() {
           </button>
         ))}
       </div>
+
+      {/* Centro de Alertas — agrega cobranza vencida + seguros + documentos */}
+      <AlertCenter />
 
       {loading ? (
         <div className="flex items-center justify-center py-12">

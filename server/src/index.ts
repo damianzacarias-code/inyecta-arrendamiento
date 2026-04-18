@@ -18,6 +18,7 @@ import invoicesRoutes from './routes/invoices';
 import portalRoutes from './routes/portal';
 import conciliationRoutes from './routes/conciliation';
 import searchRoutes from './routes/search';
+import alertsRoutes from './routes/alerts';
 
 const app = express();
 
@@ -50,6 +51,7 @@ app.use('/api/invoices', invoicesRoutes);
 app.use('/api/portal', portalRoutes);
 app.use('/api/conciliation', conciliationRoutes);
 app.use('/api/search', searchRoutes);
+app.use('/api/alerts', alertsRoutes);
 
 // Start
 app.listen(config.port, () => {
