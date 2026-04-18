@@ -5,7 +5,7 @@ import { formatCurrency, formatDate } from '@/lib/utils';
 import {
   Shield, ShieldCheck, ShieldAlert, ShieldX, AlertTriangle,
   Plus, Search, RefreshCw, Building2, User, X, Edit2,
-  CalendarClock, FileText, Trash2, Eye,
+  CalendarClock, FileText, Trash2, Eye, Bell, Sparkles,
 } from 'lucide-react';
 
 interface Policy {
@@ -74,6 +74,7 @@ export default function Seguros() {
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState<{ mode: 'create' | 'edit' | 'renew'; policy?: Policy; preselectContractId?: string } | null>(null);
   const [activeContracts, setActiveContracts] = useState<Array<{ id: string; folio: string; bienDescripcion: string }>>([]);
+  const [alerts, setAlerts] = useState<{ total: number; criticas: number; altas: number; alerts: any[] } | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -86,7 +87,11 @@ export default function Seguros() {
     setLoading(false);
   };
 
-  useEffect(() => { fetchData(); }, [filter]);
+  const fetchAlerts = () => {
+    api.get('/insurance/alerts').then(r => setAlerts(r.data)).catch(() => {});
+  };
+
+  useEffect(() => { fetchData(); fetchAlerts(); }, [filter]);
 
   useEffect(() => {
     api.get('/contracts?limit=200')
@@ -138,6 +143,57 @@ export default function Seguros() {
           <Plus size={16} /> Nueva póliza
         </button>
       </div>
+
+      {/* Alertas críticas (vencidas + alta urgencia) */}
+      {alerts && alerts.criticas + alerts.altas > 0 && (
+        <div className="bg-gradient-to-r from-red-50 to-amber-50 border-l-4 border-red-500 rounded-r-xl p-4 mb-4">
+          <div className="flex items-start gap-3">
+            <Bell size={20} className="text-red-600 flex-shrink-0 mt-0.5 animate-pulse" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-red-900">
+                {alerts.criticas + alerts.altas} alerta{alerts.criticas + alerts.altas !== 1 ? 's' : ''} urgente{alerts.criticas + alerts.altas !== 1 ? 's' : ''}
+                {alerts.criticas > 0 && <span className="ml-2 px-2 py-0.5 bg-red-600 text-white text-xs rounded-full">{alerts.criticas} críticas</span>}
+              </p>
+              <ul className="mt-2 space-y-1.5 text-sm">
+                {alerts.alerts.filter(a => a.level === 'CRITICA' || a.level === 'ALTA').slice(0, 5).map((a, i) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <span className={`mt-0.5 inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${a.level === 'CRITICA' ? 'bg-red-600' : 'bg-amber-500'}`} />
+                    <div className="flex-1">
+                      <span className="font-medium">{a.contractFolio}</span>
+                      <span className="text-gray-500"> — {a.cliente}</span>
+                      <span className="text-gray-700"> · {a.mensaje}</span>
+                    </div>
+                    {a.kind === 'POLIZA_VENCIMIENTO' && a.policyId && (
+                      <button
+                        onClick={() => {
+                          const pol = data.find(p => p.id === a.policyId);
+                          if (pol) setShowModal({ mode: 'renew', policy: pol });
+                        }}
+                        className="text-xs px-2 py-0.5 bg-white border border-red-300 text-red-700 rounded hover:bg-red-50"
+                      >
+                        Renovar
+                      </button>
+                    )}
+                    {a.kind === 'SIN_POLIZA' && (
+                      <button
+                        onClick={() => setShowModal({ mode: 'create', preselectContractId: a.contractId })}
+                        className="text-xs px-2 py-0.5 bg-white border border-red-300 text-red-700 rounded hover:bg-red-50"
+                      >
+                        Crear
+                      </button>
+                    )}
+                  </li>
+                ))}
+                {alerts.alerts.filter(a => a.level === 'CRITICA' || a.level === 'ALTA').length > 5 && (
+                  <li className="text-xs text-red-700 ml-3">
+                    +{alerts.alerts.filter(a => a.level === 'CRITICA' || a.level === 'ALTA').length - 5} más
+                  </li>
+                )}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Alert banner: contratos sin póliza */}
       {sinPoliza.length > 0 && (
@@ -462,13 +518,39 @@ function PolicyModal({ mode, policy, preselectContractId, contracts, onClose, on
 
           {isRenew && policy && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
-              <p className="text-amber-800">
-                Renovando póliza <span className="font-mono font-semibold">{policy.numPoliza || policy.id.slice(0, 8)}</span> del
-                contrato <span className="font-mono font-semibold">{policy.contract.folio}</span>.
-              </p>
-              <p className="text-amber-600 text-xs mt-1">
-                La póliza anterior se marcará como inactiva y se creará una nueva con los datos de abajo.
-              </p>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-amber-800">
+                    Renovando póliza <span className="font-mono font-semibold">{policy.numPoliza || policy.id.slice(0, 8)}</span> del
+                    contrato <span className="font-mono font-semibold">{policy.contract.folio}</span>.
+                  </p>
+                  <p className="text-amber-600 text-xs mt-1">
+                    La póliza anterior se marcará como inactiva y se creará una nueva con los datos de abajo.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const res = await api.get(`/insurance/${policy.id}/suggest-renewal`);
+                      const d = res.data;
+                      setForm(f => ({
+                        ...f,
+                        fechaInicio: d.fechaInicio.slice(0, 10),
+                        fechaVencimiento: d.fechaVencimiento.slice(0, 10),
+                        primaAnual: String(d.primaSugerida),
+                        montoAsegurado: String(d.montoAsegurado || f.montoAsegurado),
+                      }));
+                    } catch (e: any) {
+                      alert('Error: ' + (e?.response?.data?.error || e.message));
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded hover:bg-purple-200 whitespace-nowrap"
+                  title="Sugerir fechas y prima ajustada por inflación (5%)"
+                >
+                  <Sparkles size={12} /> Sugerir
+                </button>
+              </div>
             </div>
           )}
 

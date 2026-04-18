@@ -22,18 +22,32 @@ const policySchema = z.object({
 
 const ALERT_THRESHOLD_DAYS = 30;
 
+// Niveles de alerta para el centro de notificaciones
+type AlertLevel = 'CRITICA' | 'ALTA' | 'MEDIA' | 'BAJA' | null;
+
 // ─── Helper: clasifica el estado de la póliza ────────────────
 function getPolicyStatus(p: { fechaVencimiento: Date | null; vigente: boolean }) {
-  if (!p.vigente) return { status: 'INACTIVA', daysToExpire: null };
-  if (!p.fechaVencimiento) return { status: 'SIN_FECHA', daysToExpire: null };
+  if (!p.vigente) return { status: 'INACTIVA', daysToExpire: null, alertLevel: null as AlertLevel };
+  if (!p.fechaVencimiento) return { status: 'SIN_FECHA', daysToExpire: null, alertLevel: 'MEDIA' as AlertLevel };
 
   const now = new Date();
   const exp = new Date(p.fechaVencimiento);
   const daysToExpire = Math.floor((exp.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
-  if (daysToExpire < 0) return { status: 'VENCIDA', daysToExpire };
-  if (daysToExpire <= ALERT_THRESHOLD_DAYS) return { status: 'POR_VENCER', daysToExpire };
-  return { status: 'VIGENTE', daysToExpire };
+  // Niveles de alerta:
+  //   CRITICA: vencida (negativos)
+  //   ALTA:    ≤ 7 días para vencer
+  //   MEDIA:   ≤ 15 días
+  //   BAJA:    ≤ 30 días
+  let alertLevel: AlertLevel = null;
+  if (daysToExpire < 0) alertLevel = 'CRITICA';
+  else if (daysToExpire <= 7) alertLevel = 'ALTA';
+  else if (daysToExpire <= 15) alertLevel = 'MEDIA';
+  else if (daysToExpire <= ALERT_THRESHOLD_DAYS) alertLevel = 'BAJA';
+
+  if (daysToExpire < 0) return { status: 'VENCIDA', daysToExpire, alertLevel };
+  if (daysToExpire <= ALERT_THRESHOLD_DAYS) return { status: 'POR_VENCER', daysToExpire, alertLevel };
+  return { status: 'VIGENTE', daysToExpire, alertLevel: null as AlertLevel };
 }
 
 // ─── GET /api/insurance ──────────────────────────────────────
@@ -229,6 +243,160 @@ router.post('/:id/renew', requireAuth, async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Renew policy error:', error);
     res.status(500).json({ error: 'Error al renovar póliza' });
+  }
+});
+
+// ─── GET /api/insurance/alerts ───────────────────────────────
+// Lista única de items accionables para el Centro de Alertas:
+//   - Pólizas vencidas
+//   - Pólizas por vencer (≤30 días)
+//   - Contratos vigentes sin póliza
+// Cada item viene con prioridad (CRITICA/ALTA/MEDIA/BAJA), categoría y CTA.
+router.get('/alerts', requireAuth, async (_req: Request, res: Response) => {
+  try {
+    // Pólizas con vencimiento próximo o vencido
+    const policies = await prisma.insurancePolicy.findMany({
+      where: { vigente: true },
+      include: {
+        contract: {
+          select: {
+            id: true, folio: true, bienDescripcion: true,
+            client: { select: { tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true } },
+          },
+        },
+      },
+    });
+
+    const alerts: any[] = [];
+
+    for (const p of policies) {
+      const s = getPolicyStatus(p);
+      if (!s.alertLevel) continue;
+      const cName = p.contract.client.tipo === 'PM'
+        ? p.contract.client.razonSocial
+        : `${p.contract.client.nombre || ''} ${p.contract.client.apellidoPaterno || ''}`.trim();
+      alerts.push({
+        kind: 'POLIZA_VENCIMIENTO',
+        level: s.alertLevel,
+        policyId: p.id,
+        contractId: p.contract.id,
+        contractFolio: p.contract.folio,
+        cliente: cName,
+        bien: p.contract.bienDescripcion,
+        aseguradora: p.aseguradora,
+        numPoliza: p.numPoliza,
+        diasRestantes: s.daysToExpire,
+        fechaVencimiento: p.fechaVencimiento,
+        mensaje: s.status === 'VENCIDA'
+          ? `Póliza VENCIDA hace ${Math.abs(s.daysToExpire || 0)} días`
+          : `Póliza vence en ${s.daysToExpire} días`,
+        action: 'RENOVAR',
+        actionUrl: `/seguros?renew=${p.id}`,
+      });
+    }
+
+    // Contratos vigentes sin póliza
+    const sinPolizaContracts = await prisma.contract.findMany({
+      where: { estatus: { in: ['VIGENTE', 'VENCIDO'] } },
+      select: {
+        id: true, folio: true, bienDescripcion: true,
+        seguros: { where: { vigente: true }, select: { id: true } },
+        client: { select: { tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true } },
+      },
+    });
+
+    sinPolizaContracts
+      .filter(c => c.seguros.length === 0)
+      .forEach(c => {
+        const cName = c.client.tipo === 'PM'
+          ? c.client.razonSocial
+          : `${c.client.nombre || ''} ${c.client.apellidoPaterno || ''}`.trim();
+        alerts.push({
+          kind: 'SIN_POLIZA',
+          level: 'ALTA' as AlertLevel,
+          contractId: c.id,
+          contractFolio: c.folio,
+          cliente: cName,
+          bien: c.bienDescripcion,
+          mensaje: 'Contrato vigente SIN póliza de seguro',
+          action: 'CREAR',
+          actionUrl: `/seguros?create=${c.id}`,
+        });
+      });
+
+    // Ordenar por prioridad: CRITICA > ALTA > MEDIA > BAJA
+    const order: Record<string, number> = { CRITICA: 0, ALTA: 1, MEDIA: 2, BAJA: 3 };
+    alerts.sort((a, b) => (order[a.level] ?? 9) - (order[b.level] ?? 9));
+
+    res.json({
+      total: alerts.length,
+      criticas: alerts.filter(a => a.level === 'CRITICA').length,
+      altas: alerts.filter(a => a.level === 'ALTA').length,
+      medias: alerts.filter(a => a.level === 'MEDIA').length,
+      bajas: alerts.filter(a => a.level === 'BAJA').length,
+      alerts,
+    });
+  } catch (error) {
+    console.error('Insurance alerts error:', error);
+    res.status(500).json({ error: 'Error al obtener alertas' });
+  }
+});
+
+// ─── POST /api/insurance/:id/acknowledge ─────────────────────
+// Marca que el operador vio una alerta (deja huella en observaciones)
+router.post('/:id/acknowledge', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const policy = await prisma.insurancePolicy.findUnique({ where: { id: req.params.id } });
+    if (!policy) return res.status(404).json({ error: 'Póliza no encontrada' });
+
+    const ts = new Date().toISOString().slice(0, 16);
+    const updated = await prisma.insurancePolicy.update({
+      where: { id: req.params.id },
+      data: {
+        observaciones: `${policy.observaciones || ''}\n[${ts}] Alerta revisada por ${userId}`.trim(),
+      },
+    });
+    res.json({ ok: true, policy: updated });
+  } catch (error) {
+    console.error('Acknowledge error:', error);
+    res.status(500).json({ error: 'Error al confirmar revisión' });
+  }
+});
+
+// ─── GET /api/insurance/:id/suggest-renewal ──────────────────
+// Sugiere fechas y prima para renovar la póliza:
+//   - fechaInicio = fechaVencimiento actual + 1 día
+//   - fechaVencimiento sugerida = +12 meses
+//   - primaSugerida = primaActual × (1 + factorInflacion). Default 5%
+router.get('/:id/suggest-renewal', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const inflacion = parseFloat(String(req.query.inflacion || '0.05'));
+    const policy = await prisma.insurancePolicy.findUnique({ where: { id: req.params.id } });
+    if (!policy) return res.status(404).json({ error: 'Póliza no encontrada' });
+
+    const baseFecha = policy.fechaVencimiento || new Date();
+    const fechaInicio = new Date(baseFecha);
+    fechaInicio.setDate(fechaInicio.getDate() + 1);
+    const fechaVencimiento = new Date(fechaInicio);
+    fechaVencimiento.setFullYear(fechaVencimiento.getFullYear() + 1);
+
+    const primaActual = Number(policy.primaAnual || 0);
+    const primaSugerida = Math.round(primaActual * (1 + inflacion) * 100) / 100;
+
+    res.json({
+      fechaInicio,
+      fechaVencimiento,
+      primaActual,
+      primaSugerida,
+      inflacionAplicada: inflacion,
+      aseguradora: policy.aseguradora,
+      tipoCobertura: policy.tipoCobertura,
+      montoAsegurado: Number(policy.montoAsegurado || 0),
+    });
+  } catch (error) {
+    console.error('Suggest renewal error:', error);
+    res.status(500).json({ error: 'Error al sugerir renovación' });
   }
 });
 
