@@ -833,6 +833,81 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+// ─── GET /api/cobranza/payment/:id/recibo ────────────────────
+// Devuelve los datos necesarios para generar el PDF del recibo de pago.
+// El folio del recibo se calcula al vuelo: REC-YYYY-NNNN donde NNNN es
+// el orden secuencial del pago dentro del año (basado en createdAt).
+router.get('/payment/:id/recibo', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const payment = await prisma.payment.findUnique({
+      where: { id },
+      include: {
+        contract: {
+          include: {
+            client: {
+              select: {
+                id: true, tipo: true, nombre: true, apellidoPaterno: true,
+                apellidoMaterno: true, razonSocial: true, rfc: true,
+                telefono: true, email: true,
+              },
+            },
+          },
+        },
+        user: { select: { nombre: true, apellidos: true, email: true } },
+      },
+    });
+
+    if (!payment) return res.status(404).json({ error: 'Pago no encontrado' });
+
+    // Folio consecutivo por año
+    const yearStart = new Date(payment.createdAt.getFullYear(), 0, 1);
+    const yearEnd = new Date(payment.createdAt.getFullYear() + 1, 0, 1);
+    const seq = await prisma.payment.count({
+      where: {
+        createdAt: { gte: yearStart, lt: yearEnd, lte: payment.createdAt },
+      },
+    });
+    const folio = `REC-${payment.createdAt.getFullYear()}-${String(seq).padStart(4, '0')}`;
+
+    res.json({
+      folio,
+      pago: {
+        id: payment.id,
+        tipo: payment.tipo,
+        periodo: payment.periodo,
+        fechaPago: payment.fechaPago,
+        fechaVencimiento: payment.fechaVencimiento,
+        montoRenta: Number(payment.montoRenta),
+        montoIVA: Number(payment.montoIVA),
+        montoSeguro: Number(payment.montoSeguro),
+        montoMoratorio: Number(payment.montoMoratorio),
+        montoIVAMoratorio: Number(payment.montoIVAMoratorio),
+        montoCapitalExtra: Number(payment.montoCapitalExtra),
+        montoTotal: Number(payment.montoTotal),
+        diasAtraso: payment.diasAtraso,
+        referencia: payment.referencia,
+        observaciones: payment.observaciones,
+        createdAt: payment.createdAt,
+      },
+      contrato: {
+        id: payment.contract.id,
+        folio: payment.contract.folio,
+        producto: payment.contract.producto,
+        plazo: payment.contract.plazo,
+        client: payment.contract.client,
+      },
+      usuario: payment.user
+        ? `${payment.user.nombre || ''} ${payment.user.apellidos || ''}`.trim() || payment.user.email
+        : null,
+    });
+  } catch (error) {
+    console.error('Recibo error:', error);
+    res.status(500).json({ error: 'Error al obtener recibo' });
+  }
+});
+
 // ─── POST /api/cobranza/pay-anticipado ──────────────────────
 // STUB: Pago anticipado / liquidación anticipada
 // TODO: Implementar fórmulas específicas para arrendamiento

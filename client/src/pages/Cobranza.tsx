@@ -6,8 +6,9 @@ import {
   CalendarDays, ChevronLeft, ChevronRight, CheckCircle2, Clock,
   AlertTriangle, Building2, User, DollarSign, TrendingUp,
   Phone, CreditCard, Filter, ChevronDown, ChevronUp,
-  ArrowRightLeft, FastForward, X, FileText, CircleDot,
+  ArrowRightLeft, FastForward, X, FileText, CircleDot, Receipt,
 } from 'lucide-react';
+import { generateReciboPDF } from '@/lib/reciboPDF';
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -526,9 +527,25 @@ export default function Cobranza() {
                               <Row label="Total pagado" value={entry.pagos.totalPagado} bold green />
                             </div>
                             {entry.pagos.detalle.map((p, i) => (
-                              <div key={p.id} className="text-[10px] text-gray-400 mt-1">
-                                Pago {i + 1}: {formatDate(p.fecha)} · {formatCurrency(p.monto)}
-                                {p.referencia && <> · {p.referencia}</>}
+                              <div key={p.id} className="text-[10px] text-gray-400 mt-1 flex items-center gap-2">
+                                <span>
+                                  Pago {i + 1}: {formatDate(p.fecha)} · {formatCurrency(p.monto)}
+                                  {p.referencia && <> · {p.referencia}</>}
+                                </span>
+                                <button
+                                  onClick={async () => {
+                                    try {
+                                      const res = await api.get(`/cobranza/payment/${p.id}/recibo`);
+                                      generateReciboPDF(res.data);
+                                    } catch {
+                                      alert('No se pudo generar el recibo');
+                                    }
+                                  }}
+                                  title="Descargar recibo"
+                                  className="text-inyecta-600 hover:text-inyecta-800 inline-flex items-center gap-0.5"
+                                >
+                                  <Receipt size={10} /> Recibo
+                                </button>
                               </div>
                             ))}
                           </div>
