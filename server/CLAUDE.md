@@ -593,7 +593,21 @@ Completado:
         (estilo Inyecta: header #1B2A47, zebra #F5F5F5).
         Complementa el endpoint existente
         /api/conciliation/upload (que sólo lee CSV).
-  - [ ] T11: Portal arrendatario
+  - [x] T11: Portal del Arrendatario — backend (server/src/routes/
+        portal.ts) y frontend (client/src/pages/Portal.tsx) ya
+        existían: vista pública en /portal/:token (sin login, token
+        único impreso en el contrato). Incluye dashboard con cliente +
+        contratos, detalle por contrato con calendario de pagos
+        (estatus PAGADO/PARCIAL/VENCIDO/PENDIENTE/FUTURO + cálculo
+        live de moratorios), tabs de pagos e facturas, y bloque de
+        datos bancarios para depósito.
+        En esta sesión se cerró el spec agregando la **descarga de
+        estado de cuenta**: client/src/lib/pdf/EstadoCuentaPDF.tsx
+        (header + footer Inyecta, 4 secciones — datos del contrato,
+        resumen al corte, calendario con badges de estatus, datos
+        bancarios). Botón "Descargar estado de cuenta" integrado en
+        Portal.tsx vía PDFDownloadLink en la vista de contrato.
+        38/38 tests siguen pasando, tsc --noEmit limpio en cliente.
   - [ ] T12: CFDI 4.0
   - [ ] T13: Reportes
 

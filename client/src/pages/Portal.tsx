@@ -7,7 +7,9 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
 import axios from 'axios';
+import { PDFDownloadLink } from '@react-pdf/renderer';
 import { formatCurrency, formatDate } from '@/lib/utils';
+import { EstadoCuentaPDF } from '@/lib/pdf/EstadoCuentaPDF';
 import {
   Building2, FileText, Calendar, AlertTriangle, CheckCircle2,
   Receipt, Download, Clock, DollarSign, ArrowRight, ArrowLeft,
@@ -218,8 +220,27 @@ export default function Portal() {
 
           {/* Tabla de periodos */}
           <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-            <div className="px-4 py-3 border-b bg-gray-50">
+            <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between gap-2 flex-wrap">
               <h2 className="font-semibold text-gray-900">Calendario de pagos</h2>
+              <PDFDownloadLink
+                document={
+                  <EstadoCuentaPDF
+                    cliente={{ nombre: cliente.nombre, rfc: cliente.rfc, email: cliente.email }}
+                    contrato={contrato}
+                    resumen={resumen}
+                    periodos={periodos}
+                  />
+                }
+                fileName={`estado-cuenta-${contrato.folio}.pdf`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-inyecta-600 hover:bg-inyecta-700 text-white text-sm font-medium transition-colors"
+              >
+                {({ loading }) => (
+                  <>
+                    {loading ? <Loader2 className="animate-spin" size={14} /> : <Download size={14} />}
+                    {loading ? 'Generando…' : 'Descargar estado de cuenta'}
+                  </>
+                )}
+              </PDFDownloadLink>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
