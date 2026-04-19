@@ -7,6 +7,7 @@ import {
   AlertTriangle, Building2, User, DollarSign, TrendingUp,
   Phone, CreditCard, Filter, ChevronDown, ChevronUp,
   ArrowRightLeft, FastForward, X, FileText, CircleDot, Receipt, FileCheck2,
+  Eye,
 } from 'lucide-react';
 import { generateReciboPDF } from '@/lib/reciboPDF';
 
@@ -381,6 +382,14 @@ export default function Cobranza() {
                         </span>
                         <Link to={`/contratos/${entry.contract.id}`} className="font-mono text-xs text-inyecta-700 font-medium hover:underline">
                           {entry.contract.folio}
+                        </Link>
+                        <Link
+                          to={`/cobranza/contrato/${entry.contract.id}`}
+                          title="Ver amortización completa, parcialidades y moratorios"
+                          className="inline-flex items-center gap-1 text-[10px] text-white bg-[#112239] hover:bg-[#0b1729] px-1.5 py-0.5 rounded font-medium transition-colors"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Eye size={10} /> Ver crédito
                         </Link>
                         <span className="text-xs text-gray-400">P{entry.periodo}</span>
                         <span className={`text-[10px] px-1.5 py-0.5 rounded ${

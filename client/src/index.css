@@ -1,28 +1,48 @@
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --color-inyecta-950: #0a0520;
-  --color-inyecta-900: #1a0f3e;
-  --color-inyecta-800: #2a1960;
-  --color-inyecta-700: #3a2382;
-  --color-inyecta-600: #4a2da4;
-  --color-inyecta-500: #5a37c6;
-  --color-inyecta-400: #7a5cd6;
-  --color-inyecta-300: #9a81e6;
-  --color-inyecta-200: #baa6f0;
-  --color-inyecta-100: #dacbfa;
-  --color-inyecta-50: #f0ebfd;
+  /* ─── Legacy Inyecta navigation palette ──────────────────────────
+     Extraída del sistema de créditos en producción (DOM real):
+       #184892  → fondo del sidebar
+       #112239  → hover / header superior / botón primary
+       #FF6600  → acento naranja (usuario activo, enlace activo)
+  ──────────────────────────────────────────────────────────────── */
+  --color-nav-bg:      #184892;
+  --color-nav-hover:   #112239;
+  --color-nav-accent:  #FF6600;
 
-  --color-accent: #e8833a;
-  --color-accent-light: #f0a060;
-  --color-accent-dark: #d06a20;
+  /* ─── Inyecta brand palette (logo) ────────────────────────────────
+     Derivada del logo oficial:
+       #205878  → azul oscuro del marco del diamante (primary dark)
+       #3080B0  → azul medio de "inyecta" + palomita (accent / primary)
+     La escala se construyó alrededor de esos dos tonos.
+  ──────────────────────────────────────────────────────────────── */
+  --color-inyecta-950: #0A1F2E;
+  --color-inyecta-900: #0F2C40;
+  --color-inyecta-800: #163D57;
+  --color-inyecta-700: #205878;  /* marco del diamante — primary dark */
+  --color-inyecta-600: #2A6C92;
+  --color-inyecta-500: #3080B0;  /* texto "inyecta" — primary / accent blue */
+  --color-inyecta-400: #5A9ECC;
+  --color-inyecta-300: #85BADD;
+  --color-inyecta-200: #B0D2E8;
+  --color-inyecta-100: #DAE8F2;
+  --color-inyecta-50:  #EFF5FA;
 
-  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  /* Accent = azul medio brillante del logo (reemplaza el antiguo naranja) */
+  --color-accent:       #3080B0;
+  --color-accent-light: #5A9ECC;
+  --color-accent-dark:  #205878;
+
+  --font-sans: 'Roboto', 'Inter', system-ui, -apple-system, sans-serif;
 }
 
 body {
   margin: 0;
   font-family: var(--font-sans);
+  font-size: 13px;
+  color: #112239;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

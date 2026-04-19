@@ -510,7 +510,12 @@ Completado:
         Precision 20, ROUND_HALF_UP. Verificado al centavo. La carpeta
         legacy `lib/pdfGenerator.ts` queda en uso por CotizacionDetalle.tsx
         (será reemplazada en una limpieza posterior).
-  - [ ] T3: Sidebar/navegación
+  - [x] T3: Sidebar/navegación — client/src/config/navigation.ts con
+        NAV_SECTIONS jerárquica (Inicio / Administración / Arrendamiento)
+        + findActiveBranch() para abrir el acordeón correcto. Layout.tsx
+        usa la configuración. Cotizador unificado (un solo /cotizador con
+        toggle PURO/FINANCIERO interno, ya no /cotizador/{puro,financiero}).
+        App.tsx con todas las rutas + EnConstruccion.tsx para placeholders.
   - [ ] T4: PDF Cotización
   - [ ] T5: PDF Amortización
   - [ ] T6: Unit tests
