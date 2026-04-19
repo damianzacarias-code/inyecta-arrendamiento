@@ -1,0 +1,6 @@
+# Dependencias del script de conciliación bancaria (T10).
+# Instalar con: pip install -r scripts/requirements.txt
+pdfplumber>=0.11.0    # Lectura tabular de PDFs de estado de cuenta
+openpyxl>=3.1.0       # Escritura del reporte Excel de salida
+psycopg2-binary>=2.9.0  # Conexión directa a Postgres (DATABASE_URL)
+python-dotenv>=1.0.0  # Lectura del archivo server/.env

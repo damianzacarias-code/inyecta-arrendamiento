@@ -575,7 +575,24 @@ Completado:
         PATCH /leer-todas, DELETE /:id. Todo restringido al usuario
         autenticado (no se pueden ver/editar notificaciones ajenas).
         Migración: 20260419180117_add_notificaciones.
-  - [ ] T10: Conciliación bancaria
+  - [x] T10: Conciliación bancaria — script Python en
+        sistema/scripts/conciliar_banco.py + requirements.txt
+        (pdfplumber, openpyxl, psycopg2-binary, python-dotenv).
+        Lee 1..N PDFs de estado de cuenta, autodetecta banco
+        (BBVA/Santander/Banamex/Banorte/HSBC/Scotia + fallback),
+        conecta a Postgres usando DATABASE_URL de server/.env,
+        carga periodos pendientes desde amortization_entries y
+        cruza con heurística scoring 0-100:
+          +40 monto coincide ±$5
+          +35 folio del contrato en descripción
+          +20 RFC del cliente en descripción
+          +15 fecha ±5d del vencimiento
+          +10 sin pago previo del periodo
+        Score umbral = 50. NO modifica BD (sólo reporte).
+        Output Excel con 3 hojas: Matches / Pendientes / Resumen
+        (estilo Inyecta: header #1B2A47, zebra #F5F5F5).
+        Complementa el endpoint existente
+        /api/conciliation/upload (que sólo lee CSV).
   - [ ] T11: Portal arrendatario
   - [ ] T12: CFDI 4.0
   - [ ] T13: Reportes
