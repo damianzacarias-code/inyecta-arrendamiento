@@ -1,8 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { PDFDownloadLink } from '@react-pdf/renderer';
 import api from '@/lib/api';
-import { formatCurrency, formatPercent } from '@/lib/utils';
-import { Calculator, Save, FileDown, RotateCcw, ChevronDown, ChevronUp } from 'lucide-react';
+import { formatCurrency } from '@/lib/utils';
+import { Calculator, Save, FileDown, RotateCcw, ChevronDown, ChevronUp, FileText, Table } from 'lucide-react';
+import { calcularCotizacion } from '@/lib/cotizacion/calculos';
+import { calcAmortPuro, calcAmortFinanciero } from '@/lib/cotizacion/amortizacion';
+import { CotizacionPDF } from '@/lib/pdf/CotizacionPDF';
+import { AmortizacionPDF } from '@/lib/pdf/AmortizacionPDF';
 
 interface SimulationResult {
   resultado: {
@@ -47,6 +52,18 @@ interface AssetCategory {
   requiereGPS: boolean;
 }
 
+/** Fecha de hoy en formato YYYY-MM-DD para el input date */
+function todayISO(): string {
+  const d = new Date();
+  return (
+    d.getFullYear() +
+    '-' +
+    String(d.getMonth() + 1).padStart(2, '0') +
+    '-' +
+    String(d.getDate()).padStart(2, '0')
+  );
+}
+
 const defaultForm = {
   nombreCliente: '',
   producto: 'PURO' as 'PURO' | 'FINANCIERO',
@@ -55,6 +72,7 @@ const defaultForm = {
   tasaAnual: 0.36,
   nivelRiesgo: 'A' as 'A' | 'B' | 'C',
   enganchePct: 0,
+  engancheEsContado: true,           // true = pago inicial / false = reduce monto a financiar
   depositoGarantiaPct: 0.16,
   comisionAperturaPct: 0.05,
   comisionAperturaFinanciada: true,
@@ -64,6 +82,8 @@ const defaultForm = {
   gpsFinanciado: true,
   seguroAnual: 0,
   seguroFinanciado: true,
+  seguroEstado: 'Pendiente',         // "Pendiente" | "Contratado"
+  fechaPrimerPago: todayISO(),       // YYYY-MM-DD
   generarOpciones: false,
   categoriaId: '',
   bienDescripcion: '',
@@ -74,9 +94,20 @@ const defaultForm = {
   observaciones: '',
 };
 
-export default function Cotizador() {
+interface CotizadorProps {
+  /** Producto pre-seleccionado cuando se entra desde /cotizador/puro o /cotizador/financiero */
+  productoInicial?: 'PURO' | 'FINANCIERO';
+}
+
+export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
   const navigate = useNavigate();
-  const [form, setForm] = useState(defaultForm);
+  const [form, setForm] = useState({
+    ...defaultForm,
+    producto: productoInicial ?? defaultForm.producto,
+    // Defaults por producto: PURO → residual 16%, FIN → residual 2% (opción de compra)
+    valorResidualPct: productoInicial === 'FINANCIERO' ? 0.02 : 0.16,
+    depositoGarantiaPct: productoInicial === 'FINANCIERO' ? 0.16 : 0.16,
+  });
   const [result, setResult] = useState<SimulationResult | null>(null);
   const [categories, setCategories] = useState<AssetCategory[]>([]);
   const [loading, setLoading] = useState(false);
@@ -145,6 +176,96 @@ export default function Cotizador() {
     setForm((prev) => ({ ...prev, nivelRiesgo: level, ...defaults }));
   };
 
+  // ── Datos para los PDFs (cliente, sin pasar por servidor) ─────────
+  // Usamos el motor de cálculo verificado al centavo y derivamos los
+  // campos descriptivos del formulario actual.
+  const pdfData = useMemo(() => {
+    if (!result) return null;
+
+    const fechaPrimerPagoDate = (() => {
+      const [y, m, d] = form.fechaPrimerPago.split('-').map(Number);
+      return new Date(y, (m || 1) - 1, d || 1, 12, 0, 0);
+    })();
+
+    const valorBienConIVA = form.valorBien * 1.16;
+    const nombreBien =
+      form.bienDescripcion ||
+      [form.bienMarca, form.bienModelo, form.bienAnio].filter(Boolean).join(' ') ||
+      'Bien arrendado';
+
+    const cotData = calcularCotizacion({
+      valorBienConIVA,
+      tasaIVA: 0.16,
+      producto: form.producto,
+      plazo: form.plazo,
+      tasaAnual: form.tasaAnual,
+      tasaComisionApertura: form.comisionAperturaPct,
+      comisionAperturaEsContado: !form.comisionAperturaFinanciada,
+      porcentajeResidual: form.valorResidualPct,
+      gpsMonto: form.gpsInstalacion,
+      gpsEsContado: !form.gpsFinanciado,
+      seguroMonto: form.seguroAnual,
+      seguroEsContado: !form.seguroFinanciado,
+      engancheMonto: form.valorBien * form.enganchePct * 1.16,  // sobre valorConIVA
+      engancheEsContado: form.engancheEsContado,
+      nombreBien,
+      estadoBien: form.bienNuevo ? 'Nuevo' : 'Seminuevo',
+      seguroEstado: form.seguroEstado,
+      nombreCliente: form.nombreCliente || 'Sin nombre',
+      fecha: new Date(),
+    });
+
+    const filasPuro =
+      form.producto === 'PURO'
+        ? calcAmortPuro(cotData.rentaMensual.montoNeto, form.plazo, fechaPrimerPagoDate)
+        : undefined;
+
+    const filasFinanciero =
+      form.producto === 'FINANCIERO'
+        ? calcAmortFinanciero(
+            cotData.montoFinanciadoReal,
+            form.tasaAnual,
+            form.plazo,
+            cotData.fvAmortizacion,
+            fechaPrimerPagoDate,
+          )
+        : undefined;
+
+    return { cotData, filasPuro, filasFinanciero };
+  }, [
+    result,
+    form.valorBien,
+    form.producto,
+    form.plazo,
+    form.tasaAnual,
+    form.comisionAperturaPct,
+    form.comisionAperturaFinanciada,
+    form.valorResidualPct,
+    form.gpsInstalacion,
+    form.gpsFinanciado,
+    form.seguroAnual,
+    form.seguroFinanciado,
+    form.enganchePct,
+    form.engancheEsContado,
+    form.bienDescripcion,
+    form.bienMarca,
+    form.bienModelo,
+    form.bienAnio,
+    form.bienNuevo,
+    form.seguroEstado,
+    form.fechaPrimerPago,
+    form.nombreCliente,
+  ]);
+
+  /** Slug seguro para los nombres de archivo */
+  const fileSlug = (form.nombreCliente || 'cotizacion')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 40) || 'cotizacion';
+
   return (
     <div className="max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-6">
@@ -192,6 +313,58 @@ export default function Cotizador() {
                     <option key={cat.id} value={cat.id}>{cat.nombre}</option>
                   ))}
                 </select>
+              </div>
+              <div className="lg:col-span-2">
+                <label className="block text-sm font-medium text-gray-600 mb-1">Descripción del Bien</label>
+                <input
+                  type="text"
+                  value={form.bienDescripcion}
+                  onChange={(e) => updateField('bienDescripcion', e.target.value)}
+                  placeholder="Ej: Camioneta Toyota Hilux 4x4 2025"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-600 mb-1">Estado del Bien</label>
+                <div className="flex gap-2">
+                  {[
+                    { v: true,  label: 'Nuevo' },
+                    { v: false, label: 'Seminuevo' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.label}
+                      onClick={() => updateField('bienNuevo', opt.v)}
+                      className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                        form.bienNuevo === opt.v
+                          ? 'bg-inyecta-700 text-white'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-600 mb-1">Estado del Seguro</label>
+                <select
+                  value={form.seguroEstado}
+                  onChange={(e) => updateField('seguroEstado', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none"
+                >
+                  <option value="Pendiente">Pendiente</option>
+                  <option value="Contratado">Contratado</option>
+                  <option value="Cliente">Por cuenta del cliente</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-600 mb-1">Fecha Primer Pago</label>
+                <input
+                  type="date"
+                  value={form.fechaPrimerPago}
+                  onChange={(e) => updateField('fechaPrimerPago', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none"
+                />
               </div>
             </div>
           </div>
@@ -321,6 +494,15 @@ export default function Cotizador() {
                     onChange={(e) => updateField('enganchePct', Number(e.target.value))}
                     className="w-full accent-inyecta-600"
                   />
+                </div>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={form.engancheEsContado}
+                    onChange={(e) => updateField('engancheEsContado', e.target.checked)}
+                    className="rounded accent-inyecta-600"
+                  />
+                  <span className="text-sm text-gray-600">Enganche de contado (si no, descuenta del monto a financiar)</span>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-600 mb-1">
@@ -485,6 +667,59 @@ export default function Cotizador() {
               </p>
             )}
           </div>
+
+          {/* PDFs (cotización + amortización) */}
+          {pdfData && (
+            <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-3">
+              <h3 className="font-semibold text-gray-900">Documentos PDF</h3>
+              <p className="text-xs text-gray-500 -mt-1">
+                Generados con los parámetros actuales (cliente, sin enviar al servidor).
+              </p>
+
+              <PDFDownloadLink
+                document={
+                  <CotizacionPDF
+                    data={pdfData.cotData}
+                    tasaAnual={form.tasaAnual}
+                  />
+                }
+                fileName={`cotizacion-${fileSlug}.pdf`}
+                className="w-full bg-inyecta-700 hover:bg-inyecta-800 text-white py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+              >
+                {({ loading: pdfLoading }) => (
+                  <>
+                    <FileText size={15} />
+                    {pdfLoading ? 'Generando...' : 'Descargar Cotización'}
+                  </>
+                )}
+              </PDFDownloadLink>
+
+              <PDFDownloadLink
+                document={
+                  <AmortizacionPDF
+                    data={pdfData.cotData}
+                    tasaAnual={form.tasaAnual}
+                    filasPuro={pdfData.filasPuro}
+                    filasFinanciero={pdfData.filasFinanciero}
+                  />
+                }
+                fileName={`amortizacion-${fileSlug}.pdf`}
+                className="w-full bg-accent hover:bg-accent-dark text-white py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+              >
+                {({ loading: pdfLoading }) => (
+                  <>
+                    <Table size={15} />
+                    {pdfLoading ? 'Generando...' : 'Descargar Tabla de Amortización'}
+                  </>
+                )}
+              </PDFDownloadLink>
+
+              <p className="text-[10px] text-gray-400 leading-relaxed">
+                Tip: usa "Guardar Cotización" si quieres persistirla en el sistema y volver
+                a generarla más adelante con su folio asignado.
+              </p>
+            </div>
+          )}
 
           {/* Amortization toggle */}
           {result && (

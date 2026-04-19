@@ -523,7 +523,16 @@ Completado:
         contacto), 4 secciones zebra (Monto, Pago inicial, Renta, Residual).
         Logo 150×100. Branch dinámico por producto (PURO: "Valor de rescate"
         16% / FIN: "Opción de compra" 2%). Assets en client/public/brand/.
-  - [ ] T5: PDF Amortización
+  - [x] T5: PDF Amortización — client/src/lib/pdf/AmortizacionPDF.tsx
+        comparte header/footer FIJOS con CotizacionPDF (se repiten en
+        cada página). Sub-header con cliente/plazo/tasa/renta/folio.
+        PURO portrait (5 cols: # Fecha Renta IVA Total) /
+        FINANCIERO landscape (7 cols: + Capital Interés Saldo).
+        Encabezado de columnas marcado `fixed` para repetirse en cada
+        página. Totales al final + paginación "Página X de Y".
+        Cotizador.tsx integra PDFDownloadLink para ambos PDFs +
+        nuevos campos descriptivos del bien (descripción, estado,
+        seguro, fecha primer pago).
   - [ ] T6: Unit tests
   - [ ] T7: Bitácora
   - [ ] T8: Pagos adicionales
