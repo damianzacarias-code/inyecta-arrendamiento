@@ -20,6 +20,7 @@ import conciliationRoutes from './routes/conciliation';
 import searchRoutes from './routes/search';
 import alertsRoutes from './routes/alerts';
 import bitacoraRoutes from './routes/bitacora';
+import notificacionesRoutes from './routes/notificaciones';
 import { bitacora } from './middleware/bitacora';
 
 const app = express();
@@ -60,6 +61,7 @@ app.use('/api/conciliation', conciliationRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/alerts', alertsRoutes);
 app.use('/api/bitacora', bitacoraRoutes);
+app.use('/api/notificaciones', notificacionesRoutes);
 
 // Start
 app.listen(config.port, () => {

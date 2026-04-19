@@ -558,7 +558,23 @@ Completado:
         Ambas con validación de período (1..plazo-1) y de monto
         (no excede saldo amortizable). 10 tests adicionales en la suite
         (38/38 ✅). Wiring UI pendiente (lib lista para conectarse).
-  - [ ] T9: Notificaciones
+  - [x] T9: Notificaciones in-app — modelo Prisma `Notificacion`
+        (userId/tipo/titulo/mensaje/entidad/entidadId/url/leida/leidaAt
+        + índices userId+leida y userId+createdAt). Agregado rol LEGAL
+        al enum UserRole para soportar la regla "SOLICITUD_* → LEGAL"
+        del CLAUDE.md §9 T9. server/src/lib/notificar.ts expone:
+        * notificar(payload) — siempre ADMIN + ejecutivo (si aplica) +
+          LEGAL si tipo empieza con "SOLICITUD_". De-duplica por userId.
+          Fire-and-forget: errores se loggean, nunca tumban la operación.
+        * notificarPorRol(roles, payload) — para alertas dirigidas
+          (ej: COBRANZA en mora ≥30 días).
+        * notificarUsuario(userId, payload) — confirmaciones individuales.
+        server/src/routes/notificaciones.ts: GET / (paginado,
+        filtros soloNoLeidas+tipo, devuelve contador de no leídas),
+        GET /contador (polling ligero), PATCH /:id/leida (idempotente),
+        PATCH /leer-todas, DELETE /:id. Todo restringido al usuario
+        autenticado (no se pueden ver/editar notificaciones ajenas).
+        Migración: 20260419180117_add_notificaciones.
   - [ ] T10: Conciliación bancaria
   - [ ] T11: Portal arrendatario
   - [ ] T12: CFDI 4.0
@@ -577,6 +593,14 @@ Notas de la última sesión:
     cliente y servidor. Última fila de calcAmortFinanciero ahora
     respeta FV (antes asumía 0).
   - Logo de inyecta más grande en CotizacionPDF (95×64 → 150×100).
+  - T9: el enum UserRole no incluía LEGAL (sólo ADMIN/DIRECTOR/
+    ANALISTA/COBRANZA/OPERACIONES). Se agregó LEGAL para honrar la
+    regla de SOLICITUD_* del CLAUDE.md §9 T9. Wiring UI (campana,
+    listado, polling de /contador) pendiente — la API ya está lista.
+    Pendiente también: enganchar `notificar()` desde los handlers
+    relevantes (POST /api/contracts → "SOLICITUD_CREADA",
+    PATCH stage → "ETAPA_AVANZADA", POST /api/cobranza/payments →
+    "PAGO_REGISTRADO", etc.) en una pasada posterior.
 ```
 
 ---

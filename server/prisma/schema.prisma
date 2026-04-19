@@ -27,6 +27,7 @@ model User {
   pagosRegistrados Payment[]
   notas         Note[]
   documentosSubidos ContractDocument[]
+  notificaciones Notificacion[]
 
   @@map("users")
 }
@@ -37,6 +38,7 @@ enum UserRole {
   ANALISTA
   COBRANZA
   OPERACIONES
+  LEGAL          // CLAUDE.md §2 — recibe notificaciones de SOLICITUD_*
 }
 
 // ============================================================
@@ -748,6 +750,32 @@ enum NoteType {
 // Todas las operaciones POST/PATCH/PUT/DELETE quedan registradas
 // con usuario, IP, payload y timestamp para inspección de la CNBV.
 // ============================================================
+
+// ============================================================
+// NOTIFICACIONES IN-APP
+// CLAUDE.md §9 T9 — notificar siempre a ADMIN + ejecutivo;
+// si la acción es SOLICITUD_*, también a LEGAL.
+// ============================================================
+
+model Notificacion {
+  id          String   @id @default(cuid())
+  userId      String                          // destinatario
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tipo        String                          // ej: "SOLICITUD_CREADA", "PAGO_REGISTRADO", "CONTRATO_VENCIDO"
+  titulo      String                          // texto corto para listado
+  mensaje     String                          // descripción legible
+  entidad     String?                         // ej: "Contract", "Payment", "Quotation"
+  entidadId   String?                         // id del recurso relacionado
+  url         String?                         // deep-link al detalle (opcional)
+  leida       Boolean  @default(false)
+  leidaAt     DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, leida])
+  @@index([userId, createdAt])
+  @@index([entidad, entidadId])
+  @@map("notificaciones")
+}
 
 model Bitacora {
   id          String   @id @default(cuid())
