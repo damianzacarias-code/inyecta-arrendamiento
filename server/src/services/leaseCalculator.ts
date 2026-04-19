@@ -1,23 +1,67 @@
 /**
- * Motor de cálculo de arrendamiento.
- * Replica la lógica exacta de los Excels de Inyecta.
+ * Motor de cálculo de arrendamiento — Inyecta SOFOM
+ * ---------------------------------------------------------------
+ * Replica EXACTA de la lógica validada en el cliente
+ * (client/src/lib/cotizacion/calculos.ts + amortizacion.ts).
+ *
+ * Modelo financiero (validado al centavo contra Excels de referencia):
+ *
+ *   valorSinIVA       = precio del bien ANTES de IVA
+ *   valorConIVA       = valorSinIVA × 1.16
+ *   baseBien          = valorSinIVA + (gpsFinanciado ? gps : 0)
+ *                       ← base para comisión y depósito
+ *   comisionApertura  = baseBien × comisionAperturaPct
+ *   depositoGarantia  = baseBien × depositoGarantiaPct     (PURO: residual real)
+ *   enganche          = valorConIVA × enganchePct          (FINANCIERO)
+ *   montoFinanciado   = baseBien + (comisionFin ? comisión : 0)   ← SIN IVA del bien
+ *                       ← el que entra al PMT
+ *   fvPMT             = PURO → depositoGarantia, FIN → 0
+ *   rentaNeta         = PMT(tasaMensual, plazo, −montoFinanciado, fvPMT)
+ *
+ * IVA (CLAUDE.md §4.6/§4.8 + regla 8 — fuente de verdad: Excel Inyecta):
+ *   PURO       → IVA = renta × 16%
+ *   FINANCIERO → IVA = renta × 16%   (AMBOS gravan la renta completa,
+ *                                    según la práctica operativa de Inyecta;
+ *                                    NO solo el interés como dicta el Art 18-A LIVA).
+ *
+ * Decimal.js con precision 20 + ROUND_HALF_UP para evitar drift.
  */
+import Decimal from 'decimal.js';
+
+Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
+
+// ═══════════════════════════════════════════════════════════════════
+// Interfaces públicas (compatibilidad con quotations.ts)
+// ═══════════════════════════════════════════════════════════════════
 
 export interface LeaseParams {
   producto: 'PURO' | 'FINANCIERO';
-  valorBien: number;        // sin IVA
-  plazo: number;            // meses (12-48)
-  tasaAnual: number;        // e.g. 0.36
-  enganchePct: number;      // porcentaje sobre valor del bien con IVA
-  depositoGarantiaPct: number; // porcentaje sobre valor del bien con IVA
-  comisionAperturaPct: number; // porcentaje sobre monto financiado
+  valorBien: number;                    // SIN IVA
+  plazo: number;                        // meses (12-48)
+  tasaAnual: number;                    // e.g. 0.36
+  enganchePct: number;                  // FINANCIERO: % sobre valorConIVA
+  depositoGarantiaPct: number;          // % sobre baseBien (residual real en PURO)
+  comisionAperturaPct: number;          // % sobre baseBien
   comisionAperturaFinanciada: boolean;
-  valorResidualPct: number; // porcentaje sobre valor del bien con IVA
+  valorResidualPct: number;             // espejo de depositoGarantiaPct en PURO; 0 en FIN
   rentaInicial: number;
   gpsInstalacion: number;
   gpsFinanciado: boolean;
   seguroAnual: number;
   seguroFinanciado: boolean;
+}
+
+export interface AmortizationRow {
+  periodo: number;
+  fecha: Date;
+  saldoInicial: number;
+  intereses: number;
+  pagoCapital: number;
+  renta: number;
+  iva: number;
+  seguro: number;
+  pagoTotal: number;
+  saldoFinal: number;
 }
 
 export interface LeaseResult {
@@ -37,219 +81,224 @@ export interface LeaseResult {
   amortizacion: AmortizationRow[];
 }
 
-export interface AmortizationRow {
-  periodo: number;
-  fecha: Date;
-  saldoInicial: number;
-  intereses: number;
-  pagoCapital: number;
-  renta: number;
-  iva: number;
-  seguro: number;
-  pagoTotal: number;
-  saldoFinal: number;
-}
-
 const IVA_RATE = 0.16;
 
-/**
- * Calcula la renta mensual usando PMT (Payment) financiero.
- * Para Financiero: PMT clásico donde se amortiza todo el capital.
- * Para Puro: PMT con valor futuro (valor residual) no amortizado.
- */
-function calcularPMT(capital: number, tasaMensual: number, periodos: number, valorFuturo: number = 0): number {
-  if (tasaMensual === 0) {
-    return (capital - valorFuturo) / periodos;
+// ═══════════════════════════════════════════════════════════════════
+// PMT — amortización francesa con FV opcional
+// PMT = (P·r·(1+r)^n − FV·r) / ((1+r)^n − 1)
+// ═══════════════════════════════════════════════════════════════════
+
+function calcPMT(
+  capital: Decimal,
+  tasaMensual: Decimal,
+  periodos: number,
+  valorFuturo: Decimal,
+): Decimal {
+  if (tasaMensual.isZero()) {
+    return capital.minus(valorFuturo).dividedBy(periodos);
   }
-  const factor = Math.pow(1 + tasaMensual, periodos);
-  const pmt = (capital * tasaMensual * factor - valorFuturo * tasaMensual) / (factor - 1);
-  return pmt;
+  const factor = tasaMensual.plus(1).pow(periodos);
+  return capital
+    .times(tasaMensual)
+    .times(factor)
+    .minus(valorFuturo.times(tasaMensual))
+    .dividedBy(factor.minus(1));
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Motor principal
+// ═══════════════════════════════════════════════════════════════════
 
 export function calcularArrendamiento(params: LeaseParams): LeaseResult {
   const {
     producto, valorBien, plazo, tasaAnual,
     enganchePct, depositoGarantiaPct, comisionAperturaPct,
-    comisionAperturaFinanciada, valorResidualPct,
+    comisionAperturaFinanciada,
     rentaInicial, gpsInstalacion, gpsFinanciado,
     seguroAnual, seguroFinanciado,
   } = params;
 
-  const tasaMensual = tasaAnual / 12;
-  const valorBienIVA = valorBien * (1 + IVA_RATE);
+  // ── Montos base ───────────────────────────────────────────────────
+  const valorSinIVA = new Decimal(valorBien);
+  const valorConIVA = valorSinIVA.times(1 + IVA_RATE);
+  const gps         = new Decimal(gpsInstalacion || 0);
+  const tasaMensual = new Decimal(tasaAnual).dividedBy(12);
 
-  // Enganche y depósito sobre valor del bien con IVA
-  const enganche = valorBienIVA * enganchePct;
-  const depositoGarantia = valorBienIVA * depositoGarantiaPct;
-  const valorResidual = valorBienIVA * valorResidualPct;
+  const baseBien = valorSinIVA.plus(gpsFinanciado ? gps : 0);
 
-  // Monto base a financiar = valor del bien con IVA - enganche
-  let montoFinanciar = valorBienIVA - enganche;
+  // ── Comisión, enganche, depósito ─────────────────────────────────
+  const comisionApertura   = baseBien.times(comisionAperturaPct);
+  const comisionFinanciada = comisionAperturaFinanciada ? comisionApertura : new Decimal(0);
+  const comisionContado    = comisionAperturaFinanciada ? new Decimal(0) : comisionApertura;
 
-  // Comisión por apertura sobre el monto financiado del bien
-  const comisionApertura = montoFinanciar * comisionAperturaPct;
-  if (comisionAperturaFinanciada) {
-    montoFinanciar += comisionApertura;
-  }
+  const enganche         = producto === 'FINANCIERO'
+    ? valorConIVA.times(enganchePct)
+    : new Decimal(0);
+  const depositoGarantia = baseBien.times(depositoGarantiaPct);
 
-  // GPS financiado
-  if (gpsFinanciado && gpsInstalacion > 0) {
-    montoFinanciar += gpsInstalacion;
-  }
+  // Seguro: si financiado, NO se suma al montoFinanciado del PMT; se cobra
+  // como parte del flujo (renta fija o prorrateado). El legacy lo sumaba al
+  // monto financiado; nosotros lo mantenemos en el desembolso/total.
+  const seguro = new Decimal(seguroAnual || 0);
 
-  // Seguro financiado
-  if (seguroFinanciado && seguroAnual > 0) {
-    montoFinanciar += seguroAnual;
-  }
+  // ── Monto financiado (SIN IVA del bien) ──────────────────────────
+  const montoFinanciado = baseBien.plus(comisionFinanciada).minus(enganche);
 
-  // Calcular renta mensual
-  let rentaMensual: number;
-  if (producto === 'PURO') {
-    // Arrendamiento Puro: PMT con valor residual como valor futuro
-    rentaMensual = calcularPMT(montoFinanciar, tasaMensual, plazo, valorResidual);
-  } else {
-    // Arrendamiento Financiero: amortiza 100% del capital
-    rentaMensual = calcularPMT(montoFinanciar, tasaMensual, plazo, 0);
-  }
+  // ── PMT: FV = depósito (PURO) o 0 (FINANCIERO) ───────────────────
+  const fvPMT = producto === 'PURO' ? depositoGarantia : new Decimal(0);
+  const rentaNeta = calcPMT(montoFinanciado, tasaMensual, plazo, fvPMT);
 
-  // IVA solo sobre la porción de intereses (Art. 18-A LIVA)
-  // Para simplificar en cotización, se calcula IVA sobre la renta completa
-  // El desglose exacto se hace en la tabla de amortización
-  const ivaRenta = rentaMensual * IVA_RATE;
-  const rentaMensualIVA = rentaMensual + ivaRenta;
+  // ── IVA de la renta ──────────────────────────────────────────────
+  // CLAUDE.md §4.6 + regla 8: IVA = renta × 16% para AMBOS productos.
+  const ivaRenta        = rentaNeta.times(IVA_RATE);
+  const rentaMensualIVA = rentaNeta.plus(ivaRenta);
+  const totalRentas     = rentaMensualIVA.times(plazo);
 
-  const totalRentas = rentaMensualIVA * plazo;
+  // ── Desembolso inicial ────────────────────────────────────────────
+  const desembolsoInicial = enganche
+    .plus(depositoGarantia)
+    .plus(comisionContado)
+    .plus(gpsFinanciado ? 0 : gps)
+    .plus(seguroFinanciado ? 0 : seguro)
+    .plus(rentaInicial || 0);
 
-  // Desembolso inicial
-  let desembolsoInicial = depositoGarantia + rentaInicial;
-  if (!comisionAperturaFinanciada) {
-    desembolsoInicial += comisionApertura;
-  }
-  if (!gpsFinanciado && gpsInstalacion > 0) {
-    desembolsoInicial += gpsInstalacion;
-  }
-  desembolsoInicial += enganche;
+  const totalPagar = totalRentas.plus(desembolsoInicial);
+  const ganancia   = totalPagar.minus(valorConIVA);
 
-  const totalPagar = totalRentas + desembolsoInicial;
-  const ganancia = totalPagar - valorBienIVA;
-
-  // Generar tabla de amortización
-  const amortizacion = generarAmortizacion(
-    producto, montoFinanciar, tasaMensual, plazo,
-    rentaMensual, valorResidual, seguroAnual, seguroFinanciado,
-    new Date()
-  );
+  // ── Tabla de amortización ─────────────────────────────────────────
+  const amortizacion = generarAmortizacion({
+    producto,
+    montoFinanciado,
+    tasaMensual,
+    plazo,
+    rentaNeta,
+    fvResidual: fvPMT,
+    fechaInicio: new Date(),
+  });
 
   return {
-    valorBienIVA: round2(valorBienIVA),
-    enganche: round2(enganche),
-    depositoGarantia: round2(depositoGarantia),
-    comisionApertura: round2(comisionApertura),
-    valorResidual: round2(valorResidual),
-    montoFinanciar: round2(montoFinanciar),
-    rentaMensual: round2(rentaMensual),
-    ivaRenta: round2(ivaRenta),
-    rentaMensualIVA: round2(rentaMensualIVA),
-    totalRentas: round2(totalRentas),
-    desembolsoInicial: round2(desembolsoInicial),
-    totalPagar: round2(totalPagar),
-    ganancia: round2(ganancia),
+    valorBienIVA:     r2(valorConIVA),
+    enganche:         r2(enganche),
+    depositoGarantia: r2(depositoGarantia),
+    comisionApertura: r2(comisionApertura),
+    valorResidual:    r2(depositoGarantia), // en PURO residual = depósito; en FIN = 0 si pct=0
+    montoFinanciar:   r2(montoFinanciado),
+    rentaMensual:     r2(rentaNeta),
+    ivaRenta:         r2(ivaRenta),
+    rentaMensualIVA:  r2(rentaMensualIVA),
+    totalRentas:      r2(totalRentas),
+    desembolsoInicial: r2(desembolsoInicial),
+    totalPagar:       r2(totalPagar),
+    ganancia:         r2(ganancia),
     amortizacion,
   };
 }
 
-function generarAmortizacion(
-  producto: 'PURO' | 'FINANCIERO',
-  montoFinanciar: number,
-  tasaMensual: number,
-  plazo: number,
-  rentaMensual: number,
-  valorResidual: number,
-  seguroAnual: number,
-  seguroFinanciado: boolean,
-  fechaInicio: Date
-): AmortizationRow[] {
+// ═══════════════════════════════════════════════════════════════════
+// Tabla de amortización unificada
+// ═══════════════════════════════════════════════════════════════════
+
+interface AmortArgs {
+  producto: 'PURO' | 'FINANCIERO';
+  montoFinanciado: Decimal;
+  tasaMensual: Decimal;
+  plazo: number;
+  rentaNeta: Decimal;
+  fvResidual: Decimal;      // saldo remanente tras la última fila (PURO: depósito; FIN: 0)
+  fechaInicio: Date;
+}
+
+function generarAmortizacion(a: AmortArgs): AmortizationRow[] {
+  const { montoFinanciado, tasaMensual, plazo, rentaNeta, fvResidual, fechaInicio } = a;
   const rows: AmortizationRow[] = [];
-  let saldo = montoFinanciar;
+  let saldo = montoFinanciado;
 
   for (let i = 1; i <= plazo; i++) {
-    const fecha = new Date(fechaInicio);
-    fecha.setMonth(fecha.getMonth() + i);
+    const esUltima = i === plazo;
+    const saldoInicial = saldo;
+    const interes      = saldo.times(tasaMensual);
 
-    let intereses = 0;
-    let pagoCapital = 0;
-    let seguro = 0;
+    // Capital:
+    //  - última fila: lo que falte para dejar saldo = fvResidual
+    //  - resto: PMT − interés
+    const capital = esUltima
+      ? saldo.minus(fvResidual)
+      : rentaNeta.minus(interes);
 
-    if (producto === 'FINANCIERO') {
-      intereses = saldo * tasaMensual;
-      pagoCapital = rentaMensual - intereses;
-    } else {
-      // Puro: toda la renta es "gasto", no hay amortización de capital visible
-      intereses = saldo * tasaMensual;
-      pagoCapital = rentaMensual - intereses;
-    }
+    const nuevoSaldo = esUltima ? fvResidual : saldo.minus(capital);
 
-    const iva = rentaMensual * IVA_RATE;
-    const saldoFinal = saldo - pagoCapital;
+    // IVA = renta × 16% para AMBOS productos
+    // (CLAUDE.md §4.6/§4.8 + regla 8 — práctica operativa de Inyecta)
+    const iva = rentaNeta.times(IVA_RATE);
+
+    const pagoTotal = rentaNeta.plus(iva);
+
+    const fecha = addMeses(fechaInicio, i - 1);
 
     rows.push({
-      periodo: i,
+      periodo:      i,
       fecha,
-      saldoInicial: round2(saldo),
-      intereses: round2(intereses),
-      pagoCapital: round2(pagoCapital),
-      renta: round2(rentaMensual),
-      iva: round2(iva),
-      seguro: round2(seguro),
-      pagoTotal: round2(rentaMensual + iva + seguro),
-      saldoFinal: round2(Math.max(0, saldoFinal)),
+      saldoInicial: r2(saldoInicial),
+      intereses:    r2(interes),
+      pagoCapital:  r2(capital),
+      renta:        r2(rentaNeta),
+      iva:          r2(iva),
+      seguro:       0,
+      pagoTotal:    r2(pagoTotal),
+      saldoFinal:   r2(nuevoSaldo),
     });
 
-    saldo = saldoFinal;
+    saldo = nuevoSaldo;
   }
 
   return rows;
 }
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
+// ═══════════════════════════════════════════════════════════════════
+// Intereses moratorios
+//   Regla legacy: 0.2% diario sobre el importe vencido.
+//   Para mantener compatibilidad API aceptamos tasaAnualOrdinaria
+//   pero la ignoramos: la tasa moratoria es fija por regulación interna.
+// ═══════════════════════════════════════════════════════════════════
 
-/**
- * Calcula intereses moratorios.
- * Moratoria = 2x tasa ordinaria, calculado sobre rentas vencidas e impagadas.
- * Se acumula desde el primer día de atraso.
- */
+const TASA_MORATORIA_DIARIA = 0.002;
+
 export function calcularMoratorios(
   rentaVencida: number,
   diasAtraso: number,
-  tasaAnualOrdinaria: number
+  _tasaAnualOrdinaria: number,
 ): { moratorio: number; ivaMoratorio: number; total: number } {
-  const tasaMoratoriaAnual = tasaAnualOrdinaria * 2;
-  const tasaMoratoriaDiaria = tasaMoratoriaAnual / 360;
-  const moratorio = rentaVencida * tasaMoratoriaDiaria * diasAtraso;
-  const ivaMoratorio = moratorio * IVA_RATE;
+  const base = new Decimal(rentaVencida);
+  const moratorio    = base.times(TASA_MORATORIA_DIARIA).times(diasAtraso);
+  const ivaMoratorio = moratorio.times(IVA_RATE);
   return {
-    moratorio: round2(moratorio),
-    ivaMoratorio: round2(ivaMoratorio),
-    total: round2(moratorio + ivaMoratorio),
+    moratorio:    r2(moratorio),
+    ivaMoratorio: r2(ivaMoratorio),
+    total:        r2(moratorio.plus(ivaMoratorio)),
   };
 }
 
-/**
- * Genera las 6 opciones de riesgo para una cotización.
- */
-export function generarOpcionesRiesgo(valorBien: number, plazo: number, tasaAnual: number, gps: number, comisionPct: number) {
+// ═══════════════════════════════════════════════════════════════════
+// Opciones de riesgo (3 niveles × 2 productos = 6 escenarios)
+// ═══════════════════════════════════════════════════════════════════
+
+export function generarOpcionesRiesgo(
+  valorBien: number,
+  plazo: number,
+  tasaAnual: number,
+  gps: number,
+  comisionPct: number,
+) {
   const niveles = [
-    { nivel: 'A', nombre: 'Riesgo bajo', depositoPuro: 0.16, depositoFin: 0.16, engancheFin: 0 },
+    { nivel: 'A', nombre: 'Riesgo bajo',  depositoPuro: 0.16, depositoFin: 0.16, engancheFin: 0.00 },
     { nivel: 'B', nombre: 'Riesgo medio', depositoPuro: 0.21, depositoFin: 0.16, engancheFin: 0.05 },
-    { nivel: 'C', nombre: 'Riesgo alto', depositoPuro: 0.26, depositoFin: 0.16, engancheFin: 0.10 },
+    { nivel: 'C', nombre: 'Riesgo alto',  depositoPuro: 0.26, depositoFin: 0.16, engancheFin: 0.10 },
   ];
 
   const opciones = [];
 
   for (const nv of niveles) {
-    // Opción Puro
+    // PURO
     const puro = calcularArrendamiento({
       producto: 'PURO',
       valorBien, plazo, tasaAnual,
@@ -257,7 +306,7 @@ export function generarOpcionesRiesgo(valorBien: number, plazo: number, tasaAnua
       depositoGarantiaPct: nv.depositoPuro,
       comisionAperturaPct: comisionPct,
       comisionAperturaFinanciada: true,
-      valorResidualPct: nv.depositoPuro, // valor residual = depósito en garantía
+      valorResidualPct: nv.depositoPuro,
       rentaInicial: 0,
       gpsInstalacion: gps,
       gpsFinanciado: true,
@@ -272,7 +321,7 @@ export function generarOpcionesRiesgo(valorBien: number, plazo: number, tasaAnua
       ...puro,
     });
 
-    // Opción Financiero
+    // FINANCIERO
     const financiero = calcularArrendamiento({
       producto: 'FINANCIERO',
       valorBien, plazo, tasaAnual,
@@ -280,7 +329,7 @@ export function generarOpcionesRiesgo(valorBien: number, plazo: number, tasaAnua
       depositoGarantiaPct: nv.depositoFin,
       comisionAperturaPct: comisionPct,
       comisionAperturaFinanciada: true,
-      valorResidualPct: 0, // financiero amortiza 100%
+      valorResidualPct: 0,
       rentaInicial: 0,
       gpsInstalacion: gps,
       gpsFinanciado: true,
@@ -297,4 +346,21 @@ export function generarOpcionesRiesgo(valorBien: number, plazo: number, tasaAnua
   }
 
   return opciones;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════════════════════════
+
+function addMeses(base: Date, meses: number): Date {
+  const totalMeses = base.getMonth() + meses;
+  const yr  = base.getFullYear() + Math.floor(totalMeses / 12);
+  const mo  = ((totalMeses % 12) + 12) % 12;
+  const dia = base.getDate();
+  const maxDia = new Date(yr, mo + 1, 0).getDate();
+  return new Date(yr, mo, Math.min(dia, maxDia), 12, 0, 0);
+}
+
+function r2(d: Decimal): number {
+  return d.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
 }

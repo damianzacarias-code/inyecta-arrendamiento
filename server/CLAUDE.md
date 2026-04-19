@@ -1,0 +1,553 @@
+# CLAUDE.md — Inyecta Arrendamiento
+> Este archivo es tu fuente de verdad. Léelo completo antes de tocar cualquier código.
+> Actualízalo después de cada tarea completada.
+
+---
+
+## 1. QUÉ ES ESTE PROYECTO
+
+Sistema de arrendamiento financiero y puro para **FSMP Soluciones de Capital, S.A. de C.V., SOFOM, E.N.R.** (marca: Inyecta). Reemplaza el módulo de Créditos del sistema legado en producción (http://34.239.151.177).
+
+**Dos productos únicos:**
+- **Arrendamiento PURO** — arrendamiento operativo, el bien nunca se transfiere al cliente, valor de rescate alto (16%)
+- **Arrendamiento FINANCIERO** — arrendamiento con opción de compra simbólica (2%), amortiza todo el capital
+
+---
+
+## 2. STACK TÉCNICO
+
+```
+Frontend:   React + TypeScript + Vite  (apps/web)
+Backend:    Node.js + Express + Prisma + PostgreSQL  (server/)
+Core lib:   packages/core/  (lógica financiera compartida)
+Auth:       JWT + bcryptjs
+Roles:      ADMIN, LEGAL, OPERADOR, CONSULTOR
+UI lib:     Tailwind CSS + lucide-react
+HTTP:       @tanstack/react-query
+Router:     react-router-dom
+Precision:  decimal.js (20 dígitos, ROUND_HALF_UP) — OBLIGATORIO para dinero
+Tests:      Vitest
+```
+
+**NO cambiar:** el stack, el Layout/branding, el router.
+**Commits:** conventional commits en español. Ejemplo: `feat(cotizador): agregar generación PDF arrendamiento puro`
+
+---
+
+## 3. DESIGN TOKENS — INAMOVIBLES
+
+Extraídos del DOM del sistema de producción el 18-04-2026.
+
+```
+Sidebar background:     #184892   ← NUNCA cambiar
+Sidebar hover/header:   #112239   ← NUNCA cambiar
+Accent usuario:         #FF6600   (nombre de usuario en sidebar)
+Texto sidebar:          #FFFFFF
+Link activo:            #FF6600 con border-left 3px
+Body background:        #FFFFFF
+Botón primary:          #112239
+Fuente:                 Roboto, sans-serif
+Framework CSS:          Bootstrap (sistema legado) / Tailwind (sistema nuevo)
+Logo:                   circular, ~60px, fondo blanco
+Footer:                 "Digital Invoice 2026 © 5.3.3.9"
+```
+
+**Colores PDF (cotizaciones):**
+```
+Fila TOTAL (fondo):     #1B2A47
+Fila TOTAL (texto):     #FFFFFF bold
+Filas impares:          #F5F5F5
+Filas pares:            #FFFFFF
+Texto general:          #000000
+Tipografía PDF:         Helvetica (embebida en @react-pdf/renderer)
+Tamaño base PDF:        9pt
+```
+
+---
+
+## 4. FÓRMULAS FINANCIERAS — VERIFICADAS CONTRA EL EXCEL ORIGINAL
+
+> Todas verificadas el 18-04-2026 contra `Cotización Inyecta Arrendamiento.xlsx`
+> Producen exactamente los valores del PDF de referencia. NO modificar.
+
+### 4.1 Variables de entrada
+
+| Variable | Ejemplo | Notas |
+|---|---|---|
+| valorBienConIVA | $2,100,000.00 | Precio al cliente con IVA |
+| tasaIVA | 0.16 | 16% |
+| tasaAnual | 0.36 | **36% anual = 3% mensual** — tasa estándar Inyecta |
+| plazo | 48 | meses |
+| tasaComisionApertura | 0.05 | 5% sobre baseBien |
+| porcentajeResidual | 0.16 (PURO) / 0.02 (FIN) | ver uso abajo |
+| gpsMonto | $16,000 | si es financiado |
+| tasaMoratoriaAnual | 0.72 | 72% anual = 0.2% diario base 360 |
+
+### 4.2 Cálculos en orden estricto
+
+```
+valorSinIVA     = valorConIVA / 1.16
+                = $2,100,000 / 1.16 = $1,810,344.83 ✓
+
+baseBien        = valorSinIVA + gpsFinanciado
+                = $1,810,344.83 + $16,000 = $1,826,344.83 ✓
+
+comisionApertura = baseBien × tasaComisionApertura
+                 = $1,826,344.83 × 0.05 = $91,317.24 ✓
+
+montoFinanciadoReal = baseBien + comisionAperturaFinanciada
+                    = $1,826,344.83 + $91,317.24 = $1,917,662.07 ✓
+                    ← ESTE es el PV que entra al PMT (sin IVA del bien)
+
+depositoGarantia = baseBien × porcentajeResidual
+                 = $1,826,344.83 × 0.16 = $292,215.17 ✓
+```
+
+### 4.3 PMT — Fórmula verificada
+
+```
+PURO:       FV_pmt = depositoGarantia = $292,215.17
+            renta  = PMT(3%, 48, -1,917,662.07, 292,215.17) = $73,098.02 ✓
+
+FINANCIERO: FV_pmt = 0  (amortiza TODO el capital)
+            renta  = PMT(3%, 48, -1,917,662.07, 0) = $75,896.80 ✓
+
+PMT = (PV × r × (1+r)^n - FV × r) / ((1+r)^n - 1)
+donde r = tasaAnual / 12
+```
+
+### 4.4 Monto a financiar (DISPLAY en cotización — diferente al PMT)
+
+```
+montoTotalDisplay = valorConIVA + comisionFinanciada + gpsFinanciado + seguro - enganche
+                  = $2,100,000 + $91,317.24 + $16,000 = $2,207,317.24 ✓
+                  ← Solo para mostrar al cliente, NO entra al PMT
+```
+
+### 4.5 Residual DISPLAY (sección 4 de la cotización)
+
+```
+PURO:       valorRescate_display = montoTotalDisplay × 0.16
+                                 = $2,207,317.24 × 0.16 = $353,170.76 ✓
+            IVA rescate          = $353,170.76 × 0.16   = $56,507.32 ✓
+            Total rescate        = $353,170.76 × 1.16   = $409,678.08 ✓
+
+FINANCIERO: opcionCompra_display = montoTotalDisplay × 0.02
+                                 = $2,207,317.24 × 0.02 = $44,146.34 ✓
+            IVA opcion           = $44,146.34 × 0.16    = $7,063.42 ✓
+            Total opcion         = $44,146.34 × 1.16    = $51,209.76 ✓
+```
+
+### 4.6 IVA de la renta
+
+```
+IVA_renta = renta × 0.16
+PURO:       $73,098.02 × 0.16 = $11,695.68 ✓
+FINANCIERO: $75,896.80 × 0.16 = $12,143.49 ✓
+```
+
+### 4.7 Amortización PURO (tabla al cliente — sin desglose capital/interés)
+
+```
+Columnas: N° | Fecha | Renta | IVA | Total
+Renta = constante (PMT)
+IVA   = Renta × 0.16
+Total = Renta × 1.16
+NO hay columnas de Capital, Interés ni Saldo (arrendamiento operativo)
+```
+
+### 4.8 Amortización FINANCIERO (tabla con desglose completo)
+
+```
+Columnas: N° | Fecha | Capital | Interés | IVA | Total | Saldo
+
+Interés_n = Saldo_n × (tasaAnual/12)
+Capital_n = PMT - Interés_n   (última fila: capital = saldo exacto)
+Saldo_n   = Saldo_{n-1} - Capital_n   (última fila = 0.00 exacto)
+IVA_n     = Renta × 0.16   (= PMT × 0.16, no solo sobre interés)
+Total_n   = Capital_n + Interés_n + IVA_n
+
+Verificación período 1:
+  Saldo inicial:  $1,917,662.07
+  Interés p1:     $1,917,662.07 × 0.03 = $57,529.86 ✓
+  Capital p1:     $73,098.02 - $57,529.86 = $15,568.16 ✓
+  Saldo p1:       $1,917,662.07 - $15,568.16 = $1,902,093.91 ✓
+  Saldo p48:      $292,215.17 ✓
+```
+
+### 4.9 Moratorios
+
+```
+interesMoratorio = saldoInsoluto × (tasaMoratoriaAnual / 360) × diasAtraso
+ivaMoratorio     = interesMoratorio × 0.16
+tasaMoratoriaAnual estándar = 0.72 (72%)
+
+Prelación de pagos (orden legal México):
+  1. Intereses moratorios
+  2. IVA sobre moratorios
+  3. Intereses ordinarios
+  4. IVA sobre intereses
+  5. Capital
+```
+
+### 4.10 Pagos adicionales
+
+```
+PURO  → Rentas Prorrateadas:
+  nueva_renta = (rentas_restantes_netas_total - pago_adicional_neto) / periodos_restantes
+  Formula: =((B13-C13)*I13_SIN_IVA - Q13) / (B13-C13)
+  Donde: B13=plazo, C13=periodo actual, I13=renta con IVA, Q13=pago adicional
+
+FINANCIERO → Rentas Anticipadas:
+  nueva_renta = PMT(tasaAnual/12, periodos_restantes, -saldo_tras_abono, fv)
+  El pago reduce el saldo y se recalcula la renta
+```
+
+### 4.11 Función addMeses (bug crítico de fechas)
+
+```typescript
+// OBLIGATORIO: usar esta función en lugar de setMonth()
+// Razón: Jan 31 + 1 mes con setMonth() = Mar 3 (incorrecto)
+// Con esta función = Feb 28 (correcto)
+function addMeses(base: Date, meses: number): Date {
+  const totalMeses = base.getMonth() + meses;
+  const yr  = base.getFullYear() + Math.floor(totalMeses / 12);
+  const mo  = ((totalMeses % 12) + 12) % 12;
+  const dia = base.getDate();
+  const maxDia = new Date(yr, mo + 1, 0).getDate();
+  return new Date(yr, mo, Math.min(dia, maxDia), 12, 0, 0);
+}
+```
+
+---
+
+## 5. ESTRUCTURA DE ARCHIVOS DEL PROYECTO
+
+```
+apps/web/src/
+├── components/
+│   └── layout/
+│       ├── Layout.tsx          ← wrapper con sidebar + header + footer
+│       └── Sidebar.tsx         ← menú lateral colapsable
+├── config/
+│   └── navigation.ts           ← estructura de menús (ver sección 6)
+├── lib/
+│   ├── pdf/
+│   │   ├── tokens.ts           ← design tokens PDF
+│   │   ├── CotizacionPDF.tsx   ← componente @react-pdf/renderer cotización
+│   │   └── AmortizacionPDF.tsx ← componente @react-pdf/renderer amortización
+│   └── cotizacion/
+│       ├── calculos.ts         ← calcularCotizacion() + calcPMT()
+│       └── amortizacion.ts     ← calcAmortPuro() + calcAmortFinanciero()
+└── pages/
+    ├── cotizador/
+    │   ├── CotizadorPuro.tsx
+    │   └── CotizadorFinanciero.tsx
+    ├── crm/
+    ├── arrendatarios/
+    ├── operaciones/
+    ├── cobranza/
+    ├── estadisticas/
+    └── admin/
+
+server/src/
+├── routes/
+│   ├── operaciones.ts
+│   ├── arrendatarios.ts
+│   ├── cobranza.ts
+│   ├── pagos.ts
+│   └── notificaciones.ts
+├── middleware/
+│   └── bitacora.ts             ← audit trail PLD
+└── lib/
+    └── notificar.ts            ← notificaciones por rol
+
+packages/core/src/
+├── amortizacion.ts             ← calcularAmortFrances() con Decimal.js
+├── pagos.ts                    ← aplicarPago() con prelación legal
+└── __tests__/
+    └── calculos.test.ts
+```
+
+---
+
+## 6. ESTRUCTURA DE NAVEGACIÓN — MENÚ LATERAL
+
+Extraída del DOM de producción (61 links, 18-04-2026).
+
+```typescript
+// apps/web/src/config/navigation.ts
+export const NAV_SECTIONS = [
+  {
+    label: 'Administración', icon: 'Settings',
+    items: [
+      { label: 'Catálogos', icon: 'BookOpen', children: [
+        { label: 'Tasas de Interés',  path: '/admin/tasas' },
+        { label: 'Comisiones',        path: '/admin/comisiones' },
+        { label: 'Configuración GPS', path: '/admin/gps' },
+      ]},
+    ],
+  },
+  {
+    label: 'Arrendamiento', icon: 'FileText',
+    items: [
+      { label: 'Cotizador', icon: 'Calculator', children: [
+        { label: 'Arrendamiento Puro',       path: '/cotizador/puro' },
+        { label: 'Arrendamiento Financiero', path: '/cotizador/financiero' },
+      ]},
+      { label: 'CRM', icon: 'Users', children: [
+        { label: 'Prospectos',  path: '/crm' },
+        { label: 'Calendario',  path: '/crm/calendario' },
+      ]},
+      { label: 'Arrendatarios', icon: 'User', children: [
+        { label: 'Nuevo Arrendatario', path: '/arrendatarios/nuevo' },
+        { label: 'Visor',             path: '/arrendatarios' },
+      ]},
+      { label: 'Operaciones', icon: 'Briefcase', children: [
+        { label: 'Nueva Operación',   path: '/operaciones/nueva' },
+        { label: 'Mesa de Registros', path: '/operaciones/mesa' },
+        { label: 'Dispersión',        path: '/operaciones/dispersion' },
+      ]},
+      { label: 'Cobranza', icon: 'CreditCard', children: [
+        { label: 'Caja Receptora', path: '/cobranza' },
+        { label: 'Moratorios',     path: '/cobranza/moratorios' },
+      ]},
+      { label: 'Regulación', icon: 'Shield', children: [
+        { label: 'Círculo de Crédito', path: '/regulacion/circulo-credito' },
+      ]},
+      { label: 'Solicitudes', icon: 'FilePlus', children: [
+        { label: 'Nueva Solicitud',    path: '/solicitudes/nueva' },
+        { label: 'Carga Masiva Excel', path: '/solicitudes/excel' },
+      ]},
+      { label: 'Estadísticas', icon: 'BarChart2', children: [
+        { label: 'Portafolio Vigente', path: '/estadisticas/portafolio' },
+        { label: 'Cartera Vencida',    path: '/estadisticas/vencida' },
+        { label: 'Producción Mensual', path: '/estadisticas/produccion' },
+        { label: 'Métricas Generales', path: '/estadisticas/metricas' },
+      ]},
+    ],
+  },
+];
+```
+
+---
+
+## 7. REGLAS DE NEGOCIO — NO NEGOCIABLES
+
+1. **Decimal.js es obligatorio** para TODOS los cálculos financieros. Ningún `number` nativo para dinero.
+
+2. **El monto que entra al PMT** es `valorSinIVA + gpsFinanciado + comisionAperturaFinanciada` (sin IVA del bien). El IVA del bien no se financia en arrendamiento puro ni financiero.
+
+3. **PURO no tiene desglose Capital/Interés** en su tabla de amortización al cliente. Solo muestra Período, Fecha, Renta, IVA, Total.
+
+4. **PURO: FV del PMT = depósito en garantía** (baseBien × 16%). Ese saldo queda al final de los 48 pagos.
+
+5. **FINANCIERO: FV del PMT = 0**. La opción de compra (2%) es solo un precio simbólico que se muestra en la cotización, no entra al PMT.
+
+6. **La última fila de amortización** debe usar `capital = saldoRestante` exacto (no `PMT - interés`), para garantizar que el saldo final sea exactamente $0.00 sin residuo de redondeo.
+
+7. **addMeses()** es obligatorio para calcular fechas. Nunca usar `setMonth()` directamente.
+
+8. **IVA en tablas** = renta × 0.16 para ambos productos (per Excel de Inyecta, incluyendo FINANCIERO).
+
+9. **Pagos adicionales**: PURO usa Rentas Prorrateadas (no hay deducción de capital — solo redistribución de rentas). FINANCIERO usa Rentas Anticipadas (abona a capital, recalcula PMT).
+
+10. **Prelación legal México**: moratorios → IVA moratorios → intereses → IVA intereses → capital.
+
+11. **Tasa moratoria estándar**: 72% anual. Campo obligatorio por operación, sin default en UI.
+
+12. **Comisión de apertura**: 5% sobre (valorSinIVA + gpsFinanciado). Se puede financiar o cobrar de contado.
+
+13. **Depósito en garantía**: baseBien × porcentajeResidual. No es meses de renta — es porcentaje del bien.
+
+---
+
+## 8. REFERENCIAS IMPORTANTES
+
+### Excel de referencia (fuente de verdad para fórmulas)
+- Google Sheets: https://docs.google.com/spreadsheets/d/1emmDSujIVG8MUkjTyLWH6VQQP6l_7qi-
+- Hoja "Pagos": amortización PURO con todas las fórmulas
+- Hoja "Cotización": layout exacto del PDF
+- Hoja "Amortización Financiero": desglose por período
+
+### Sistema en producción (referencia de UX/navegación)
+- URL: http://34.239.151.177/Home/Index
+- Stack: .NET MVC + Bootstrap 4 (el nuevo sistema NO usa esto, solo como referencia visual)
+
+### PDFs de referencia (cotizaciones)
+- Ver `outputs/PROMPT_PDF_COTIZACIONES.md` — tiene el design system completo
+- PURO: sección 4 = "Valor de rescate" (16%)
+- FINANCIERO: sección 4 = "Opcion de compra" (2%)
+
+### Sistema STPB (código reutilizable)
+- Ubicación: `/sessions/.../sistema_banco/SE TU PROPIO BANCO_SISTEMA/inyecta-stpb/`
+- `packages/core/src/amortizacion.ts` — Decimal.js + addMeses() + fix última fila
+- `packages/core/src/pagos.ts` — aplicarPago() con prelación legal
+- `server/src/middleware/bitacora.ts` — audit trail PLD (adaptar)
+- `server/src/lib/notificar.ts` — notificaciones por rol (adaptar)
+
+---
+
+## 9. LISTA DE TAREAS PENDIENTES (en orden de prioridad y velocidad)
+
+Marca cada tarea como `[x]` cuando esté completada. Haz commit al terminar cada una.
+
+### FASE 1 — Core (hacer primero, son base de todo lo demás)
+
+- [ ] **T1: Bug $NaN en tabla de amortización**
+  - Archivo: `apps/web/src/pages/Cotizador.tsx` (buscar `calcAmort` o similar)
+  - Fix: aplicar fórmulas de sección 4.8 de este archivo
+  - Verificar: período 1 debe mostrar interés=$57,529.86, capital=$15,568.16
+  - Commit: `fix(cotizador): corregir NaN en tabla de amortización`
+
+- [ ] **T2: Instalar Decimal.js y migrar cálculos**
+  - `cd apps/web && npm install decimal.js`
+  - Crear `apps/web/src/lib/cotizacion/calculos.ts` con `calcPMT()` y `calcularCotizacion()`
+  - Crear `apps/web/src/lib/cotizacion/amortizacion.ts` con `calcAmortPuro()` y `calcAmortFinanciero()`
+  - Eliminar cualquier función `calcAmort` duplicada en el Cotizador
+  - Commit: `feat(core): migrar cálculos financieros a Decimal.js`
+
+- [ ] **T3: Sidebar y navegación**
+  - Crear `apps/web/src/config/navigation.ts` (ver sección 6)
+  - Crear `apps/web/src/components/layout/Sidebar.tsx` (color #184892)
+  - Crear `apps/web/src/components/layout/Layout.tsx`
+  - Actualizar `apps/web/src/App.tsx` con todas las rutas de sección 6
+  - Crear páginas stub para rutas que no existan
+  - Commit: `feat(layout): implementar sidebar con navegación completa`
+
+### FASE 2 — PDFs (la función más importante para ventas)
+
+- [ ] **T4: PDF Cotización PURO y FINANCIERO**
+  - Instalar: `cd apps/web && npm install @react-pdf/renderer`
+  - Crear `apps/web/src/lib/pdf/tokens.ts`
+  - Crear `apps/web/src/lib/pdf/CotizacionPDF.tsx`
+  - Agregar botón "Descargar Cotización" en el Cotizador
+  - Verificar contra valores de sección 4 de este archivo
+  - Commit: `feat(pdf): generación de cotización PURO y FINANCIERO`
+
+- [ ] **T5: PDF Tabla de amortización**
+  - Crear `apps/web/src/lib/pdf/AmortizacionPDF.tsx`
+  - PURO: 5 columnas (Período, Fecha, Renta, IVA, Total) — sin capital/saldo
+  - FINANCIERO: 7 columnas (+ Capital, Interés, Saldo)
+  - Agregar botón "Descargar Amortización" junto al botón de cotización
+  - Commit: `feat(pdf): tabla de amortización PURO y FINANCIERO`
+
+### FASE 3 — Calidad y compliance
+
+- [ ] **T6: Unit tests del core financiero**
+  - Archivo: `apps/web/src/lib/cotizacion/__tests__/calculos.test.ts`
+  - Test 1: `calcPMT(0.36, 48, 1917662.07, 292215.17)` → `73098.02`
+  - Test 2: `calcPMT(0.36, 48, 1917662.07, 0)` → `75896.80`
+  - Test 3: amortización PURO período 1 interés = `57529.86`
+  - Test 4: amortización FINANCIERO saldo p48 = `292215.17`
+  - Test 5: amortización FINANCIERO saldo final = `0.00` exacto
+  - Commit: `test(core): tests unitarios de cálculos financieros verificados`
+
+- [ ] **T7: Bitácora de auditoría (PLD)**
+  - Adaptar `server/src/middleware/bitacora.ts` del sistema STPB
+  - Modelo Prisma: `Bitacora { usuarioId, accion, entidad, entidadId, payloadJson, ip, createdAt }`
+  - Aplicar en todas las rutas POST/PATCH/PUT/DELETE
+  - Commit: `feat(api): bitácora de auditoría para cumplimiento PLD`
+
+### FASE 4 — Funcionalidad avanzada
+
+- [ ] **T8: Pagos adicionales en amortización**
+  - PURO: input "Pago adicional" en período N → redistribuye rentas restantes (Rentas Prorrateadas)
+  - FINANCIERO: input "Pago adicional" en período N → abona a capital, recalcula PMT (Rentas Anticipadas)
+  - Fórmulas en sección 4.10 de este archivo
+  - Commit: `feat(cotizador): pagos adicionales PURO y FINANCIERO`
+
+- [ ] **T9: Sistema de notificaciones in-app**
+  - Adaptar `server/src/lib/notificar.ts` del sistema STPB
+  - Reglas: notificar siempre a ADMIN + ejecutivo de la operación
+  - Si acción es tipo SOLICITUD_: también notificar a LEGAL
+  - Endpoint: `GET /api/notificaciones`, `PATCH /api/notificaciones/:id/leida`
+  - Commit: `feat(notif): sistema de notificaciones por rol`
+
+- [ ] **T10: Conciliación bancaria**
+  - Script Python: `scripts/conciliar_banco.py`
+  - Lee PDFs de estado de cuenta (pdfplumber)
+  - Cruza contra registros de cobranza por monto (±$5), RFC en concepto, número de contrato
+  - Output: Excel con matches y pendientes
+  - Commit: `feat(conciliacion): script de conciliación bancaria`
+
+### FASE 5 — Portales y facturación
+
+- [ ] **T11: Portal del Arrendatario**
+  - Auth separada (JWT diferente o sub-ruta `/portal`)
+  - Vista: contrato vigente, tabla de pagos, saldo pendiente, descarga de estado de cuenta
+  - Commit: `feat(portal): portal del arrendatario`
+
+- [ ] **T12: CFDI 4.0**
+  - Interface abstracta `PACService` con método `timbrar(xml: string)`
+  - Implementación con el PAC que use Inyecta
+  - Generar XML por cada renta cobrada + complemento de pago
+  - Commit: `feat(cfdi): integración CFDI 4.0 para rentas`
+
+- [ ] **T13: Reportes y estadísticas**
+  - Portafolio vigente, cartera vencida, producción mensual, métricas generales
+  - Requiere que T1-T9 estén funcionando primero
+  - Commit: `feat(stats): dashboard de reportes y estadísticas`
+
+---
+
+## 10. ESTADO ACTUAL DEL PROYECTO
+
+> Actualizar esta sección después de cada sesión de trabajo.
+
+```
+Última actualización: 18-04-2026 (sesión activa)
+
+Completado:
+  - [x] T1: Bug $NaN — IVA financiero corregido a renta×16% (regla 8) en
+        client/src/lib/cotizacion/amortizacion.ts y
+        server/src/services/leaseCalculator.ts. Última fila ahora cierra
+        en FV exacto (saldo − FV) en vez de hardcodeado a 0.
+        Verificado al centavo contra §4.6/§4.8.
+  - [ ] T2: Decimal.js
+  - [ ] T3: Sidebar/navegación
+  - [ ] T4: PDF Cotización
+  - [ ] T5: PDF Amortización
+  - [ ] T6: Unit tests
+  - [ ] T7: Bitácora
+  - [ ] T8: Pagos adicionales
+  - [ ] T9: Notificaciones
+  - [ ] T10: Conciliación bancaria
+  - [ ] T11: Portal arrendatario
+  - [ ] T12: CFDI 4.0
+  - [ ] T13: Reportes
+
+Bloqueantes conocidos:
+  - DISCREPANCIA DE RUTAS: este archivo referencia `apps/web/...` y
+    `packages/core/...`, pero la estructura real del repo es
+    `sistema/client/...` y `sistema/server/...` (sin packages/core/).
+    Las tareas se ejecutan sobre las rutas reales.
+
+Notas de la última sesión:
+  - T1: el bug "NaN" se manifestaba como una discrepancia de IVA en
+    FINANCIERO (interes×16% en vez de renta×16%). Per regla 11.5 de
+    este archivo, CLAUDE.md es la fuente de verdad → corregido en
+    cliente y servidor. Última fila de calcAmortFinanciero ahora
+    respeta FV (antes asumía 0).
+  - Logo de inyecta más grande en CotizacionPDF (95×64 → 150×100).
+```
+
+---
+
+## 11. INSTRUCCIONES PARA CLAUDE CODE
+
+1. **Al iniciar una sesión:** lee este archivo completo, luego lee el estado actual del código en los archivos relevantes para la tarea que vas a hacer. No asumas nada sobre el estado del proyecto.
+
+2. **Antes de cada tarea:** confirma en un párrafo qué entendiste y qué archivos vas a tocar.
+
+3. **Al terminar cada tarea:** haz commit, actualiza la sección 10 de este archivo marcando la tarea como completada, y confirma qué sigue.
+
+4. **Si el contexto se acerca al límite:** usa `/compact` antes de empezar la siguiente tarea. El resumen debe incluir qué tareas están completas y cuál es la siguiente.
+
+5. **Si encuentras código que contradice las fórmulas de sección 4:** las fórmulas de este archivo son la fuente de verdad. El código está mal, no las fórmulas.
+
+6. **Si encuentras lógica de amortización duplicada** en el Cotizador (calcAmort, calcPMT, etc.): elimínala y usa las funciones de `apps/web/src/lib/cotizacion/`.
+
+7. **No crear archivos de documentación** (README, CHANGELOG, etc.) a menos que se pida explícitamente.
+
+8. **Empieza siempre por T1** si no está completada — es un bug activo en producción.
