@@ -504,7 +504,12 @@ Completado:
         server/src/services/leaseCalculator.ts. Última fila ahora cierra
         en FV exacto (saldo − FV) en vez de hardcodeado a 0.
         Verificado al centavo contra §4.6/§4.8.
-  - [ ] T2: Decimal.js
+  - [x] T2: Decimal.js — motor cliente en client/src/lib/cotizacion/
+        (calculos.ts: calcPMT + calcularCotizacion;
+         amortizacion.ts: calcAmortPuro + calcAmortFinanciero).
+        Precision 20, ROUND_HALF_UP. Verificado al centavo. La carpeta
+        legacy `lib/pdfGenerator.ts` queda en uso por CotizacionDetalle.tsx
+        (será reemplazada en una limpieza posterior).
   - [ ] T3: Sidebar/navegación
   - [ ] T4: PDF Cotización
   - [ ] T5: PDF Amortización
