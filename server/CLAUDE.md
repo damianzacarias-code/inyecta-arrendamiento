@@ -516,7 +516,13 @@ Completado:
         usa la configuración. Cotizador unificado (un solo /cotizador con
         toggle PURO/FINANCIERO interno, ya no /cotizador/{puro,financiero}).
         App.tsx con todas las rutas + EnConstruccion.tsx para placeholders.
-  - [ ] T4: PDF Cotización
+  - [x] T4: PDF Cotización — réplica del Excel original de Inyecta usando
+        @react-pdf/renderer (no html→pdf). Componentes en
+        client/src/lib/pdf/{tokens.ts, CotizacionPDF.tsx}. Header fijo
+        (fecha + logo + razón social + título), footer fijo (5 notas +
+        contacto), 4 secciones zebra (Monto, Pago inicial, Renta, Residual).
+        Logo 150×100. Branch dinámico por producto (PURO: "Valor de rescate"
+        16% / FIN: "Opción de compra" 2%). Assets en client/public/brand/.
   - [ ] T5: PDF Amortización
   - [ ] T6: Unit tests
   - [ ] T7: Bitácora
