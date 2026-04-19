@@ -608,7 +608,36 @@ Completado:
         bancarios). Botón "Descargar estado de cuenta" integrado en
         Portal.tsx vía PDFDownloadLink en la vista de contrato.
         38/38 tests siguen pasando, tsc --noEmit limpio en cliente.
-  - [ ] T12: CFDI 4.0
+  - [x] T12: CFDI 4.0 — la abstracción ICfdiProvider + factory
+        getCfdiProvider() + MockCfdiProvider + rutas /api/invoices
+        ya existían. En esta sesión se cerró el spec:
+        * MockCfdiProvider ahora emite XML CFDI 4.0 conforme
+          (xmlns + xsi:schemaLocation + Exportacion="01" +
+          DomicilioFiscalReceptor + ObjetoImp por concepto +
+          TFD 1.1 con xmlns). Datos de emisor configurables vía
+          CFDI_EMISOR_RFC/NOMBRE/REGIMEN/LUGAR_EXPEDICION.
+        * Soporte de Complemento de Pago 2.0 (Pagos20):
+          - Nuevo campo opcional CfdiInvoiceInput.complementoPago
+            con fechaPago/formaPago/monto + DoctoRelacionado[].
+          - El MockProvider lo serializa (pago20:Pagos /
+            pago20:Totales / pago20:Pago / pago20:DoctoRelacionado).
+          - routes/invoices.ts construye automáticamente el
+            complemento cuando tipo='PAGO' + paymentId, ligando al
+            primer CFDI de ingreso PPD pendiente del contrato y
+            calculando saldoAnterior / importePagado / saldoInsoluto.
+            Para PAGO los importes del comprobante van en 0 (el
+            monto real vive en el complemento, per Anexo 20 SAT).
+        * FacturamaProvider: deja de ser stub. Implementación real
+          contra REST de Facturama (api / apisandbox), Basic auth
+          con FACTURAMA_USER/PASS, mapping completo a
+          NameId/CfdiType/Issuer/Receiver/Items/Complemento.Payments,
+          descarga del XML timbrado y cancelación por motivo SAT
+          (01/02/03/04). Throw helpful error si faltan credenciales.
+        * SwSapienProvider sigue como stub explícito (Inyecta usa
+          Facturama; el contrato queda preparado para enchufar SW
+          o cualquier otro PAC sin tocar las rutas).
+        * tsc --noEmit limpio (excepto el bug pre-existente de
+          jwt.sign en auth.ts, no relacionado con T12).
   - [ ] T13: Reportes
 
 Bloqueantes conocidos:

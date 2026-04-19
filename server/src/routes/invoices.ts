@@ -207,6 +207,64 @@ router.post('/facturar', requireAuth, async (req: Request, res: Response) => {
       formaPago: data.formaPago,
     };
 
+    // ─── Complemento de Pago (CFDI 2.0) ────────────────────────
+    // Cuando se factura con tipo='PAGO' a partir de un Payment registrado,
+    // construimos automáticamente el complemento Pagos20 referenciando el
+    // CFDI de ingreso PPD original. SAT exige 1 línea de DoctoRelacionado
+    // por cada factura ingreso que se está liquidando.
+    if (data.tipo === 'PAGO' && paymentWithCtx) {
+      // Buscar las facturas de ingreso PPD del mismo contrato/periodo aún con saldo
+      const facturasIngreso = await prisma.invoice.findMany({
+        where: {
+          contractId,
+          tipo: 'INGRESO',
+          status: 'TIMBRADO',
+          uuid: { not: null },
+          metodoPago: 'PPD',
+        },
+        orderBy: { fechaTimbrado: 'asc' },
+      });
+
+      if (facturasIngreso.length > 0) {
+        // Heurística simple: aplicar el pago a la primera ingreso pendiente.
+        // Para casos avanzados (pago multi-factura) el cliente puede mandar
+        // los DoctoRelacionado en req.body.documentosRelacionados (TODO).
+        const f = facturasIngreso[0];
+        const importePagado = Number(paymentWithCtx.montoTotal);
+        const saldoAnterior = Number(f.total);
+        const saldoInsoluto = Math.max(0, +(saldoAnterior - importePagado).toFixed(2));
+        cfdiInput.complementoPago = {
+          fechaPago: paymentWithCtx.fechaPago,
+          formaPago: data.formaPago,
+          monto:     importePagado,
+          moneda:    'MXN',
+          documentosRelacionados: [{
+            uuidFactura:     f.uuid!,
+            serie:           f.serie,
+            folio:           String(f.folio),
+            moneda:          'MXN',
+            numParcialidad:  1,
+            saldoAnterior,
+            importePagado,
+            saldoInsoluto,
+          }],
+        };
+        // En complementos de Pago, los conceptos llevan importe 0 y el monto
+        // real va dentro del complemento. Ajustamos:
+        cfdiInput.subtotal = 0;
+        cfdiInput.iva      = 0;
+        cfdiInput.total    = 0;
+        cfdiInput.conceptos = [{
+          descripcion:   'Pago',
+          cantidad:      1,
+          valorUnitario: 0,
+          importe:       0,
+          claveProdServ: '84111506',  // Servicios de cobro de pagos
+          claveUnidad:   'ACT',        // Actividad
+        }];
+      }
+    }
+
     const timbrado = await provider.timbrar(cfdiInput);
 
     // ─── Guardar XML en disco ───
@@ -216,6 +274,9 @@ router.post('/facturar', requireAuth, async (req: Request, res: Response) => {
     const xmlUrl = `/uploads/facturas/${xmlFilename}`;
 
     // ─── Persistir Invoice ───
+    // Para CFDI tipo PAGO los importes en el comprobante son 0 (el monto
+    // real va dentro del Complemento Pagos20). Persistimos lo que se mandó
+    // al provider para mantener consistencia con el XML guardado.
     const invoice = await prisma.invoice.create({
       data: {
         paymentId: data.paymentId || null,
@@ -227,10 +288,10 @@ router.post('/facturar', requireAuth, async (req: Request, res: Response) => {
         uuid: timbrado.uuid,
         fechaTimbrado: timbrado.fechaTimbrado,
         status: 'TIMBRADO',
-        subtotal,
-        iva,
+        subtotal: cfdiInput.subtotal,
+        iva:      cfdiInput.iva,
         retenciones: 0,
-        total,
+        total:    cfdiInput.total,
         rfcReceptor: cliente.rfc,
         nombreReceptor: nombreReceptor(cliente),
         usoCfdi: data.usoCfdi,
