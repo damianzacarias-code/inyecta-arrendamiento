@@ -638,7 +638,43 @@ Completado:
           o cualquier otro PAC sin tocar las rutas).
         * tsc --noEmit limpio (excepto el bug pre-existente de
           jwt.sign en auth.ts, no relacionado con T12).
-  - [ ] T13: Reportes
+  - [x] T13: Reportes y estadísticas — extendido reports.ts con tres
+        endpoints nuevos:
+        * GET /api/reports/portafolio — composición del vigente:
+          totales, agregaciones por producto (PURO/FIN) con %, por
+          riesgo (A/B/C), por plazo, por etapa de pipeline, y top 10
+          contratos por saldo.
+        * GET /api/reports/produccion-mensual?year — originación por
+          mes (contratos firmados o creados): mix Puro/Financiero,
+          monto colocado, renta nueva, comisiones generadas, ticket
+          promedio y plazo promedio del mes.
+        * GET /api/reports/metricas — KPIs ejecutivos en 4 bloques:
+          portafolio (vigentes/proceso/terminados/cotizaciones/
+          clientes/saldo/renta/intereses + alerta de próximos a
+          vencer 90d), mes (contratos nuevos/colocado/comisiones/
+          cobranza/moratorios/facturas), año (mismos KPIs anuales),
+          calidad (índice de morosidad con semáforo, contratos en
+          mora, moratorios cobrados, recaudado acumulado).
+        Cuatro páginas nuevas en client/src/pages/:
+        * EstadisticasPortafolio.tsx — KPIs + cards por producto/
+          riesgo + tabla por plazo + barras por etapa + top 10.
+        * EstadisticasCarteraVencida.tsx — KPIs (índice morosidad,
+          saldo vencido, críticos +90d), buckets clickables como
+          filtro, tabla con CTA "Gestionar" → /cobranza/contrato/:id.
+        * EstadisticasProduccion.tsx — selector de año, KPIs anuales,
+          mix de productos visual, gráfico de barras por mes con
+          tooltip, tabla detallada con totales en footer.
+        * EstadisticasMetricas.tsx — bloques Portafolio / Este mes /
+          Año actual / Calidad de cartera, semáforo de morosidad
+          (verde<5%, ámbar<10%, rojo≥10%), alerta de próximos a
+          vencer.
+        App.tsx reemplaza los EnConstruccion stubs por los nuevos
+        componentes. navigation.ts mantiene los 4 entradas de
+        Estadísticas + agrega "Reportes operativos" para la página
+        existente con tabs cartera/cobranza/rentabilidad.
+        38/38 tests siguen pasando, tsc --noEmit limpio en cliente y
+        en servidor (excepto el bug pre-existente de jwt.sign en
+        auth.ts).
 
 Bloqueantes conocidos:
   - DISCREPANCIA DE RUTAS: este archivo referencia `apps/web/...` y

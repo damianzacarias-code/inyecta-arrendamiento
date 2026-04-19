@@ -213,4 +213,357 @@ router.get('/rentabilidad', requireAuth, async (_req: Request, res: Response) =>
   }
 });
 
+// ─── GET /api/reports/portafolio ────────────────────────────
+// Composición del portafolio vigente: por producto, riesgo, plazo, etapa.
+router.get('/portafolio', requireAuth, async (_req: Request, res: Response) => {
+  try {
+    const contracts = await prisma.contract.findMany({
+      where: { estatus: 'VIGENTE' },
+      include: {
+        amortizacion: { select: { saldoInicial: true, periodo: true } },
+        pagos:        { select: { montoTotal: true } },
+        client:       { select: { tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true } },
+      },
+    });
+
+    // Agregaciones
+    type Bucket = { contratos: number; saldoInsoluto: number; rentaMensual: number; montoOriginal: number };
+    const init = (): Bucket => ({ contratos: 0, saldoInsoluto: 0, rentaMensual: 0, montoOriginal: 0 });
+
+    const porProducto: Record<'PURO' | 'FINANCIERO', Bucket> = { PURO: init(), FINANCIERO: init() };
+    const porRiesgo:   Record<'A' | 'B' | 'C', Bucket>      = { A: init(), B: init(), C: init() };
+    const porPlazo:    Record<string, Bucket>               = {};
+    const porEtapa:    Record<string, number>               = {};
+
+    let totalSaldo = 0;
+    let totalRenta = 0;
+    let totalMonto = 0;
+
+    contracts.forEach(c => {
+      const saldo = Number(c.amortizacion[0]?.saldoInicial || c.montoFinanciar);
+      const renta = Number(c.rentaMensual);
+      const monto = Number(c.montoFinanciar);
+
+      totalSaldo += saldo;
+      totalRenta += renta;
+      totalMonto += monto;
+
+      // Producto
+      const p = porProducto[c.producto as 'PURO' | 'FINANCIERO'];
+      p.contratos++; p.saldoInsoluto += saldo; p.rentaMensual += renta; p.montoOriginal += monto;
+
+      // Riesgo
+      const r = porRiesgo[c.nivelRiesgo as 'A' | 'B' | 'C'];
+      r.contratos++; r.saldoInsoluto += saldo; r.rentaMensual += renta; r.montoOriginal += monto;
+
+      // Plazo
+      const plazoKey = `${c.plazo}m`;
+      if (!porPlazo[plazoKey]) porPlazo[plazoKey] = init();
+      porPlazo[plazoKey].contratos++;
+      porPlazo[plazoKey].saldoInsoluto += saldo;
+      porPlazo[plazoKey].rentaMensual  += renta;
+      porPlazo[plazoKey].montoOriginal += monto;
+
+      // Etapa
+      porEtapa[c.etapa] = (porEtapa[c.etapa] || 0) + 1;
+    });
+
+    // Round
+    const roundBucket = (b: Bucket): Bucket => ({
+      contratos: b.contratos,
+      saldoInsoluto: round2(b.saldoInsoluto),
+      rentaMensual:  round2(b.rentaMensual),
+      montoOriginal: round2(b.montoOriginal),
+    });
+
+    Object.keys(porProducto).forEach(k => { porProducto[k as 'PURO' | 'FINANCIERO'] = roundBucket(porProducto[k as 'PURO' | 'FINANCIERO']); });
+    Object.keys(porRiesgo).forEach(k => { porRiesgo[k as 'A' | 'B' | 'C'] = roundBucket(porRiesgo[k as 'A' | 'B' | 'C']); });
+    Object.keys(porPlazo).forEach(k => { porPlazo[k] = roundBucket(porPlazo[k]); });
+
+    // Top 10 contratos por saldo
+    const top = contracts
+      .map(c => {
+        const cliente = c.client.tipo === 'PM'
+          ? c.client.razonSocial
+          : `${c.client.nombre || ''} ${c.client.apellidoPaterno || ''}`.trim();
+        return {
+          contractId: c.id,
+          folio: c.folio,
+          cliente: cliente || '—',
+          producto: c.producto,
+          saldoInsoluto: round2(Number(c.amortizacion[0]?.saldoInicial || c.montoFinanciar)),
+          rentaMensual:  round2(Number(c.rentaMensual)),
+          plazo: c.plazo,
+        };
+      })
+      .sort((a, b) => b.saldoInsoluto - a.saldoInsoluto)
+      .slice(0, 10);
+
+    res.json({
+      totales: {
+        contratos:        contracts.length,
+        saldoInsoluto:    round2(totalSaldo),
+        rentaMensual:     round2(totalRenta),
+        montoOriginado:   round2(totalMonto),
+      },
+      porProducto,
+      porRiesgo,
+      porPlazo,
+      porEtapa,
+      topContratos: top,
+    });
+  } catch (err) {
+    console.error('Reporte portafolio error:', err);
+    res.status(500).json({ error: 'Error al generar reporte de portafolio' });
+  }
+});
+
+// ─── GET /api/reports/produccion-mensual ────────────────────
+// Producción mensual: contratos firmados, monto colocado por mes.
+// Query: ?year=2026 (default año actual)
+router.get('/produccion-mensual', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const year = Number(req.query.year) || new Date().getFullYear();
+    const yearStart = new Date(year, 0, 1);
+    const yearEnd = new Date(year + 1, 0, 1);
+
+    const contracts = await prisma.contract.findMany({
+      where: {
+        OR: [
+          { fechaFirma: { gte: yearStart, lt: yearEnd } },
+          { fechaFirma: null, createdAt: { gte: yearStart, lt: yearEnd } },
+        ],
+      },
+      select: {
+        producto: true,
+        nivelRiesgo: true,
+        montoFinanciar: true,
+        rentaMensual: true,
+        comisionApertura: true,
+        fechaFirma: true,
+        createdAt: true,
+        plazo: true,
+      },
+    });
+
+    interface MesProduccion {
+      mes: number;
+      contratos: number;
+      contratosPuro: number;
+      contratosFinanciero: number;
+      montoColocado: number;
+      rentaMensualNueva: number;
+      comisionesGeneradas: number;
+      ticketPromedio: number;
+      plazoPromedio: number;
+    }
+
+    const meses: MesProduccion[] = Array.from({ length: 12 }, (_, m) => ({
+      mes: m + 1,
+      contratos: 0,
+      contratosPuro: 0,
+      contratosFinanciero: 0,
+      montoColocado: 0,
+      rentaMensualNueva: 0,
+      comisionesGeneradas: 0,
+      ticketPromedio: 0,
+      plazoPromedio: 0,
+    }));
+    const sumPlazo = Array(12).fill(0);
+
+    contracts.forEach(c => {
+      const fecha = c.fechaFirma || c.createdAt;
+      const m = new Date(fecha).getMonth();
+      meses[m].contratos++;
+      if (c.producto === 'PURO') meses[m].contratosPuro++;
+      else meses[m].contratosFinanciero++;
+      meses[m].montoColocado       += Number(c.montoFinanciar);
+      meses[m].rentaMensualNueva   += Number(c.rentaMensual);
+      meses[m].comisionesGeneradas += Number(c.comisionApertura);
+      sumPlazo[m] += c.plazo;
+    });
+
+    meses.forEach((m, i) => {
+      m.montoColocado       = round2(m.montoColocado);
+      m.rentaMensualNueva   = round2(m.rentaMensualNueva);
+      m.comisionesGeneradas = round2(m.comisionesGeneradas);
+      m.ticketPromedio      = m.contratos > 0 ? round2(m.montoColocado / m.contratos) : 0;
+      m.plazoPromedio       = m.contratos > 0 ? Math.round(sumPlazo[i] / m.contratos) : 0;
+    });
+
+    const totales = {
+      contratos:           meses.reduce((s, m) => s + m.contratos, 0),
+      contratosPuro:       meses.reduce((s, m) => s + m.contratosPuro, 0),
+      contratosFinanciero: meses.reduce((s, m) => s + m.contratosFinanciero, 0),
+      montoColocado:       round2(meses.reduce((s, m) => s + m.montoColocado, 0)),
+      rentaMensualNueva:   round2(meses.reduce((s, m) => s + m.rentaMensualNueva, 0)),
+      comisionesGeneradas: round2(meses.reduce((s, m) => s + m.comisionesGeneradas, 0)),
+    };
+    const ticketPromedioAnual = totales.contratos > 0
+      ? round2(totales.montoColocado / totales.contratos)
+      : 0;
+
+    res.json({ year, meses, totales, ticketPromedioAnual });
+  } catch (err) {
+    console.error('Reporte producción mensual error:', err);
+    res.status(500).json({ error: 'Error al generar reporte de producción' });
+  }
+});
+
+// ─── GET /api/reports/metricas ──────────────────────────────
+// Métricas generales (KPIs ejecutivos del negocio).
+router.get('/metricas', requireAuth, async (_req: Request, res: Response) => {
+  try {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const yearStart = new Date(now.getFullYear(), 0, 1);
+    const yearEnd = new Date(now.getFullYear() + 1, 0, 1);
+
+    const [
+      contratosVigentes,
+      contratosTerminados,
+      contratosEnProceso,
+      cotizacionesVigentes,
+      clientesActivos,
+      contratosMes,
+      contratosAnio,
+      pagosMes,
+      pagosAnio,
+      facturasMes,
+      proximosVencer,
+    ] = await Promise.all([
+      prisma.contract.findMany({
+        where: { estatus: 'VIGENTE' },
+        include: {
+          amortizacion: { select: { saldoInicial: true, pagoTotal: true, intereses: true, fechaPago: true } },
+          pagos: { select: { montoTotal: true, montoMoratorio: true, montoIVAMoratorio: true } },
+        },
+      }),
+      prisma.contract.count({ where: { estatus: 'TERMINADO' } }),
+      prisma.contract.count({ where: { estatus: 'EN_PROCESO' } }),
+      prisma.quotation.count({ where: { estado: 'VIGENTE' } }),
+      prisma.client.count({ where: { contratos: { some: { estatus: 'VIGENTE' } } } }),
+      prisma.contract.findMany({
+        where: {
+          OR: [
+            { fechaFirma: { gte: monthStart, lt: monthEnd } },
+            { fechaFirma: null, createdAt: { gte: monthStart, lt: monthEnd } },
+          ],
+        },
+        select: { montoFinanciar: true, comisionApertura: true },
+      }),
+      prisma.contract.findMany({
+        where: {
+          OR: [
+            { fechaFirma: { gte: yearStart, lt: yearEnd } },
+            { fechaFirma: null, createdAt: { gte: yearStart, lt: yearEnd } },
+          ],
+        },
+        select: { montoFinanciar: true, comisionApertura: true },
+      }),
+      prisma.payment.aggregate({
+        where: { fechaPago: { gte: monthStart, lt: monthEnd } },
+        _sum: { montoTotal: true, montoMoratorio: true, montoIVAMoratorio: true },
+      }),
+      prisma.payment.aggregate({
+        where: { fechaPago: { gte: yearStart, lt: yearEnd } },
+        _sum: { montoTotal: true, montoMoratorio: true, montoIVAMoratorio: true },
+      }),
+      prisma.invoice.count({
+        where: { createdAt: { gte: monthStart, lt: monthEnd }, status: { not: 'CANCELADO' } },
+      }),
+      prisma.contract.count({
+        where: {
+          estatus: 'VIGENTE',
+          fechaVencimiento: { gte: now, lt: new Date(now.getTime() + 90 * 86400000) },
+        },
+      }),
+    ]);
+
+    // Saldo insoluto total y mora
+    let saldoInsolutoTotal = 0;
+    let rentaMensualTotal = 0;
+    let interesProgramado = 0;
+    let totalRecaudadoVigentes = 0;
+    let totalMoratoriosCobrados = 0;
+    let contratosConMora = 0;
+    let saldoConMora = 0;
+
+    contratosVigentes.forEach(c => {
+      const saldo = Number(c.amortizacion[0]?.saldoInicial || c.montoFinanciar);
+      saldoInsolutoTotal += saldo;
+      rentaMensualTotal += Number(c.rentaMensual);
+
+      // Intereses programados
+      const interes = c.amortizacion.reduce((s, a) => s + Number(a.intereses || 0), 0);
+      interesProgramado += interes;
+
+      const recaudado = c.pagos.reduce((s, p) => s + Number(p.montoTotal), 0);
+      totalRecaudadoVigentes += recaudado;
+
+      const programado = c.amortizacion.reduce((s, a) => s + Number(a.pagoTotal), 0);
+      const moratorios = c.pagos.reduce((s, p) => s + Number(p.montoMoratorio) + Number(p.montoIVAMoratorio), 0);
+      totalMoratoriosCobrados += moratorios;
+
+      // Aproximación: vencido si recaudado < programado al día de hoy
+      const pagosHasta = c.amortizacion.filter(a => new Date(a.fechaPago) < now)
+        .reduce((s, a) => s + Number(a.pagoTotal), 0);
+      if (recaudado < pagosHasta - 0.01) {
+        contratosConMora++;
+        saldoConMora += saldo;
+      }
+    });
+
+    const sumMontoMes = contratosMes.reduce((s, c) => s + Number(c.montoFinanciar), 0);
+    const sumMontoAnio = contratosAnio.reduce((s, c) => s + Number(c.montoFinanciar), 0);
+    const sumComisionMes = contratosMes.reduce((s, c) => s + Number(c.comisionApertura), 0);
+    const sumComisionAnio = contratosAnio.reduce((s, c) => s + Number(c.comisionApertura), 0);
+
+    const indiceMorosidad = saldoInsolutoTotal > 0
+      ? round2((saldoConMora / saldoInsolutoTotal) * 100)
+      : 0;
+
+    res.json({
+      portafolio: {
+        contratosVigentes:    contratosVigentes.length,
+        contratosTerminados,
+        contratosEnProceso,
+        cotizacionesVigentes,
+        clientesActivos,
+        proximosVencer90d:    proximosVencer,
+        saldoInsolutoTotal:   round2(saldoInsolutoTotal),
+        rentaMensualTotal:    round2(rentaMensualTotal),
+        interesProgramado:    round2(interesProgramado),
+      },
+      mes: {
+        contratosNuevos:      contratosMes.length,
+        montoColocado:        round2(sumMontoMes),
+        comisionesGeneradas:  round2(sumComisionMes),
+        cobranzaTotal:        round2(Number(pagosMes._sum.montoTotal || 0)),
+        moratoriosCobrados:   round2(Number(pagosMes._sum.montoMoratorio || 0) + Number(pagosMes._sum.montoIVAMoratorio || 0)),
+        facturasEmitidas:     facturasMes,
+      },
+      anio: {
+        anio:                 now.getFullYear(),
+        contratosNuevos:      contratosAnio.length,
+        montoColocado:        round2(sumMontoAnio),
+        comisionesGeneradas:  round2(sumComisionAnio),
+        cobranzaTotal:        round2(Number(pagosAnio._sum.montoTotal || 0)),
+        moratoriosCobrados:   round2(Number(pagosAnio._sum.montoMoratorio || 0) + Number(pagosAnio._sum.montoIVAMoratorio || 0)),
+      },
+      calidad: {
+        contratosConMora,
+        saldoConMora:         round2(saldoConMora),
+        indiceMorosidadPct:   indiceMorosidad,
+        moratoriosTotalesAcum: round2(totalMoratoriosCobrados),
+        recaudadoVigentesAcum: round2(totalRecaudadoVigentes),
+      },
+    });
+  } catch (err) {
+    console.error('Reporte métricas error:', err);
+    res.status(500).json({ error: 'Error al generar métricas generales' });
+  }
+});
+
 export default router;

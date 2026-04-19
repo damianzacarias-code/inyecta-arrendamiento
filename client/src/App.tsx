@@ -24,6 +24,10 @@ import Reportes from '@/pages/Reportes';
 import Facturas from '@/pages/Facturas';
 import Portal from '@/pages/Portal';
 import Conciliacion from '@/pages/Conciliacion';
+import EstadisticasPortafolio from '@/pages/EstadisticasPortafolio';
+import EstadisticasCarteraVencida from '@/pages/EstadisticasCarteraVencida';
+import EstadisticasProduccion from '@/pages/EstadisticasProduccion';
+import EstadisticasMetricas from '@/pages/EstadisticasMetricas';
 import EnConstruccion from '@/pages/EnConstruccion';
 
 const queryClient = new QueryClient({
@@ -90,9 +94,10 @@ export default function App() {
 
               {/* ─── Reportes / Estadísticas ─── */}
               <Route path="reportes" element={<Reportes />} />
-              <Route path="estadisticas/portafolio" element={<EnConstruccion titulo="Estadísticas · Portafolio Vigente" />} />
-              <Route path="estadisticas/vencida" element={<EnConstruccion titulo="Estadísticas · Cartera Vencida" />} />
-              <Route path="estadisticas/produccion" element={<EnConstruccion titulo="Estadísticas · Producción Mensual" />} />
+              <Route path="estadisticas/portafolio" element={<EstadisticasPortafolio />} />
+              <Route path="estadisticas/vencida" element={<EstadisticasCarteraVencida />} />
+              <Route path="estadisticas/produccion" element={<EstadisticasProduccion />} />
+              <Route path="estadisticas/metricas" element={<EstadisticasMetricas />} />
 
               {/* ─── Facturación ─── */}
               <Route path="facturas" element={<Facturas />} />
