@@ -533,7 +533,11 @@ Completado:
         Cotizador.tsx integra PDFDownloadLink para ambos PDFs +
         nuevos campos descriptivos del bien (descripción, estado,
         seguro, fecha primer pago).
-  - [ ] T6: Unit tests
+  - [x] T6: Unit tests — Vitest configurado en cliente.
+        client/src/lib/cotizacion/__tests__/calculos.test.ts: 28 tests
+        verificando calcPMT, calcularCotizacion (PURO+FIN), calcAmortPuro,
+        calcAmortFinanciero (cierre exacto en FV, IVA renta×16%, fechas
+        sin bug fin-de-mes). `npm test` pasa 28/28 ✅.
   - [ ] T7: Bitácora
   - [ ] T8: Pagos adicionales
   - [ ] T9: Notificaciones
