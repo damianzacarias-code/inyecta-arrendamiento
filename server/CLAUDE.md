@@ -538,7 +538,15 @@ Completado:
         verificando calcPMT, calcularCotizacion (PURO+FIN), calcAmortPuro,
         calcAmortFinanciero (cierre exacto en FV, IVA renta×16%, fechas
         sin bug fin-de-mes). `npm test` pasa 28/28 ✅.
-  - [ ] T7: Bitácora
+  - [x] T7: Bitácora — server/src/middleware/bitacora.ts + modelo Prisma
+        `Bitacora` (usuarioId+email+rol snapshot, metodo, ruta, entidad,
+        entidadId, accion, payloadJson sanitizado, responseStatus, ip,
+        userAgent, createdAt). Mounted globalmente en /api antes de las
+        rutas: registra POST/PATCH/PUT/DELETE en res.on('finish') sin
+        bloquear la respuesta. Sanitiza password/token/secret/cardNumber.
+        Ruta GET /api/bitacora con paginación + filtros (usuarioId,
+        entidad, accion, fecha, q) restringida a ADMIN/DIRECTOR.
+        Migración: 20260419175538_add_bitacora.
   - [ ] T8: Pagos adicionales
   - [ ] T9: Notificaciones
   - [ ] T10: Conciliación bancaria

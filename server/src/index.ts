@@ -19,6 +19,8 @@ import portalRoutes from './routes/portal';
 import conciliationRoutes from './routes/conciliation';
 import searchRoutes from './routes/search';
 import alertsRoutes from './routes/alerts';
+import bitacoraRoutes from './routes/bitacora';
+import { bitacora } from './middleware/bitacora';
 
 const app = express();
 
@@ -33,6 +35,11 @@ app.use('/uploads', express.static(path.resolve(__dirname, '..', 'uploads')));
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+// Bitácora de auditoría (PLD) — registra todas las escrituras debajo de /api.
+// Se monta ANTES de las rutas para enganchar res.on('finish') de cada request;
+// el req.user ya estará poblado por requireAuth dentro de cada router.
+app.use('/api', bitacora());
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -52,6 +59,7 @@ app.use('/api/portal', portalRoutes);
 app.use('/api/conciliation', conciliationRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/alerts', alertsRoutes);
+app.use('/api/bitacora', bitacoraRoutes);
 
 // Start
 app.listen(config.port, () => {

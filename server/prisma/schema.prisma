@@ -742,3 +742,31 @@ enum NoteType {
   MANTENIMIENTO
   ALERTA
 }
+
+// ============================================================
+// BITÁCORA — auditoría PLD (cumplimiento regulatorio SOFOM)
+// Todas las operaciones POST/PATCH/PUT/DELETE quedan registradas
+// con usuario, IP, payload y timestamp para inspección de la CNBV.
+// ============================================================
+
+model Bitacora {
+  id          String   @id @default(cuid())
+  usuarioId   String?
+  usuarioEmail String?            // snapshot del email al momento del evento
+  usuarioRol  String?             // snapshot del rol
+  metodo      String              // GET, POST, PATCH, PUT, DELETE
+  ruta        String              // ej: "/api/contracts/abc123"
+  entidad     String?             // ej: "Contract", "Payment"
+  entidadId   String?             // id del recurso afectado (si aplica)
+  accion      String              // verbo descriptivo: CREATE, UPDATE, DELETE, LOGIN, etc.
+  payloadJson Json?               // body sanitizado (sin password ni tokens)
+  responseStatus Int?             // 200, 201, 4xx, 5xx
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([usuarioId])
+  @@index([entidad, entidadId])
+  @@index([createdAt])
+  @@map("bitacora")
+}
