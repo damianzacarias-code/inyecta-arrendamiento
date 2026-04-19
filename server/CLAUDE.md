@@ -547,7 +547,17 @@ Completado:
         Ruta GET /api/bitacora con paginación + filtros (usuarioId,
         entidad, accion, fecha, q) restringida a ADMIN/DIRECTOR.
         Migración: 20260419175538_add_bitacora.
-  - [ ] T8: Pagos adicionales
+  - [x] T8: Pagos adicionales — funciones core en
+        client/src/lib/cotizacion/amortizacion.ts:
+        * aplicarPagoAdicionalPuro() — Rentas Prorrateadas: redistribuye
+          el adicional neto en las rentas restantes
+          (CLAUDE.md §4.10 fórmula 1).
+        * aplicarPagoAdicionalFinanciero() — Rentas Anticipadas:
+          reduce saldo y recalcula PMT manteniendo plazo restante y FV
+          (CLAUDE.md §4.10 fórmula 2).
+        Ambas con validación de período (1..plazo-1) y de monto
+        (no excede saldo amortizable). 10 tests adicionales en la suite
+        (38/38 ✅). Wiring UI pendiente (lib lista para conectarse).
   - [ ] T9: Notificaciones
   - [ ] T10: Conciliación bancaria
   - [ ] T11: Portal arrendatario

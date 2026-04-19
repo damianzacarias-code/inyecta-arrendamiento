@@ -16,7 +16,12 @@
  */
 import { describe, it, expect } from 'vitest';
 import { calcPMT, calcularCotizacion } from '../calculos';
-import { calcAmortPuro, calcAmortFinanciero } from '../amortizacion';
+import {
+  calcAmortPuro,
+  calcAmortFinanciero,
+  aplicarPagoAdicionalPuro,
+  aplicarPagoAdicionalFinanciero,
+} from '../amortizacion';
 
 const baseInputs = {
   valorBienConIVA: 2_100_000,
@@ -224,5 +229,92 @@ describe('calcAmortFinanciero (caso real FINANCIERO — FV = 0)', () => {
     const totalCap = filas.reduce((acc, f) => acc + f.capital, 0);
     const diff = Math.abs(totalCap - 1_917_662.07);
     expect(diff).toBeLessThanOrEqual(0.05);  // 48 × $0.01 / 2 ≈ tolerancia razonable
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// T8 — Pagos adicionales
+// ═══════════════════════════════════════════════════════════════════
+
+describe('aplicarPagoAdicionalPuro (Rentas Prorrateadas)', () => {
+  // 12 períodos, renta neta $10,000 → restantes (post-período) ahorran $X
+  const original = calcAmortPuro(10_000, 12, new Date(2026, 0, 15));
+
+  it('mantiene intactas las primeras `periodo` filas', () => {
+    const out = aplicarPagoAdicionalPuro(original, 3, 6_000);
+    for (let i = 0; i < 3; i++) {
+      expect(out[i].renta).toBe(original[i].renta);
+      expect(out[i].iva).toBe(original[i].iva);
+    }
+  });
+
+  it('redistribuye el pago en las rentas restantes', () => {
+    // Con pago adicional $9,000 en período 3:
+    //   restantes = 12 - 3 = 9
+    //   total neto restante = 9 × $10,000 = $90,000
+    //   nuevo total neto = $90,000 - $9,000 = $81,000
+    //   nueva renta = $81,000 / 9 = $9,000.00
+    const out = aplicarPagoAdicionalPuro(original, 3, 9_000);
+    for (let i = 3; i < 12; i++) {
+      expect(out[i].renta).toBeCloseTo(9_000, 2);
+      expect(out[i].iva).toBeCloseTo(1_440, 2);   // 9,000 × 16%
+      expect(out[i].total).toBeCloseTo(10_440, 2);
+    }
+  });
+
+  it('rechaza pagos que excedan el saldo neto restante', () => {
+    expect(() => aplicarPagoAdicionalPuro(original, 3, 100_000)).toThrow(/excede/);
+  });
+
+  it('rechaza períodos fuera de rango', () => {
+    expect(() => aplicarPagoAdicionalPuro(original, 0, 1000)).toThrow(/fuera de rango/);
+    expect(() => aplicarPagoAdicionalPuro(original, 12, 1000)).toThrow(/fuera de rango/);
+  });
+});
+
+describe('aplicarPagoAdicionalFinanciero (Rentas Anticipadas)', () => {
+  // Caso de referencia: monto $1,917,662.07, 36% anual, 48 meses, FV=0
+  const original = calcAmortFinanciero(
+    1_917_662.07, 0.36, 48, 0, new Date(2026, 0, 15),
+  );
+
+  it('mantiene intactas las primeras `periodo` filas', () => {
+    const out = aplicarPagoAdicionalFinanciero(original, 6, 50_000, 0.36, 0);
+    for (let i = 0; i < 6; i++) {
+      expect(out[i]).toEqual(original[i]);
+    }
+  });
+
+  it('reduce el saldo y recalcula el PMT', () => {
+    // Abono de $100,000 al final del período 12
+    const out = aplicarPagoAdicionalFinanciero(original, 12, 100_000, 0.36, 0);
+    // El nuevo PMT debe ser MENOR que el original (mismo plazo restante,
+    // saldo reducido)
+    const pmtOriginal = original[20].capital + original[20].interes; // capital+interes = renta
+    const pmtNuevo    = out[20].capital + out[20].interes;
+    expect(pmtNuevo).toBeLessThan(pmtOriginal);
+  });
+
+  it('saldo final = 0 exacto tras pago adicional', () => {
+    const out = aplicarPagoAdicionalFinanciero(original, 12, 100_000, 0.36, 0);
+    expect(out[47].saldo).toBe(0);
+  });
+
+  it('rechaza pagos que excedan el saldo amortizable', () => {
+    // El saldo en p1 es ~$1,899,295. Un abono de $5M no es válido.
+    expect(() =>
+      aplicarPagoAdicionalFinanciero(original, 1, 5_000_000, 0.36, 0),
+    ).toThrow(/excede/);
+  });
+
+  it('rechaza períodos fuera de rango', () => {
+    expect(() => aplicarPagoAdicionalFinanciero(original, 0, 1000, 0.36, 0)).toThrow(/fuera de rango/);
+    expect(() => aplicarPagoAdicionalFinanciero(original, 48, 1000, 0.36, 0)).toThrow(/fuera de rango/);
+  });
+
+  it('IVA de las nuevas filas = nuevo PMT × 16%', () => {
+    const out = aplicarPagoAdicionalFinanciero(original, 12, 100_000, 0.36, 0);
+    const pmtNuevo = out[20].capital + out[20].interes;
+    expect(out[20].iva).toBeCloseTo(pmtNuevo * 0.16, 1);
   });
 });

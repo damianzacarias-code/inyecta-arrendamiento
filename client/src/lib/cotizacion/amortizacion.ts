@@ -163,3 +163,138 @@ function formatFecha(d: Date): string {
 function r2(d: Decimal): number {
   return d.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// T8 — Pagos adicionales
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * PURO → "Rentas Prorrateadas"
+ * ----------------------------------------------------------------
+ * El cliente entrega un pago adicional NETO (sin IVA) en el período
+ * `periodo`. NO reduce capital (no hay capital en PURO), solo se
+ * redistribuye en las rentas restantes.
+ *
+ * Fórmula CLAUDE.md §4.10:
+ *   nueva_renta_neta =
+ *     ( (plazo - periodo) × renta_neta_actual − pago_adicional_neto )
+ *     / (plazo - periodo)
+ *
+ * @returns una nueva tabla PURO completa: las primeras `periodo` filas
+ *          conservan la renta original; las restantes usan la nueva renta.
+ */
+export function aplicarPagoAdicionalPuro(
+  filasOriginales: FilaAmortPuro[],
+  periodo: number,
+  pagoAdicionalNeto: number,
+  tasaIVA = 0.16,
+): FilaAmortPuro[] {
+  if (periodo < 1 || periodo >= filasOriginales.length) {
+    throw new Error(`Período ${periodo} fuera de rango [1..${filasOriginales.length - 1}]`);
+  }
+  const restantes = filasOriginales.length - periodo;
+  const rentaActual = new Decimal(filasOriginales[periodo - 1].renta);
+  const adicional   = new Decimal(pagoAdicionalNeto);
+
+  // Total neto que faltaba pagar después del período N (sin contar el N mismo)
+  const totalNetoRestante = rentaActual.times(restantes);
+  const nuevoTotalNeto    = totalNetoRestante.minus(adicional);
+  if (nuevoTotalNeto.isNegative()) {
+    throw new Error(
+      `Pago adicional ($${pagoAdicionalNeto}) excede el saldo neto restante ($${totalNetoRestante})`,
+    );
+  }
+  const nuevaRenta = nuevoTotalNeto.dividedBy(restantes);
+  const nuevaIVA   = nuevaRenta.times(tasaIVA);
+  const nuevoTotal = nuevaRenta.plus(nuevaIVA);
+
+  return filasOriginales.map((f, idx) => {
+    if (idx < periodo) return f;
+    return {
+      ...f,
+      renta: r2(nuevaRenta),
+      iva:   r2(nuevaIVA),
+      total: r2(nuevoTotal),
+    };
+  });
+}
+
+/**
+ * FINANCIERO → "Rentas Anticipadas"
+ * ----------------------------------------------------------------
+ * El cliente abona un pago adicional al capital en el período `periodo`.
+ * El saldo se reduce y se recalcula el PMT para los períodos restantes
+ * conservando la misma tasa.
+ *
+ * Fórmula CLAUDE.md §4.10:
+ *   saldo_tras_abono = saldo_al_final_del_periodo − pago_adicional
+ *   nueva_renta = PMT(tasa/12, periodos_restantes, saldo_tras_abono, fv)
+ *
+ * @param filasOriginales   tabla generada por calcAmortFinanciero
+ * @param periodo           período en el que se hace el abono (1..plazo-1)
+ * @param pagoAdicional     monto del abono extra a capital
+ * @param tasaAnual         misma tasa que se usó en el PMT original
+ * @param fvFinal           FV objetivo al final (usual: 0 en FIN)
+ * @param tasaIVA           default 0.16
+ * @returns nueva tabla con las filas a partir de `periodo+1` recalculadas.
+ */
+export function aplicarPagoAdicionalFinanciero(
+  filasOriginales: FilaAmortFinanciero[],
+  periodo: number,
+  pagoAdicional: number,
+  tasaAnual: number,
+  fvFinal = 0,
+  tasaIVA = 0.16,
+): FilaAmortFinanciero[] {
+  if (periodo < 1 || periodo >= filasOriginales.length) {
+    throw new Error(`Período ${periodo} fuera de rango [1..${filasOriginales.length - 1}]`);
+  }
+  const r        = new Decimal(tasaAnual).dividedBy(12);
+  const FV       = new Decimal(fvFinal);
+  const restantes = filasOriginales.length - periodo;
+
+  // Saldo al cierre del período donde ocurre el abono
+  const saldoOriginal  = new Decimal(filasOriginales[periodo - 1].saldo);
+  const abono          = new Decimal(pagoAdicional);
+  const saldoTrasAbono = saldoOriginal.minus(abono);
+  if (saldoTrasAbono.lt(FV)) {
+    throw new Error(
+      `Pago adicional ($${pagoAdicional}) excede el saldo amortizable (saldo $${saldoOriginal} − fv $${fvFinal})`,
+    );
+  }
+
+  // Nuevo PMT con saldo reducido y plazo remanente
+  const factor = r.plus(1).pow(restantes);
+  const nuevoPMT = saldoTrasAbono
+    .times(r)
+    .times(factor)
+    .minus(FV.times(r))
+    .dividedBy(factor.minus(1));
+
+  // IVA constante = nuevo PMT × tasaIVA (CLAUDE.md regla 8)
+  const ivaConst = nuevoPMT.times(tasaIVA);
+
+  // Reconstruimos las filas a partir de `periodo+1`
+  const nuevas: FilaAmortFinanciero[] = filasOriginales.slice(0, periodo);
+  let saldo = saldoTrasAbono;
+  for (let i = periodo + 1; i <= filasOriginales.length; i++) {
+    const esUltima  = i === filasOriginales.length;
+    const interes   = saldo.times(r);
+    const capital   = esUltima ? saldo.minus(FV) : nuevoPMT.minus(interes);
+    const nuevoSaldo = esUltima ? FV              : saldo.minus(capital);
+    const total     = capital.plus(interes).plus(ivaConst);
+
+    // Conservamos la fecha original (no cambia el calendario, solo los montos)
+    nuevas.push({
+      periodo: i,
+      fecha:   filasOriginales[i - 1].fecha,
+      capital: r2(capital),
+      interes: r2(interes),
+      iva:     r2(ivaConst),
+      total:   r2(total),
+      saldo:   r2(nuevoSaldo),
+    });
+    saldo = nuevoSaldo;
+  }
+  return nuevas;
+}
