@@ -691,12 +691,50 @@ Notas de la última sesión:
   - Logo de inyecta más grande en CotizacionPDF (95×64 → 150×100).
   - T9: el enum UserRole no incluía LEGAL (sólo ADMIN/DIRECTOR/
     ANALISTA/COBRANZA/OPERACIONES). Se agregó LEGAL para honrar la
-    regla de SOLICITUD_* del CLAUDE.md §9 T9. Wiring UI (campana,
-    listado, polling de /contador) pendiente — la API ya está lista.
-    Pendiente también: enganchar `notificar()` desde los handlers
-    relevantes (POST /api/contracts → "SOLICITUD_CREADA",
-    PATCH stage → "ETAPA_AVANZADA", POST /api/cobranza/payments →
-    "PAGO_REGISTRADO", etc.) en una pasada posterior.
+    regla de SOLICITUD_* del CLAUDE.md §9 T9.
+
+Sesión de pulido (post-T13):
+  - D · fix(auth): jwt.sign tipado con SignOptions
+    (server/src/routes/auth.ts) — usa
+    `expiresIn: config.jwtExpiresIn as SignOptions['expiresIn']`,
+    cierra el bug pre-existente que aparecía en `tsc --noEmit`.
+  - B · feat(notif): engachar notificar() en handlers operativos
+    — contracts (POST → SOLICITUD_CREADA, PUT advance →
+    ETAPA_AVANZADA / CONTRATO_ACTIVADO / CONTRATO_RESCINDIDO),
+    cobranza (/pay → PAGO_REGISTRADO + PAGO_PARCIAL si aplica;
+    /pay-advance → PAGO_ADELANTADO; /pay-extra → ABONO_CAPITAL),
+    quotations (estado → COTIZACION_APROBADA/RECHAZADA;
+    convert → SOLICITUD_CREADA del nuevo contrato).
+    Helpers `nombreCliente()` y `fmt$()` aceptan Decimal de Prisma.
+  - A · feat(notif): UI de campana de notificaciones con polling
+    — client/src/components/NotificationBell.tsx + wired en
+    Layout.tsx topbar. Badge naranja con conteo, polling 30s a
+    /api/notificaciones/contador, panel desplegable con últimas
+    15, click marca como leída + navega al url, "leer todas",
+    eliminar individual, cerrar con click fuera o ESC.
+  - C · feat(cotizador): UI de pagos adicionales en Cotizador
+    — nuevo panel "Pagos Adicionales" en sidebar, permite agregar
+    múltiples pagos (período + monto), aplica
+    aplicarPagoAdicionalPuro/Financiero (T8 lib ya testeada).
+    Resumen de impacto: renta original vs nueva renta + ahorro
+    proyectado. Tabla de amortización se reemplaza por la
+    recalculada cuando hay pagos activos; períodos con pago
+    marcados en ámbar con ★.
+  - E · feat(bitacora): visor UI de auditoría
+    — nueva ruta /admin/bitacora (ADMIN/DIRECTOR), tabla paginada
+    con filtros (búsqueda libre debounced, entidad, acción,
+    rango de fechas), badges por método HTTP y status.
+    Click en fila abre panel lateral con detalle completo +
+    payload JSON sanitizado en monoespaciado.
+  - H · chore(pdf): retirar pdfGenerator legacy
+    — CotizacionDetalle migrado a CotizacionPDF/AmortizacionPDF
+    (motor verificado al centavo). Eliminado client/src/lib/
+    pdfGenerator.ts. jspdf se conserva porque estadoCuentaPDF.ts
+    y reciboPDF.ts aún lo usan (limpieza fuera de scope).
+
+Limpieza post-T13: secuencia D→B→A→C→E→H ejecutada en una sola
+pasada autónoma. tsc --noEmit limpio + 38/38 tests pasan después
+de cada commit.
 ```
 
 ---
