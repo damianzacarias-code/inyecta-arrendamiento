@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import api from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import {
@@ -7,6 +7,26 @@ import {
 } from 'lucide-react';
 
 type Tab = 'cartera' | 'cobranza' | 'rentabilidad';
+
+/**
+ * Resuelve el tab activo en función del último segmento de la URL.
+ *   /reportes                    → cartera   (default)
+ *   /reportes/cartera-vencida    → cartera
+ *   /reportes/cobranza           → cobranza
+ *   /reportes/rentabilidad       → rentabilidad
+ */
+function tabFromPath(pathname: string): Tab {
+  const seg = pathname.split('/').pop() || '';
+  if (seg === 'cobranza')      return 'cobranza';
+  if (seg === 'rentabilidad')  return 'rentabilidad';
+  return 'cartera';
+}
+
+const TAB_PATH: Record<Tab, string> = {
+  cartera:      '/reportes/cartera-vencida',
+  cobranza:     '/reportes/cobranza',
+  rentabilidad: '/reportes/rentabilidad',
+};
 
 interface CarteraFila {
   contractId: string;
@@ -97,8 +117,12 @@ function downloadCSV(filename: string, rows: (string | number)[][]) {
   URL.revokeObjectURL(url);
 }
 
-export default function Reportes() {
-  const [tab, setTab] = useState<Tab>('cartera');
+export default function ReportesHub() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const tab = tabFromPath(location.pathname);
+  const setTab = (t: Tab) => navigate(TAB_PATH[t]);
+
   const [cartera, setCartera] = useState<CarteraData | null>(null);
   const [cobranza, setCobranza] = useState<CobranzaData | null>(null);
   const [rentabilidad, setRentabilidad] = useState<RentabilidadData | null>(null);
@@ -131,7 +155,7 @@ export default function Reportes() {
       {/* Tabs */}
       <div className="flex gap-2 mb-6 border-b border-gray-200">
         {([
-          { id: 'cartera', label: 'Cartera Activa', icon: Wallet },
+          { id: 'cartera', label: 'Cartera Vencida', icon: Wallet },
           { id: 'cobranza', label: 'Cobranza Mensual', icon: BarChart3 },
           { id: 'rentabilidad', label: 'Rentabilidad', icon: TrendingUp },
         ] as const).map(t => {

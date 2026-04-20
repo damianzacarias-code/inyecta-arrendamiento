@@ -47,7 +47,7 @@ const MES_ACTUAL = new Intl.DateTimeFormat('es-MX', { month: 'long', year: 'nume
   .format(new Date())
   .replace(/^./, c => c.toUpperCase());
 
-export default function EstadisticasMetricas() {
+export default function ReportesMetricas() {
   const [data, setData] = useState<MetricasData | null>(null);
   const [loading, setLoading] = useState(true);
 

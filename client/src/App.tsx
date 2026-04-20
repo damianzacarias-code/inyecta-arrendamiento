@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from '@/context/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -20,15 +20,15 @@ import Seguros from '@/pages/Seguros';
 import GPS from '@/pages/GPS';
 import Documentos from '@/pages/Documentos';
 import CirculoCredito from '@/pages/CirculoCredito';
-import Reportes from '@/pages/Reportes';
 import Facturas from '@/pages/Facturas';
 import Portal from '@/pages/Portal';
 import Conciliacion from '@/pages/Conciliacion';
-import EstadisticasPortafolio from '@/pages/EstadisticasPortafolio';
-import EstadisticasCarteraVencida from '@/pages/EstadisticasCarteraVencida';
-import EstadisticasProduccion from '@/pages/EstadisticasProduccion';
-import EstadisticasMetricas from '@/pages/EstadisticasMetricas';
-import Bitacora from '@/pages/Bitacora';
+// ─── Reportes (antes dispersos en Estadisticas*, Reportes, Bitacora) ──
+import ReportesHub from '@/pages/reportes/Hub';
+import ReportesPortafolio from '@/pages/reportes/Portafolio';
+import ReportesProduccion from '@/pages/reportes/Produccion';
+import ReportesMetricas from '@/pages/reportes/Metricas';
+import ReportesBitacora from '@/pages/reportes/Bitacora';
 import EnConstruccion from '@/pages/EnConstruccion';
 
 const queryClient = new QueryClient({
@@ -81,25 +81,34 @@ export default function App() {
               <Route path="documentos" element={<Documentos />} />
               <Route path="circulo-credito" element={<CirculoCredito />} />
 
-              {/* ─── Administración / Catálogos ─── */}
+              {/* ─── Administración / Catálogos (stubs, fuera del menú) ─── */}
               <Route path="admin/tasas" element={<EnConstruccion titulo="Administración · Tasas de Interés" />} />
               <Route path="admin/comisiones" element={<EnConstruccion titulo="Administración · Comisiones" />} />
-              <Route path="admin/bitacora" element={<Bitacora />} />
 
-              {/* ─── CRM ─── */}
+              {/* ─── CRM (stubs, fuera del menú) ─── */}
               <Route path="crm" element={<EnConstruccion titulo="CRM · Prospectos" />} />
               <Route path="crm/calendario" element={<EnConstruccion titulo="CRM · Calendario de Actividades" />} />
 
-              {/* ─── Solicitudes ─── */}
+              {/* ─── Solicitudes (stubs, fuera del menú) ─── */}
               <Route path="solicitudes/nueva" element={<EnConstruccion titulo="Solicitudes · Nueva" />} />
               <Route path="solicitudes/excel" element={<EnConstruccion titulo="Solicitudes · Carga Masiva" />} />
 
-              {/* ─── Reportes / Estadísticas ─── */}
-              <Route path="reportes" element={<Reportes />} />
-              <Route path="estadisticas/portafolio" element={<EstadisticasPortafolio />} />
-              <Route path="estadisticas/vencida" element={<EstadisticasCarteraVencida />} />
-              <Route path="estadisticas/produccion" element={<EstadisticasProduccion />} />
-              <Route path="estadisticas/metricas" element={<EstadisticasMetricas />} />
+              {/* ─── Reportes unificados (hub + vistas dedicadas) ─── */}
+              <Route path="reportes"                   element={<ReportesHub />} />
+              <Route path="reportes/cartera-vencida"   element={<ReportesHub />} />
+              <Route path="reportes/cobranza"          element={<ReportesHub />} />
+              <Route path="reportes/rentabilidad"      element={<ReportesHub />} />
+              <Route path="reportes/portafolio"        element={<ReportesPortafolio />} />
+              <Route path="reportes/produccion"        element={<ReportesProduccion />} />
+              <Route path="reportes/metricas"          element={<ReportesMetricas />} />
+              <Route path="reportes/bitacora"          element={<ReportesBitacora />} />
+
+              {/* ─── Redirects legacy (/estadisticas/* y /admin/bitacora) ─── */}
+              <Route path="estadisticas/portafolio" element={<Navigate to="/reportes/portafolio"      replace />} />
+              <Route path="estadisticas/vencida"    element={<Navigate to="/reportes/cartera-vencida" replace />} />
+              <Route path="estadisticas/produccion" element={<Navigate to="/reportes/produccion"      replace />} />
+              <Route path="estadisticas/metricas"   element={<Navigate to="/reportes/metricas"        replace />} />
+              <Route path="admin/bitacora"          element={<Navigate to="/reportes/bitacora"        replace />} />
 
               {/* ─── Facturación ─── */}
               <Route path="facturas" element={<Facturas />} />

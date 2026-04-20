@@ -43,7 +43,7 @@ function exportCSV(filename: string, rows: (string | number)[][]) {
   URL.revokeObjectURL(url);
 }
 
-export default function EstadisticasPortafolio() {
+export default function ReportesPortafolio() {
   const [data, setData] = useState<PortafolioData | null>(null);
   const [loading, setLoading] = useState(true);
 

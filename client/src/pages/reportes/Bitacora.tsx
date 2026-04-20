@@ -93,7 +93,7 @@ function fmtDate(iso: string): string {
   });
 }
 
-export default function Bitacora() {
+export default function ReportesBitacora() {
   const { user } = useAuth();
   const allowed = user?.rol === 'ADMIN' || user?.rol === 'DIRECTOR';
 

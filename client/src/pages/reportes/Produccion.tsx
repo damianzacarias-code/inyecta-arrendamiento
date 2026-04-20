@@ -47,7 +47,7 @@ function exportCSV(filename: string, rows: (string | number)[][]) {
   URL.revokeObjectURL(url);
 }
 
-export default function EstadisticasProduccion() {
+export default function ReportesProduccion() {
   const [data, setData] = useState<ProduccionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [year, setYear] = useState(new Date().getFullYear());

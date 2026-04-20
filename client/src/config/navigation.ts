@@ -1,30 +1,34 @@
 /**
  * Configuración del menú lateral — Inyecta Arrendamiento
  * ---------------------------------------------------------------
- * Replica la estructura jerárquica del sistema legacy de créditos
- * (Administración / Créditos / Inversionistas) adaptada al contexto
- * de arrendamiento puro y financiero. Tres niveles de profundidad:
+ * Seis secciones planas, como máximo dos niveles de profundidad
+ * (Sección → Item). Se eliminaron ocho entradas que apuntaban a
+ * `<EnConstruccion>` (CRM, Solicitudes, Administración, etc.) y se
+ * unificó el grupo de Estadísticas/Reportes bajo `/reportes/*`.
  *
- *   Sección (nivel 0)  →  Item (nivel 1)  →  Subitem (nivel 2)
- *
- * Los íconos se referencian por nombre del set lucide-react y se
- * resuelven dinámicamente en el Sidebar para evitar árboles enormes
- * de imports.
+ * Las rutas legacy (`/estadisticas/*`, `/admin/bitacora`) se mantienen
+ * disponibles con redirect desde `App.tsx` para no romper bookmarks.
  */
 import type { LucideIcon } from 'lucide-react';
 import {
-  Settings,
-  BookOpen,
-  FileText,
+  LayoutDashboard,
   Calculator,
+  FileText,
   Users,
   User,
-  Briefcase,
-  CreditCard,
-  Shield,
   FilePlus,
-  BarChart2,
-  LayoutDashboard,
+  FolderOpen,
+  Briefcase,
+  Shield,
+  MapPin,
+  CreditCard,
+  Banknote,
+  Receipt,
+  FileBarChart,
+  Wallet,
+  AlertTriangle,
+  TrendingUp,
+  Activity,
   ScrollText,
 } from 'lucide-react';
 
@@ -55,104 +59,60 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    label: 'Administración',
-    icon:  Settings,
+    label: 'Cotizaciones',
+    icon:  Calculator,
     items: [
-      {
-        label: 'Catálogos',
-        icon:  BookOpen,
-        children: [
-          { label: 'Tasas de Interés',  path: '/admin/tasas' },
-          { label: 'Comisiones',        path: '/admin/comisiones' },
-          { label: 'Configuración GPS', path: '/gps' },
-        ],
-      },
-      { label: 'Bitácora', icon: ScrollText, path: '/admin/bitacora' },
+      { label: 'Nueva cotización', icon: FilePlus, path: '/cotizador'    },
+      { label: 'Listado',          icon: FileText, path: '/cotizaciones' },
     ],
   },
   {
-    label: 'Arrendamiento',
-    icon:  FileText,
+    label: 'Arrendatarios',
+    icon:  Users,
     items: [
-      {
-        label: 'Cotizador',
-        icon:  Calculator,
-        children: [
-          { label: 'Nueva Cotización', path: '/cotizador' },
-          { label: 'Cotizaciones',     path: '/cotizaciones' },
-        ],
-      },
-      {
-        label: 'CRM',
-        icon:  Users,
-        children: [
-          { label: 'Prospectos', path: '/crm' },
-          { label: 'Calendario', path: '/crm/calendario' },
-        ],
-      },
-      {
-        label: 'Arrendatarios',
-        icon:  User,
-        children: [
-          { label: 'Nuevo Arrendatario', path: '/clientes/nuevo' },
-          { label: 'Visor',              path: '/clientes' },
-        ],
-      },
-      {
-        label: 'Operaciones',
-        icon:  Briefcase,
-        children: [
-          { label: 'Nueva Operación',    path: '/contratos/nuevo' },
-          { label: 'Mesa de Registros',  path: '/contratos' },
-          { label: 'Dispersión',         path: '/operaciones/dispersion' },
-        ],
-      },
-      {
-        label: 'Cobranza',
-        icon:  CreditCard,
-        children: [
-          { label: 'Caja Receptora', path: '/cobranza' },
-          { label: 'Conciliación',   path: '/conciliacion' },
-          { label: 'Facturas',       path: '/facturas' },
-          { label: 'Moratorios',     path: '/cobranza/moratorios' },
-        ],
-      },
-      {
-        label: 'Regulación',
-        icon:  Shield,
-        children: [
-          { label: 'Círculo de Crédito', path: '/circulo-credito' },
-          { label: 'Seguros',            path: '/seguros' },
-          { label: 'Documentos',         path: '/documentos' },
-        ],
-      },
-      {
-        label: 'Solicitudes',
-        icon:  FilePlus,
-        children: [
-          { label: 'Nueva Solicitud',    path: '/solicitudes/nueva' },
-          { label: 'Carga Masiva Excel', path: '/solicitudes/excel' },
-        ],
-      },
-      {
-        label: 'Estadísticas',
-        icon:  BarChart2,
-        children: [
-          { label: 'Portafolio Vigente', path: '/estadisticas/portafolio' },
-          { label: 'Cartera Vencida',    path: '/estadisticas/vencida' },
-          { label: 'Producción Mensual', path: '/estadisticas/produccion' },
-          { label: 'Métricas Generales', path: '/estadisticas/metricas' },
-          { label: 'Reportes operativos', path: '/reportes' },
-        ],
-      },
+      { label: 'Nuevo arrendatario', icon: User,       path: '/clientes/nuevo'  },
+      { label: 'Listado',            icon: Users,      path: '/clientes'        },
+      { label: 'Documentos',         icon: FolderOpen, path: '/documentos'      },
+      { label: 'Círculo de Crédito', icon: Shield,     path: '/circulo-credito' },
+    ],
+  },
+  {
+    label: 'Operaciones',
+    icon:  Briefcase,
+    items: [
+      { label: 'Nueva operación',    icon: FilePlus,  path: '/contratos/nuevo' },
+      { label: 'Mesa de registros',  icon: Briefcase, path: '/contratos'       },
+      { label: 'Seguros',            icon: Shield,    path: '/seguros'         },
+      { label: 'GPS',                icon: MapPin,    path: '/gps'             },
+    ],
+  },
+  {
+    label: 'Cobranza',
+    icon:  CreditCard,
+    items: [
+      { label: 'Caja receptora',        icon: CreditCard, path: '/cobranza'      },
+      { label: 'Conciliación bancaria', icon: Banknote,   path: '/conciliacion'  },
+      { label: 'Facturas',              icon: Receipt,    path: '/facturas'      },
+    ],
+  },
+  {
+    label: 'Reportes',
+    icon:  FileBarChart,
+    items: [
+      { label: 'Portafolio vigente',  icon: Wallet,         path: '/reportes/portafolio'      },
+      { label: 'Cartera vencida',     icon: AlertTriangle,  path: '/reportes/cartera-vencida' },
+      { label: 'Producción mensual',  icon: TrendingUp,     path: '/reportes/produccion'      },
+      { label: 'Métricas generales',  icon: Activity,       path: '/reportes/metricas'        },
+      { label: 'Reportes operativos', icon: FileBarChart,   path: '/reportes'                 },
+      { label: 'Bitácora',            icon: ScrollText,     path: '/reportes/bitacora'        },
     ],
   },
 ];
 
 /**
  * Retorna la sección + item abiertos por defecto según la ruta actual.
- * Permite que al navegar directo a /cotizador/puro el acordeón se abra
- * en "Arrendamiento → Cotizador" automáticamente.
+ * Permite que al navegar directo a /cotizador el acordeón se abra
+ * en "Cotizaciones → Nueva cotización" automáticamente.
  */
 export function findActiveBranch(pathname: string): { section?: string; item?: string } {
   for (const section of NAV_SECTIONS) {
