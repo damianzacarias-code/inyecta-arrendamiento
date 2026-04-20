@@ -21,6 +21,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import CommandPalette from './CommandPalette';
+import NotificationBell from './NotificationBell';
 import { NAV_SECTIONS, findActiveBranch } from '@/config/navigation';
 
 const SIDEBAR_BG     = '#184892';
@@ -373,22 +374,25 @@ export default function Layout() {
             <Menu size={18} />
           </button>
           <span>{user?.nombre} {user?.apellidos} <span style={{ opacity: 0.6 }}>· {user?.rol}</span></span>
-          <button
-            onClick={handleLogout}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: TEXT_MUTED,
-              cursor: 'pointer',
-              fontSize: 12,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-            }}
-          >
-            <LogOut size={12} />
-            Cerrar Sesión
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <NotificationBell />
+            <button
+              onClick={handleLogout}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: TEXT_MUTED,
+                cursor: 'pointer',
+                fontSize: 12,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <LogOut size={12} />
+              Cerrar Sesión
+            </button>
+          </div>
         </header>
 
         {/* Búsqueda (Cmd+K) */}
