@@ -2,9 +2,24 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
+import { notificar, notificarPorRol } from '../lib/notificar';
 
 const router = Router();
 const IVA = 0.16;
+
+/** Devuelve un nombre legible del cliente: razón social (PM) o "nombre apellido" (PF). */
+function nombreCliente(c: { tipo: string; nombre?: string | null; apellidoPaterno?: string | null; razonSocial?: string | null } | null | undefined): string {
+  if (!c) return 'cliente';
+  if (c.tipo === 'PM') return c.razonSocial || 'cliente';
+  return `${c.nombre || ''} ${c.apellidoPaterno || ''}`.trim() || 'cliente';
+}
+
+/** Formatea un monto como moneda MXN sin depender de Intl en el server.
+ *  Acepta number, string o Decimal de Prisma. */
+function fmt$(n: number | string | { toString(): string }): string {
+  const num = typeof n === 'number' ? n : Number(n.toString());
+  return `$${num.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -354,7 +369,15 @@ router.post('/pay', requireAuth, async (req: Request, res: Response) => {
     const entry = await prisma.amortizationEntry.findFirst({
       where: { contractId: data.contractId, periodo: data.periodo },
       include: {
-        contract: { select: { tasaAnual: true, tasaMoratoria: true } },
+        contract: {
+          select: {
+            tasaAnual: true,
+            tasaMoratoria: true,
+            folio: true,
+            userId: true,
+            client: { select: { tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true } },
+          },
+        },
       },
     });
     if (!entry) return res.status(404).json({ error: 'Periodo no encontrado' });
@@ -441,6 +464,27 @@ router.post('/pay', requireAuth, async (req: Request, res: Response) => {
     const updatedPayments = [...prevPayments, payment];
     const updatedConceptos = calcConceptos(entry, tasaAnual, updatedPayments, now);
 
+    // Notificación: PAGO_REGISTRADO (siempre) + alerta a COBRANZA si es parcial
+    notificar({
+      tipo: 'PAGO_REGISTRADO',
+      titulo: `Pago periodo ${data.periodo} · ${entry.contract.folio}`,
+      mensaje: `${nombreCliente(entry.contract.client)} pagó ${fmt$(montoTotal)}${esParcial ? ' (parcial)' : ''}`,
+      entidad: 'Payment',
+      entidadId: payment.id,
+      url: `/cobranza/contrato/${data.contractId}`,
+      ejecutivoId: entry.contract.userId,
+    });
+    if (esParcial) {
+      notificarPorRol(['COBRANZA'], {
+        tipo: 'PAGO_PARCIAL',
+        titulo: `Pago parcial ${entry.contract.folio} P${data.periodo}`,
+        mensaje: `${nombreCliente(entry.contract.client)} dejó pendiente ${fmt$(updatedConceptos.desglose.totalAdeudado)}`,
+        entidad: 'Payment',
+        entidadId: payment.id,
+        url: `/cobranza/contrato/${data.contractId}`,
+      });
+    }
+
     res.json({
       payment,
       aplicacion: {
@@ -502,7 +546,12 @@ router.post('/pay-advance', requireAuth, async (req: Request, res: Response) => 
 
     const contract = await prisma.contract.findUnique({
       where: { id: data.contractId },
-      select: { tasaAnual: true },
+      select: {
+        tasaAnual: true,
+        folio: true,
+        userId: true,
+        client: { select: { tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true } },
+      },
     });
     if (!contract) return res.status(404).json({ error: 'Contrato no encontrado' });
 
@@ -545,9 +594,24 @@ router.post('/pay-advance', requireAuth, async (req: Request, res: Response) => 
       results.push({ periodo: entry.periodo, payment });
     }
 
+    const totalPagado = Math.round(results.reduce((s, r) => s + Number(r.payment.montoTotal), 0) * 100) / 100;
+
+    if (results.length > 0) {
+      const periodos = results.map(r => r.periodo).join(', ');
+      notificar({
+        tipo: 'PAGO_ADELANTADO',
+        titulo: `Pago adelantado ${contract.folio} (${results.length} periodos)`,
+        mensaje: `${nombreCliente(contract.client)} pagó ${fmt$(totalPagado)} por periodos ${periodos}`,
+        entidad: 'Contract',
+        entidadId: data.contractId,
+        url: `/cobranza/contrato/${data.contractId}`,
+        ejecutivoId: contract.userId,
+      });
+    }
+
     res.json({
       pagados: results.length,
-      totalPagado: Math.round(results.reduce((s, r) => s + Number(r.payment.montoTotal), 0) * 100) / 100,
+      totalPagado,
       detalle: results,
     });
   } catch (error) {
@@ -664,6 +728,7 @@ router.post('/pay-extra', requireAuth, async (req: Request, res: Response) => {
       include: {
         amortizacion: { orderBy: { periodo: 'asc' } },
         pagos: { orderBy: [{ periodo: 'asc' }, { createdAt: 'asc' }] },
+        client: { select: { tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true } },
       },
     });
     if (!contract) return res.status(404).json({ error: 'Contrato no encontrado' });
@@ -805,6 +870,16 @@ router.post('/pay-extra', requireAuth, async (req: Request, res: Response) => {
       });
 
       return payment;
+    });
+
+    notificar({
+      tipo: 'ABONO_CAPITAL',
+      titulo: `Abono a capital ${contract.folio} (${fmt$(data.monto)})`,
+      mensaje: `${nombreCliente(contract.client)} — nueva renta ${fmt$(nuevaRenta)} (ahorro ${fmt$(Number(primerEntry.renta) - nuevaRenta)}/periodo)`,
+      entidad: 'Contract',
+      entidadId: data.contractId,
+      url: `/cobranza/contrato/${data.contractId}`,
+      ejecutivoId: contract.userId,
     });
 
     res.json({

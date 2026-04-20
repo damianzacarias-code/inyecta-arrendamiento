@@ -2,8 +2,23 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
+import { notificar } from '../lib/notificar';
 
 const router = Router();
+
+/** Devuelve un nombre legible del cliente: razón social (PM) o "nombre apellido" (PF). */
+function nombreCliente(c: { tipo: string; nombre?: string | null; apellidoPaterno?: string | null; razonSocial?: string | null } | null | undefined): string {
+  if (!c) return 'cliente';
+  if (c.tipo === 'PM') return c.razonSocial || 'cliente';
+  return `${c.nombre || ''} ${c.apellidoPaterno || ''}`.trim() || 'cliente';
+}
+
+/** Formatea un monto como moneda MXN sin depender de Intl en el server.
+ *  Acepta number, string o Decimal de Prisma (cualquier cosa con toString numérico). */
+function fmt$(n: number | string | { toString(): string }): string {
+  const num = typeof n === 'number' ? n : Number(n.toString());
+  return `$${num.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
 const STAGE_ORDER = ['SOLICITUD', 'ANALISIS_CLIENTE', 'ANALISIS_BIEN', 'COMITE', 'FORMALIZACION', 'DESEMBOLSO', 'ACTIVO'];
 
@@ -139,6 +154,17 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       return created;
     });
 
+    // Notificación: SOLICITUD_CREADA → ADMIN + LEGAL + ejecutivo
+    notificar({
+      tipo: 'SOLICITUD_CREADA',
+      titulo: `Nueva solicitud ${contract.folio}`,
+      mensaje: `${contract.bienDescripcion} por ${fmt$(contract.montoFinanciar)} — cliente ${nombreCliente(contract.client)}`,
+      entidad: 'Contract',
+      entidadId: contract.id,
+      url: `/contratos/${contract.id}`,
+      ejecutivoId: userId,
+    });
+
     return res.status(201).json(contract);
   } catch (error) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
@@ -257,6 +283,16 @@ router.put('/:id/advance', requireAuth, async (req: Request, res: Response) => {
           stageHistory: { orderBy: { fecha: 'desc' } },
         },
       });
+      // Notificación: rechazo en comité → ADMIN + ejecutivo
+      notificar({
+        tipo: 'CONTRATO_RESCINDIDO',
+        titulo: `Comité rechazó ${updated.folio}`,
+        mensaje: `Cliente ${nombreCliente(updated.client)}. ${observacion || ''}`.trim(),
+        entidad: 'Contract',
+        entidadId: updated.id,
+        url: `/contratos/${updated.id}`,
+        ejecutivoId: updated.userId,
+      });
       return res.json(updated);
     }
 
@@ -329,6 +365,29 @@ router.put('/:id/advance', requireAuth, async (req: Request, res: Response) => {
         stageHistory: { orderBy: { fecha: 'desc' } },
       },
     });
+
+    // Notificación: etapa avanzada (con caso especial cuando llega a ACTIVO)
+    if (nextStage === 'ACTIVO') {
+      notificar({
+        tipo: 'CONTRATO_ACTIVADO',
+        titulo: `Contrato ${updated.folio} activado`,
+        mensaje: `${nombreCliente(updated.client)} — vigente, primera renta ${updateData.fechaVencimiento ? '' : ''}`,
+        entidad: 'Contract',
+        entidadId: updated.id,
+        url: `/contratos/${updated.id}`,
+        ejecutivoId: updated.userId,
+      });
+    } else {
+      notificar({
+        tipo: 'ETAPA_AVANZADA',
+        titulo: `${updated.folio} → ${STAGE_LABELS[nextStage]}`,
+        mensaje: `Cliente ${nombreCliente(updated.client)}. ${observacion || ''}`.trim(),
+        entidad: 'Contract',
+        entidadId: updated.id,
+        url: `/contratos/${updated.id}`,
+        ejecutivoId: updated.userId,
+      });
+    }
 
     return res.json(updated);
   } catch (error) {

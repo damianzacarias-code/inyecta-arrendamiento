@@ -3,8 +3,14 @@ import { z } from 'zod';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
 import { calcularArrendamiento, generarOpcionesRiesgo } from '../services/leaseCalculator';
+import { notificar } from '../lib/notificar';
 
 const router = Router();
+
+function fmt$(n: number | string | { toString(): string }): string {
+  const num = typeof n === 'number' ? n : Number(n.toString());
+  return `$${num.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
 const quotationSchema = z.object({
   clientId: z.string().optional(),
@@ -326,6 +332,17 @@ router.patch('/:id/estado', requireAuth, async (req: Request, res: Response) => 
         observaciones: observaciones ?? current.observaciones,
       },
     });
+
+    notificar({
+      tipo: estado === 'APROBADA' ? 'COTIZACION_APROBADA' : 'COTIZACION_RECHAZADA',
+      titulo: `Cotización ${updated.folio} ${estado.toLowerCase()}`,
+      mensaje: `${updated.nombreCliente}${observaciones ? ` — ${observaciones}` : ''}`,
+      entidad: 'Quotation',
+      entidadId: updated.id,
+      url: `/cotizaciones/${updated.id}`,
+      ejecutivoId: updated.userId,
+    });
+
     return res.json(updated);
   } catch (error) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
@@ -417,6 +434,16 @@ router.post('/:id/convert', requireAuth, async (req: Request, res: Response) => 
       });
 
       return created;
+    });
+
+    notificar({
+      tipo: 'SOLICITUD_CREADA',
+      titulo: `Nueva solicitud ${contract.folio} (desde cotización)`,
+      mensaje: `${contract.bienDescripcion} por ${fmt$(contract.montoFinanciar)} — desde cotización ${quotation.folio}`,
+      entidad: 'Contract',
+      entidadId: contract.id,
+      url: `/contratos/${contract.id}`,
+      ejecutivoId: userId,
     });
 
     return res.status(201).json(contract);
