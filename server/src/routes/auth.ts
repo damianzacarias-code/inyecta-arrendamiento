@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import jwt, { type SignOptions } from 'jsonwebtoken';
 import { z } from 'zod';
 import prisma from '../config/db';
 import { config } from '../config/env';
@@ -39,10 +39,13 @@ router.post('/login', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
+    const signOptions: SignOptions = {
+      expiresIn: config.jwtExpiresIn as SignOptions['expiresIn'],
+    };
     const token = jwt.sign(
       { userId: user.id, email: user.email, rol: user.rol },
       config.jwtSecret,
-      { expiresIn: config.jwtExpiresIn }
+      signOptions
     );
 
     return res.json({
