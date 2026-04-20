@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
+import { PDFDownloadLink } from '@react-pdf/renderer';
 import api from '@/lib/api';
 import { formatCurrency, formatPercent, formatDate } from '@/lib/utils';
 import {
   ArrowLeft,
-  FileDown,
+  FileText,
+  Table as TableIcon,
   Printer,
   CheckCircle2,
   XCircle,
@@ -12,7 +14,10 @@ import {
   AlertTriangle,
   Clock,
 } from 'lucide-react';
-import { generateQuotationPDF } from '@/lib/pdfGenerator';
+import { calcularCotizacion } from '@/lib/cotizacion/calculos';
+import { calcAmortPuro, calcAmortFinanciero } from '@/lib/cotizacion/amortizacion';
+import { CotizacionPDF } from '@/lib/pdf/CotizacionPDF';
+import { AmortizacionPDF } from '@/lib/pdf/AmortizacionPDF';
 
 interface QuotationDetail {
   id: string;
@@ -184,6 +189,83 @@ export default function CotizacionDetalle() {
   const canReject = q.estado === 'VIGENTE' || q.estado === 'APROBADA';
   const badgeClass = estadoBadgeColors[q.estado] || 'bg-gray-100 text-gray-700 border-gray-200';
 
+  // ── PDFs (cotización + amortización) ────────────────────────────
+  // Reconstruimos los inputs canónicos a partir de los campos guardados
+  // y los pasamos por el motor verificado al centavo
+  // (lib/cotizacion/*). El servidor ya conserva los parámetros — aquí
+  // sólo derivamos lo que el PDF necesita y nada más.
+  const pdfData = useMemo(() => {
+    const valorBien = Number(q.valorBien);
+    const valorBienConIVA = Number(q.valorBienIVA) || valorBien * 1.16;
+    const tasaAnual = Number(q.tasaAnual);
+    const nombreBien =
+      q.bienDescripcion ||
+      [q.bienMarca, q.bienModelo, q.bienAnio].filter(Boolean).join(' ') ||
+      'Bien arrendado';
+    const enganchePct = Number(q.enganchePorcentaje);
+
+    const cotData = calcularCotizacion({
+      valorBienConIVA,
+      tasaIVA: 0.16,
+      producto: q.producto as 'PURO' | 'FINANCIERO',
+      plazo: q.plazo,
+      tasaAnual,
+      tasaComisionApertura: Number(q.comisionAperturaPct),
+      comisionAperturaEsContado: !q.comisionAperturaFinanciada,
+      porcentajeResidual: Number(q.valorResidualPct),
+      gpsMonto: Number(q.gpsInstalacion),
+      gpsEsContado: !q.gpsFinanciado,
+      seguroMonto: Number(q.seguroAnual),
+      seguroEsContado: !q.seguroFinanciado,
+      // El esquema actual no persiste si el enganche fue de contado;
+      // asumimos contado (default histórico) y sólo lo aplicamos si > 0
+      engancheMonto: valorBien * enganchePct * 1.16,
+      engancheEsContado: true,
+      nombreBien,
+      estadoBien: q.bienNuevo === false ? 'Seminuevo' : 'Nuevo',
+      seguroEstado: q.seguroFinanciado ? 'Contratado' : 'Pendiente',
+      nombreCliente: q.nombreCliente || 'Sin nombre',
+      fecha: new Date(q.createdAt),
+    });
+
+    // Para la amortización usamos createdAt + 1 mes como aproximación de
+    // fecha de primer pago (el esquema de cotización aún no la persiste).
+    const base = new Date(q.createdAt);
+    const fechaPrimerPago = new Date(
+      base.getFullYear(),
+      base.getMonth() + 1,
+      base.getDate(),
+      12, 0, 0,
+    );
+
+    const filasPuro =
+      q.producto === 'PURO'
+        ? calcAmortPuro(cotData.rentaMensual.montoNeto, q.plazo, fechaPrimerPago)
+        : undefined;
+
+    const filasFinanciero =
+      q.producto === 'FINANCIERO'
+        ? calcAmortFinanciero(
+            cotData.montoFinanciadoReal,
+            tasaAnual,
+            q.plazo,
+            cotData.fvAmortizacion,
+            fechaPrimerPago,
+          )
+        : undefined;
+
+    return { cotData, tasaAnual, filasPuro, filasFinanciero };
+  }, [q]);
+
+  /** Slug seguro para nombres de archivo */
+  const fileSlug = (q.folio || q.nombreCliente || 'cotizacion')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 40) || 'cotizacion';
+
   return (
     <div className="max-w-4xl mx-auto">
       {/* Header */}
@@ -239,12 +321,37 @@ export default function CotizacionDetalle() {
           >
             <Printer size={14} /> Imprimir
           </button>
-          <button
-            onClick={() => generateQuotationPDF(q as any)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-inyecta-600 hover:bg-inyecta-700 rounded-lg text-sm text-white font-medium shadow-sm"
+          <PDFDownloadLink
+            document={<CotizacionPDF data={pdfData.cotData} tasaAnual={pdfData.tasaAnual} folio={q.folio} />}
+            fileName={`cotizacion-${fileSlug}.pdf`}
+            className="flex items-center gap-1.5 px-3 py-2 bg-inyecta-700 hover:bg-inyecta-800 rounded-lg text-sm text-white font-medium shadow-sm"
           >
-            <FileDown size={14} /> Descargar PDF
-          </button>
+            {({ loading: pdfLoading }) => (
+              <>
+                <FileText size={14} />
+                {pdfLoading ? 'Generando…' : 'Descargar Cotización'}
+              </>
+            )}
+          </PDFDownloadLink>
+          <PDFDownloadLink
+            document={
+              <AmortizacionPDF
+                data={pdfData.cotData}
+                tasaAnual={pdfData.tasaAnual}
+                filasPuro={pdfData.filasPuro}
+                filasFinanciero={pdfData.filasFinanciero}
+              />
+            }
+            fileName={`amortizacion-${fileSlug}.pdf`}
+            className="flex items-center gap-1.5 px-3 py-2 bg-accent hover:bg-accent-dark rounded-lg text-sm text-white font-medium shadow-sm"
+          >
+            {({ loading: pdfLoading }) => (
+              <>
+                <TableIcon size={14} />
+                {pdfLoading ? 'Generando…' : 'Descargar Amortización'}
+              </>
+            )}
+          </PDFDownloadLink>
         </div>
       </div>
 
