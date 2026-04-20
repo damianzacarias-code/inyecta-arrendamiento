@@ -25,6 +25,7 @@ import {
   FilePlus,
   BarChart2,
   LayoutDashboard,
+  ScrollText,
 } from 'lucide-react';
 
 export interface NavSubItem {
@@ -66,6 +67,7 @@ export const NAV_SECTIONS: NavSection[] = [
           { label: 'Configuración GPS', path: '/gps' },
         ],
       },
+      { label: 'Bitácora', icon: ScrollText, path: '/admin/bitacora' },
     ],
   },
   {
