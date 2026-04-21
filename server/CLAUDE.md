@@ -1012,6 +1012,105 @@ Notas finales del cierre:
   • tsc --noEmit limpio.
   • Backend operativo durante TODA la sesión de gaps; ningún
     request real del usuario habría fallado por estas pruebas.
+
+──────────────────────────────────────────────────────────────────
+Sesión de observabilidad — Bloque B (20-04-2026, autónoma)
+──────────────────────────────────────────────────────────────────
+Objetivo: hacer el backend trazable y operable en producción. Todo
+sin tocar reglas de negocio. Tres mejoras + tests automatizados.
+
+  - [x] B1: Logger estructurado con pino (lib/logger.ts)
+        Una instancia compartida + child loggers por módulo.
+        prod → JSON una-línea (CloudWatch / Datadog / Loki sin
+        transform). dev → pino-pretty con colores y timestamp legible.
+        Redact path-based:
+          req.headers.authorization, req.headers.cookie,
+          req.body.{password,pwd,token,secret},
+          res.headers["set-cookie"],
+          wildcards *.{password,token,secret,apiKey,authorization}.
+          censor → "***REDACTED***".
+        httpLogger (pino-http) registra una línea por request con
+        reqId / method / url / statusCode / responseTime; ignora
+        /api/health y /api/health/live para no contaminar.
+        LOG_LEVEL configurable; default debug en dev, info en prod,
+        silent en tests.
+        Reemplaza console.* en index.ts y errorHandler.ts; el resto
+        del codebase migra en el Bloque D.
+
+  - [x] B2: Request ID por request (middleware/requestId.ts)
+        UUID v4 generado por request, expuesto como `req.id` y eco en
+        X-Request-ID del response.
+        Si el inbound trae X-Request-ID y pasa la validación
+        (≤200 chars, charset [A-Za-z0-9_\-:.]), se respeta — para
+        cadenas de proxies / API gateways. Si no, UUID nuevo.
+        Sanitización defensiva: rechaza headers con espacios, ;, =,
+        CRLF, tab, utf-8 raros, <script>, control chars → genera UUID
+        en su lugar (anti-injection).
+        Propagado a TODA la cadena:
+          • logger (pino-http genReqId lo recoge automáticamente)
+          • bitácora (Bitacora.requestId con índice para lookup
+            directo desde un log de pino)
+          • errorHandler (req.id eco en error.requestId del response)
+          • notFoundHandler (idem)
+        Migración: 20260421040027_add_bitacora_request_id.
+        Verificado end-to-end en vivo:
+          curl -H "X-Request-ID: trace-test-b2-001" /api/auth/login
+          → respuesta con X-Request-ID: trace-test-b2-001
+          → bitacora.requestId == "trace-test-b2-001" persistido
+          → password redacted en payloadJson.
+
+  - [x] B3: Graceful shutdown (lib/shutdown.ts)
+        SIGTERM / SIGINT → server.close() (drena requests en vuelo) →
+        prisma.$disconnect() → process.exit(0).
+        Drain timeout 5s: si keep-alive idle no cierra, force-close
+        con server.closeIdleConnections() / closeAllConnections().
+        Hard timeout 10s: si todo el shutdown se cuelga, exit(1).
+        Idempotente: señales repetidas se ignoran (warn).
+        uncaughtException / unhandledRejection: loggea fatal y
+        dispara shutdown con exit(1) — el proceso se va a morir igual;
+        al menos liberamos Prisma antes.
+        Verificado en vivo: SIGTERM → cierre limpio en ~1.4s
+        (HTTP closed → prisma disconnected → exit 0).
+
+  - [x] B4: Vitest + 40 tests unitarios
+        vitest 4.x con coverage v8. Patrón
+        src/**/__tests__/**/*.test.ts (mismo del cliente). Excluye
+        __verify__/, seed*, dist/. LOG_LEVEL=silent en tests.
+        Scripts: `npm test`, `npm run test:watch`, `npm run
+        test:coverage`. También expuestos:
+        `npm run verify:health`, `npm run verify:errorHandler`.
+        Suites:
+          services/leaseCalculator.test.ts (20 tests)
+            PURO: valorBienIVA, comisión, depósito, montoFinanciar,
+            renta neta, IVA, longitud amort, fila 1 (interés/capital/
+            saldo), fila 48 saldoFinal=depósito EXACTO, IVA por fila
+            = renta×16%.
+            FIN : renta=75,896.80 (FV=0), IVA=12,143.49, fila 48
+            saldoFinal=0.00 EXACTO (regla 6), Σ capital ≈
+            montoFinanciado.
+            Moratorios: lineal en días, IVA=mor×16%, edge cases.
+          middleware/requestId.test.ts (13 tests)
+            UUID v4 default, respeta inbound válido, rechaza CRLF/
+            espacios/;/=/utf-8/<script>/>200chars, array → primero,
+            echo en X-Request-ID siempre.
+          lib/logger.test.ts (7 tests)
+            Redact verificado con stream en memoria:
+            req.body.password, req.headers.authorization|cookie,
+            wildcards *.password / *.token / *.secret. NO redacta
+            campos benignos. Output JSON una-línea válido.
+        Resultado: 40/40 OK, ~200ms total.
+
+Bloque B — resumen rápido:
+  • 3 archivos nuevos: lib/logger.ts, lib/shutdown.ts,
+    middleware/requestId.ts.
+  • 1 migración Prisma (Bitacora.requestId + índice).
+  • 3 dependencias runtime: pino, pino-http, pino-pretty.
+  • 2 dependencias dev: vitest, @vitest/coverage-v8.
+  • Edits a index.ts, errorHandler.ts, bitacora.ts (ENV-tipo).
+  • 0 cambios a reglas de negocio.
+  • 40/40 tests del server pasan; 38/38 del cliente siguen pasando.
+  • tsc --noEmit limpio en cada paso.
+  • Backend en tsx watch sobrevivió sin reiniciar manualmente.
 ```
 
 ---
