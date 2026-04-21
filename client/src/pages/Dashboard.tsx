@@ -5,7 +5,7 @@ import api from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import {
   Calculator, FileText, Users, FolderOpen, CalendarDays,
-  TrendingUp, AlertTriangle, CheckCircle2, Clock, Building2, User,
+  AlertTriangle, CheckCircle2, Clock, Building2, User,
   ChevronRight, Plus,
 } from 'lucide-react';
 import AlertCenter from '@/components/AlertCenter';
@@ -71,9 +71,6 @@ export default function Dashboard() {
           api.get('/clients?limit=1'),
           api.get(`/cobranza/calendar?month=${new Date().getMonth() + 1}&year=${new Date().getFullYear()}`).catch(() => ({ data: { summary: {} } })),
         ]);
-
-        const now = new Date();
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
         setData({
           cotizacionesMes: quotationsRes.data.total || 0,

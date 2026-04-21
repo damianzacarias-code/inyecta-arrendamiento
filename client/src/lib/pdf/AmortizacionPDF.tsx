@@ -235,7 +235,10 @@ function BodyPuro({ filas }: { filas: FilaAmortPuro[] }) {
   return (
     <>
       {filas.map((r, i) => (
-        <View key={r.periodo} style={[s.row, i % 2 === 0 && s.rowBand]} wrap={false}>
+        // @react-pdf/renderer tipa style como Style|Style[]; ni boolean ni
+        // null son asignables a Style. Usamos spread condicional para
+        // mantener el arreglo homogéneo de Style.
+        <View key={r.periodo} style={[s.row, ...(i % 2 === 0 ? [s.rowBand] : [])]} wrap={false}>
           <Text style={[s.td, s.tdCenter, { width: colsPuro.periodo }]}>{r.periodo}</Text>
           <Text style={[s.td, s.tdCenter, s.tdMuted, { width: colsPuro.fecha }]}>{r.fecha}</Text>
           <Text style={[s.td, s.tdRight, { width: colsPuro.renta }]}>{fmtMoneySigned(r.renta)}</Text>
@@ -266,7 +269,7 @@ function BodyFin({ filas }: { filas: FilaAmortFinanciero[] }) {
   return (
     <>
       {filas.map((r, i) => (
-        <View key={r.periodo} style={[s.row, i % 2 === 0 && s.rowBand]} wrap={false}>
+        <View key={r.periodo} style={[s.row, ...(i % 2 === 0 ? [s.rowBand] : [])]} wrap={false}>
           <Text style={[s.td, s.tdCenter, { width: colsFin.periodo }]}>{r.periodo}</Text>
           <Text style={[s.td, s.tdCenter, s.tdMuted, { width: colsFin.fecha }]}>{r.fecha}</Text>
           <Text style={[s.td, s.tdRight, { width: colsFin.capital }]}>{fmtMoneySigned(r.capital)}</Text>

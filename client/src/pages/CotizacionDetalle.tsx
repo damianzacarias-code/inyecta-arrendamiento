@@ -52,6 +52,13 @@ interface QuotationDetail {
   estado: string;
   vigenciaHasta: string;
   observaciones?: string;
+  // Datos del bien (espejo del modelo Prisma `Quotation`).
+  // El backend ya los retorna; la interfaz los omitía.
+  bienDescripcion?: string | null;
+  bienMarca?: string | null;
+  bienModelo?: string | null;
+  bienAnio?: number | null;
+  bienNuevo?: boolean;
   createdAt: string;
   clientId?: string | null;
   user?: { nombre: string; apellidos: string; email: string };

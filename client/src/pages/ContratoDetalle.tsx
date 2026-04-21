@@ -483,7 +483,6 @@ export default function ContratoDetalle() {
             const Icon = STAGE_ICONS[stage];
             const isCompleted = i < currentIdx;
             const isCurrent = i === currentIdx;
-            const isFuture = i > currentIdx;
             return (
               <div key={stage} className="flex items-center flex-1 min-w-0">
                 <div className="flex flex-col items-center flex-1 min-w-0">

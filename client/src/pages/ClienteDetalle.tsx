@@ -4,8 +4,8 @@ import api from '@/lib/api';
 import { formatDate, formatCurrency } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
 import {
-  ArrowLeft, Building2, User, FileCheck, FileX, Clock, AlertTriangle,
-  CheckCircle2, XCircle, Send, StickyNote, FileText, Eye, ExternalLink, Copy,
+  ArrowLeft, Building2, User, FileCheck, Clock, AlertTriangle,
+  CheckCircle2, XCircle, Send, StickyNote, FileText, Eye, ExternalLink,
 } from 'lucide-react';
 
 interface Doc {

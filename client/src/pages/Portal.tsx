@@ -5,14 +5,14 @@
  * El token se imprime en su contrato y se les entrega al firmar.
  */
 import { useEffect, useState } from 'react';
-import { useParams, Link, useLocation } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import { PDFDownloadLink } from '@react-pdf/renderer';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { EstadoCuentaPDF } from '@/lib/pdf/EstadoCuentaPDF';
 import {
-  Building2, FileText, Calendar, AlertTriangle, CheckCircle2,
-  Receipt, Download, Clock, DollarSign, ArrowRight, ArrowLeft,
+  Building2, FileText, AlertTriangle,
+  Receipt, Download, DollarSign, ArrowRight, ArrowLeft,
   Loader2,
 } from 'lucide-react';
 
@@ -52,7 +52,10 @@ interface Periodo {
   ivaMoratorio: number;
   totalAdeudado: number;
   diasAtraso: number;
-  estatus: string;
+  // Mismo literal-union que EstadoCuentaPeriodo.estatus en lib/pdf/EstadoCuentaPDF
+  // para que <EstadoCuentaPDF periodos={...} /> compile sin cast.
+  // El backend (cobranza/portal) sólo emite estos cinco valores.
+  estatus: 'PENDIENTE' | 'VENCIDO' | 'PAGADO' | 'PARCIAL' | 'FUTURO';
 }
 
 interface Pago {
@@ -89,7 +92,6 @@ const ESTATUS_PERIODO_STYLES: Record<string, string> = {
 
 export default function Portal() {
   const { token } = useParams<{ token: string }>();
-  const location = useLocation();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

@@ -4,7 +4,7 @@ import api from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import {
   FolderOpen, Plus, Search, Eye, ChevronLeft, ChevronRight,
-  Building2, User, FileText, ClipboardCheck, Truck, Users,
+  Building2, User, FileText, ClipboardCheck, Users,
   Gavel, PenTool, Banknote, CheckCircle2, Filter,
 } from 'lucide-react';
 

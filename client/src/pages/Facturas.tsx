@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import api from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import {
-  Receipt, Download, XCircle, CheckCircle2, Clock, AlertTriangle,
+  Receipt, XCircle, CheckCircle2, Clock, AlertTriangle,
   FileText, Filter, Building2, User,
 } from 'lucide-react';
 

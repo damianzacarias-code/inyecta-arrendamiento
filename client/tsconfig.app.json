@@ -7,6 +7,17 @@
     "types": ["vite/client"],
     "skipLibCheck": true,
 
+    /* Path aliases — espejo del alias '@' de vite.config.ts.
+       Sin esto, `tsc -b` no resuelve `@/lib/...` y el step "Build" del CI
+       (npm run build = tsc -b && vite build) silenciaba TODOS los errores
+       reales detrás de un Cannot-find-module en cascada. Vite resuelve el
+       alias en runtime; tsc necesita la duplicación aquí.
+       baseUrl deprecado en TS 6.0; con moduleResolution=bundler basta
+       paths relativo al config. */
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+
     /* Bundler mode */
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,

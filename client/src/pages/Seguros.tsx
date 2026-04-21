@@ -5,7 +5,7 @@ import { formatCurrency, formatDate } from '@/lib/utils';
 import {
   Shield, ShieldCheck, ShieldAlert, ShieldX, AlertTriangle,
   Plus, Search, RefreshCw, Building2, User, X, Edit2,
-  CalendarClock, FileText, Trash2, Eye, Bell, Sparkles,
+  CalendarClock, FileText, Trash2, Bell, Sparkles,
 } from 'lucide-react';
 
 interface Policy {
