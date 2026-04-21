@@ -675,7 +675,7 @@ export default function ContratoDetalle() {
               <InfoRow label="Descripcion" value={c.bienDescripcion} />
               <InfoRow label="Marca" value={c.bienMarca} />
               <InfoRow label="Modelo" value={c.bienModelo} />
-              <InfoRow label="Anio" value={c.bienAnio ? String(c.bienAnio) : undefined} />
+              <InfoRow label="Año" value={c.bienAnio ? String(c.bienAnio) : undefined} />
               <InfoRow label="No. Serie" value={c.bienNumSerie} mono />
               <InfoRow label="Estado" value={c.bienEstado} />
               <InfoRow label="Proveedor" value={c.proveedor} />

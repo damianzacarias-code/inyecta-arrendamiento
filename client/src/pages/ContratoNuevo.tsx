@@ -360,7 +360,7 @@ export default function ContratoNuevo() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Anio</label>
+              <label className="block text-sm font-medium text-gray-600 mb-1">Año</label>
               <input type="number" value={bienAnio} onChange={(e) => setBienAnio(e.target.value)} min={2000} max={2030}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
             </div>
