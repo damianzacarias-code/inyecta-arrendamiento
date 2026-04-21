@@ -1163,6 +1163,85 @@ Bloque C — resumen rápido:
   • Backup verificado contra Postgres real local (36K dump +
     rotación borrando archivos > 30 días).
   • CI listo para correr en cuanto el repo se conecte a GitHub.
+
+──────────────────────────────────────────────────────────────────
+Sesión de limpieza técnica — Bloque D (20-04-2026, autónoma)
+──────────────────────────────────────────────────────────────────
+Cuatro sub-bloques que devuelven el repo a verde "build limpio en
+CI". Se descubrieron varios fallos enmascarados por la corrida
+previa de tsc + lint con paths sin configurar.
+
+  - [x] D1: Migrar bitacoraStore a estructura unificada (server)
+        bitacora.ts ya escribía con un shape ad-hoc; ahora persiste
+        eventos con la misma forma que consume el frontend
+        (categoria + título + ts ISO). Sin cambios al endpoint
+        público.
+
+  - [x] D2: Eliminar jspdf legacy del cliente
+        Reemplazo end-to-end por @react-pdf/renderer (consistente
+        con CotizacionPDF y AmortizacionPDF):
+          • Nuevo lib/pdf/ReciboPDF.tsx (~410 líneas) con todas
+            las secciones del recibo (importe, datos, desglose,
+            monto en letras y firmas). Algoritmo `numeroALetras`
+            preservado verbatim del legacy — validado contra
+            ejemplos reales.
+          • ContratoDetalle.tsx: handleDownloadEstadoCuenta usa
+            `pdf().toBlob()` + adapter inline mapEstadoCuentaProps
+            que mapea el response de /cobranza/estado-cuenta/:id
+            al shape de EstadoCuentaPDF (que ya existía desde T11).
+          • Cobranza.tsx: helper module-level descargarRecibo
+            con el mismo patrón.
+          • Borrados client/src/lib/{estadoCuentaPDF,reciboPDF}.ts
+            (319+297 líneas). Removidos jspdf y jspdf-autotable
+            de package.json (-22 paquetes).
+
+  - [x] D3: Build limpio (tsc -b && vite build) — destapado de
+        errores reales que CI silenciaba detrás de
+        "Cannot-find-module @/lib/...":
+
+          • tsconfig.app.json: añadir `paths: { "@/*":
+            ["./src/*"] }` espejo del alias de vite.config.ts.
+            Sin esto tsc -b no resolvía aliases. baseUrl
+            deprecado en TS 6.0 (no se requiere con
+            moduleResolution=bundler).
+          • pako@^1.0.11 como dep top-level: @react-pdf/pdfkit
+            deep-importa pako/lib/zlib/{zstream,deflate,inflate,
+            constants}.js pero NO lo declara como dependencia.
+            Rolldown (vite 8) no resuelve por hoisting transitivo
+            como sí lo hacía rollup clásico.
+          • Portal.tsx: estrechar Periodo.estatus a literal-union
+            ('PENDIENTE'|'VENCIDO'|'PAGADO'|'PARCIAL'|'FUTURO')
+            para que <EstadoCuentaPDF periodos> compile sin cast.
+          • CotizacionDetalle.tsx: añadir bienDescripcion,
+            bienMarca, bienModelo, bienAnio, bienNuevo a
+            QuotationDetail (ya viven en el modelo Prisma; la
+            interfaz los omitía).
+          • AmortizacionPDF.tsx: spread condicional `...(cond ?
+            [s.rowBand] : [])` para style arrays — @react-pdf
+            rechaza tanto `false` como `null` en arreglos de Style.
+          • Limpieza noUnusedLocals: 12 imports/locals huérfanos
+            en 7 archivos (FileX, Copy, isFuture, Truck,
+            TrendingUp, monthStart, Download, Link, useLocation,
+            location, Calendar, CheckCircle2, Clock, Eye).
+
+        Resultado: `npm run build` exit 0 (1989 módulos), 38/38
+        tests del cliente pasan.
+
+  - [x] D4: npm audit + dedupe en client y server
+          • client: 0 vulnerabilidades, dedupe sin cambios.
+          • server: 0 vulnerabilidades. dedupe colapsa
+            @types/send 1.2.1 → 0.17.6 (la 1.2.1 era huérfana;
+            @types/serve-static restringe a "<1"). 40/40 tests
+            siguen pasando.
+
+Bloque D — resumen rápido:
+  • Cliente y servidor en build limpio (tsc -b + vite build + tests).
+  • jspdf erradicado; única lib de PDF es @react-pdf/renderer.
+  • CI ya no necesita continue-on-error en el step "Build" del
+    cliente (los Cannot-find-module ya no esconden errores reales).
+  • -22 paquetes (jspdf+autotable) +1 (pako) = -21 neto.
+  • 4 issues de tipos reales reparados (no eran simple ruido).
+  • 0 cambios a reglas de negocio ni a código de cálculo.
 ```
 
 ---
