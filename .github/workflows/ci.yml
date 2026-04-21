@@ -1,0 +1,98 @@
+# GitHub Actions — CI del monorepo Inyecta Arrendamiento.
+#
+# Trigger: push a `main` y cualquier pull request.
+# Dos jobs en paralelo:
+#   • client: lint + typecheck (vía vite build) + tests vitest.
+#   • server: typecheck (tsc --noEmit) + tests vitest + prisma validate.
+#
+# No requerimos Postgres en el CI: los tests del server son unitarios y
+# no tocan BD. Las verificaciones que sí necesitan BD viven bajo
+# server/src/__verify__/ y se corren manualmente.
+#
+# Concurrency: una corrida por branch. Pushes nuevos cancelan a la
+# anterior (no acumulamos workers ociosos).
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  client:
+    name: Client — lint + typecheck + tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        # Soft gate por ahora: el cliente tiene ~127 issues legacy
+        # (no-explicit-any, set-state-in-effect, exhaustive-deps).
+        # Se limpian en el Bloque D ("sweep de tipos any" + cleanup de
+        # efectos). Mientras tanto, la salida queda visible en el log
+        # del PR pero no bloquea el merge.
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Build (incluye tsc -b)
+        run: npm run build
+
+      - name: Tests
+        run: npm test
+
+  server:
+    name: Server — typecheck + tests + prisma validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    env:
+      # Defaults seguros para que config/env.ts no falle al cargar
+      # durante typecheck/tests (los tests usan vitest config).
+      DATABASE_URL: postgresql://test:test@localhost:5432/test
+      JWT_SECRET: ci-secret-only-for-typecheck-do-not-deploy-with-this-1234
+      NODE_ENV: test
+      LOG_LEVEL: silent
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Prisma generate (necesario para tsc)
+        run: npx prisma generate
+
+      - name: Prisma schema validate
+        run: npx prisma validate
+
+      - name: Typecheck (tsc --noEmit)
+        run: npx tsc --noEmit
+
+      - name: Tests
+        run: npm test

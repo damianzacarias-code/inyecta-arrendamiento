@@ -1,0 +1,38 @@
+# docker-compose.yml — Servicios de desarrollo local.
+#
+# Uso:
+#   docker compose up -d db        # solo Postgres
+#   docker compose up -d           # todo
+#   docker compose down            # detiene
+#   docker compose down -v         # detiene y BORRA el volumen (¡cuidado!)
+#
+# El servicio `db` es lo único que el equipo realmente necesita: el
+# server y el client se siguen corriendo nativos con `npm run dev` en
+# cada repo (mejor DX que dockerizarlos en desarrollo).
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: inyecta_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: inyecta_arrendamiento
+    ports:
+      - "5432:5432"
+    volumes:
+      # Persistencia: el volumen sobrevive a `docker compose down`
+      # (pero NO a `docker compose down -v`).
+      - inyecta_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Postgres lista para conexiones (no solo el proceso vivo).
+      test: ["CMD-SHELL", "pg_isready -U postgres -d inyecta_arrendamiento"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  inyecta_pgdata:
+    name: inyecta_pgdata
