@@ -2,6 +2,9 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
+import { childLogger } from '../lib/logger';
+
+const log = childLogger('insurance');
 
 const router = Router();
 
@@ -124,7 +127,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ data: filtered, sinPoliza, summary });
   } catch (error) {
-    console.error('List policies error:', error);
+    log.error({ err: error }, 'List policies error');
     res.status(500).json({ error: 'Error al obtener pólizas' });
   }
 });
@@ -148,7 +151,7 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
     const s = getPolicyStatus(policy);
     res.json({ ...policy, ...s });
   } catch (error) {
-    console.error('Get policy error:', error);
+    log.error({ err: error }, 'Get policy error');
     res.status(500).json({ error: 'Error al obtener póliza' });
   }
 });
@@ -175,7 +178,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    console.error('Create policy error:', error);
+    log.error({ err: error }, 'Create policy error');
     res.status(500).json({ error: 'Error al crear póliza' });
   }
 });
@@ -199,7 +202,7 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    console.error('Update policy error:', error);
+    log.error({ err: error }, 'Update policy error');
     res.status(500).json({ error: 'Error al actualizar póliza' });
   }
 });
@@ -241,7 +244,7 @@ router.post('/:id/renew', requireAuth, async (req: Request, res: Response) => {
 
     res.status(201).json(newPolicy);
   } catch (error) {
-    console.error('Renew policy error:', error);
+    log.error({ err: error }, 'Renew policy error');
     res.status(500).json({ error: 'Error al renovar póliza' });
   }
 });
@@ -337,7 +340,7 @@ router.get('/alerts', requireAuth, async (_req: Request, res: Response) => {
       alerts,
     });
   } catch (error) {
-    console.error('Insurance alerts error:', error);
+    log.error({ err: error }, 'Insurance alerts error');
     res.status(500).json({ error: 'Error al obtener alertas' });
   }
 });
@@ -359,7 +362,7 @@ router.post('/:id/acknowledge', requireAuth, async (req: Request, res: Response)
     });
     res.json({ ok: true, policy: updated });
   } catch (error) {
-    console.error('Acknowledge error:', error);
+    log.error({ err: error }, 'Acknowledge error');
     res.status(500).json({ error: 'Error al confirmar revisión' });
   }
 });
@@ -395,7 +398,7 @@ router.get('/:id/suggest-renewal', requireAuth, async (req: Request, res: Respon
       montoAsegurado: Number(policy.montoAsegurado || 0),
     });
   } catch (error) {
-    console.error('Suggest renewal error:', error);
+    log.error({ err: error }, 'Suggest renewal error');
     res.status(500).json({ error: 'Error al sugerir renovación' });
   }
 });
@@ -406,7 +409,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
     await prisma.insurancePolicy.delete({ where: { id: req.params.id } });
     res.json({ ok: true });
   } catch (error) {
-    console.error('Delete policy error:', error);
+    log.error({ err: error }, 'Delete policy error');
     res.status(500).json({ error: 'Error al eliminar póliza' });
   }
 });

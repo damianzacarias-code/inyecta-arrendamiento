@@ -26,6 +26,9 @@
 import type { Request, Response, NextFunction } from 'express';
 import prisma from '../config/db';
 import { config } from '../config/env';
+import { childLogger } from '../lib/logger';
+
+const log = childLogger('bitacora');
 
 // ───────────────────────────────────────────────────────────────────
 // Sanitización de payloads
@@ -145,7 +148,7 @@ export function bitacora(opts: BitacoraOptions = {}) {
     res.on('finish', () => {
       // No bloquear el ciclo de respuesta — fire and forget
       void registrar(req, res, opts).catch((e) => {
-        console.error('[bitacora] error registrando evento', e);
+        log.error({ err: e }, '[bitacora] error registrando evento');
       });
       void tStart; // se podría loggear duración si se requiere
     });

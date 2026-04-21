@@ -2,6 +2,9 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
+import { childLogger } from '../lib/logger';
+
+const log = childLogger('clients');
 
 const router = Router();
 
@@ -132,7 +135,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    console.error('Create client error:', error);
+    log.error({ err: error }, 'Create client error');
     return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
@@ -191,7 +194,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       pages: Math.ceil(total / parseInt(limit as string)),
     });
   } catch (error) {
-    console.error('List clients error:', error);
+    log.error({ err: error }, 'List clients error');
     return res.status(500).json({ error: 'Error interno' });
   }
 });
@@ -230,7 +233,7 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
 
     return res.json(client);
   } catch (error) {
-    console.error('Get client error:', error);
+    log.error({ err: error }, 'Get client error');
     return res.status(500).json({ error: 'Error interno' });
   }
 });
@@ -257,7 +260,7 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
 
     return res.json(client);
   } catch (error) {
-    console.error('Update client error:', error);
+    log.error({ err: error }, 'Update client error');
     return res.status(500).json({ error: 'Error interno' });
   }
 });
@@ -286,7 +289,7 @@ router.put('/:id/documents/:docId', requireAuth, async (req: Request, res: Respo
     return res.json(updated);
   } catch (error) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
-    console.error('Update document error:', error);
+    log.error({ err: error }, 'Update document error');
     return res.status(500).json({ error: 'Error interno' });
   }
 });
@@ -309,7 +312,7 @@ router.post('/:id/notes', requireAuth, async (req: Request, res: Response) => {
 
     return res.status(201).json(note);
   } catch (error) {
-    console.error('Create note error:', error);
+    log.error({ err: error }, 'Create note error');
     return res.status(500).json({ error: 'Error interno' });
   }
 });

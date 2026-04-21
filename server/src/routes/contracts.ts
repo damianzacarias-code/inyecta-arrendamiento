@@ -3,6 +3,9 @@ import { z } from 'zod';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
 import { notificar } from '../lib/notificar';
+import { childLogger } from '../lib/logger';
+
+const log = childLogger('contracts');
 
 const router = Router();
 
@@ -168,7 +171,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     return res.status(201).json(contract);
   } catch (error) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
-    console.error('Create contract error:', error);
+    log.error({ err: error }, 'Create contract error');
     return res.status(500).json({ error: 'Error interno' });
   }
 });
@@ -218,7 +221,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       pipeline,
     });
   } catch (error) {
-    console.error('List contracts error:', error);
+    log.error({ err: error }, 'List contracts error');
     return res.status(500).json({ error: 'Error interno' });
   }
 });
@@ -244,7 +247,7 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
     if (!contract) return res.status(404).json({ error: 'Contrato no encontrado' });
     return res.json(contract);
   } catch (error) {
-    console.error('Get contract error:', error);
+    log.error({ err: error }, 'Get contract error');
     return res.status(500).json({ error: 'Error interno' });
   }
 });
@@ -391,7 +394,7 @@ router.put('/:id/advance', requireAuth, async (req: Request, res: Response) => {
 
     return res.json(updated);
   } catch (error) {
-    console.error('Advance contract error:', error);
+    log.error({ err: error }, 'Advance contract error');
     return res.status(500).json({ error: 'Error interno' });
   }
 });
@@ -412,7 +415,7 @@ router.post('/:id/notes', requireAuth, async (req: Request, res: Response) => {
     });
     return res.status(201).json(note);
   } catch (error) {
-    console.error('Create note error:', error);
+    log.error({ err: error }, 'Create note error');
     return res.status(500).json({ error: 'Error interno' });
   }
 });

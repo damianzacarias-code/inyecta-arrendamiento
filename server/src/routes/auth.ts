@@ -6,6 +6,9 @@ import prisma from '../config/db';
 import { config } from '../config/env';
 import { requireAuth } from '../middleware/auth';
 import { loginLimiter } from '../middleware/rateLimit';
+import { childLogger } from '../lib/logger';
+
+const log = childLogger('auth');
 
 const router = Router();
 
@@ -64,7 +67,7 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors[0].message });
     }
-    console.error('Login error:', error);
+    log.error({ err: error }, 'Login error');
     return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
@@ -108,7 +111,7 @@ router.post('/register', requireAuth, async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors[0].message });
     }
-    console.error('Register error:', error);
+    log.error({ err: error }, 'Register error');
     return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
@@ -134,7 +137,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
 
     return res.json(user);
   } catch (error) {
-    console.error('Me error:', error);
+    log.error({ err: error }, 'Me error');
     return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });

@@ -1,6 +1,9 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
+import { childLogger } from '../lib/logger';
+
+const log = childLogger('circuloCredito');
 
 const router = Router();
 
@@ -297,7 +300,7 @@ router.get('/preview', requireAuth, async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    console.error('Circulo preview error:', error);
+    log.error({ err: error }, 'Circulo preview error');
     res.status(500).json({ error: 'Error al generar preview del reporte' });
   }
 });
@@ -414,7 +417,7 @@ router.get('/solicitud/:contractId', requireAuth, async (req: Request, res: Resp
       listo: camposFaltantes.length === 0,
     });
   } catch (error) {
-    console.error('Solicitud error:', error);
+    log.error({ err: error }, 'Solicitud error');
     res.status(500).json({ error: 'Error al generar solicitud' });
   }
 });

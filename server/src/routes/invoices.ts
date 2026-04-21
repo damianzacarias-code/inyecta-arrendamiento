@@ -17,6 +17,9 @@ import path from 'path';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
 import { getCfdiProvider, CfdiInvoiceInput } from '../services/cfdiProvider';
+import { childLogger } from '../lib/logger';
+
+const log = childLogger('invoices');
 
 const router = Router();
 const IVA = 0.16;
@@ -314,7 +317,7 @@ router.post('/facturar', requireAuth, async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    console.error('Facturar error:', error);
+    log.error({ err: error }, 'Facturar error');
     res.status(500).json({ error: error.message || 'Error al timbrar factura' });
   }
 });
@@ -362,7 +365,7 @@ router.post('/:id/cancelar', requireAuth, async (req: Request, res: Response) =>
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    console.error('Cancelar error:', error);
+    log.error({ err: error }, 'Cancelar error');
     res.status(500).json({ error: error.message || 'Error al cancelar factura' });
   }
 });
@@ -402,7 +405,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       })),
     });
   } catch (error) {
-    console.error('List invoices error:', error);
+    log.error({ err: error }, 'List invoices error');
     res.status(500).json({ error: 'Error al listar facturas' });
   }
 });
@@ -428,7 +431,7 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
       total: Number(invoice.total),
     });
   } catch (error) {
-    console.error('Get invoice error:', error);
+    log.error({ err: error }, 'Get invoice error');
     res.status(500).json({ error: 'Error al obtener factura' });
   }
 });

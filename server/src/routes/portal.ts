@@ -17,6 +17,9 @@ import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
+import { childLogger } from '../lib/logger';
+
+const log = childLogger('portal');
 
 const router = Router();
 
@@ -77,7 +80,7 @@ router.get('/:token', async (req: Request, res: Response) => {
       })),
     });
   } catch (error) {
-    console.error('Portal load error:', error);
+    log.error({ err: error }, 'Portal load error');
     res.status(500).json({ error: 'Error al cargar información' });
   }
 });
@@ -177,7 +180,7 @@ router.get('/:token/contract/:id', async (req: Request, res: Response) => {
       periodos,
     });
   } catch (error) {
-    console.error('Portal contract error:', error);
+    log.error({ err: error }, 'Portal contract error');
     res.status(500).json({ error: 'Error al obtener contrato' });
   }
 });
@@ -211,7 +214,7 @@ router.get('/:token/payments', async (req: Request, res: Response) => {
       })),
     });
   } catch (error) {
-    console.error('Portal payments error:', error);
+    log.error({ err: error }, 'Portal payments error');
     res.status(500).json({ error: 'Error al obtener pagos' });
   }
 });
@@ -245,7 +248,7 @@ router.get('/:token/invoices', async (req: Request, res: Response) => {
       })),
     });
   } catch (error) {
-    console.error('Portal invoices error:', error);
+    log.error({ err: error }, 'Portal invoices error');
     res.status(500).json({ error: 'Error al obtener facturas' });
   }
 });
@@ -267,7 +270,7 @@ router.post('/regenerate-token/:clientId', requireAuth, async (req: Request, res
       portalUrl: `/portal/${client.portalToken}`,
     });
   } catch (error: any) {
-    console.error('Portal regenerate error:', error);
+    log.error({ err: error }, 'Portal regenerate error');
     res.status(500).json({ error: error.message || 'Error al generar token' });
   }
 });

@@ -20,6 +20,9 @@
  *     tipo de evento.
  */
 import prisma from '../config/db';
+import { childLogger } from './logger';
+
+const log = childLogger('notificar');
 
 // ───────────────────────────────────────────────────────────────────
 // Tipos
@@ -116,7 +119,7 @@ export async function notificar(payload: NotificacionPayload): Promise<void> {
       skipDuplicates: true,
     });
   } catch (err) {
-    console.error('[notificar] error encolando notificación', err);
+    log.error({ err }, '[notificar] error encolando notificación');
   }
 }
 
@@ -153,7 +156,7 @@ export async function notificarPorRol(
       skipDuplicates: true,
     });
   } catch (err) {
-    console.error('[notificarPorRol] error encolando notificación', err);
+    log.error({ err }, '[notificarPorRol] error encolando notificación');
   }
 }
 
@@ -184,6 +187,6 @@ export async function notificarUsuario(
       },
     });
   } catch (err) {
-    console.error('[notificarUsuario] error encolando notificación', err);
+    log.error({ err }, '[notificarUsuario] error encolando notificación');
   }
 }

@@ -15,6 +15,9 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
+import { childLogger } from '../lib/logger';
+
+const log = childLogger('search');
 
 const router = Router();
 
@@ -183,7 +186,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ q, results, total: results.length });
   } catch (error: any) {
-    console.error('Search error:', error);
+    log.error({ err: error }, 'Search error');
     res.status(500).json({ error: error.message || 'Error en búsqueda' });
   }
 });

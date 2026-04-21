@@ -16,6 +16,9 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
+import { childLogger } from '../lib/logger';
+
+const log = childLogger('alerts');
 
 const router = Router();
 
@@ -225,7 +228,7 @@ router.get('/', requireAuth, async (_req: Request, res: Response) => {
       alerts,
     });
   } catch (error: any) {
-    console.error('Alerts error:', error);
+    log.error({ err: error }, 'Alerts error');
     res.status(500).json({ error: error.message || 'Error al obtener alertas' });
   }
 });

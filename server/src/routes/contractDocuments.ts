@@ -3,6 +3,9 @@ import { z } from 'zod';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
 import { uploadContrato, publicUrl, deleteIfExists } from '../middleware/upload';
+import { childLogger } from '../lib/logger';
+
+const log = childLogger('contractDocuments');
 
 const router = Router();
 
@@ -115,7 +118,7 @@ router.get('/contract/:contractId', requireAuth, async (req: Request, res: Respo
       etapas: porEtapa,
     });
   } catch (err) {
-    console.error('Get contract docs error:', err);
+    log.error({ err }, 'Get contract docs error');
     res.status(500).json({ error: 'Error al obtener documentos del contrato' });
   }
 });
@@ -149,7 +152,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     res.json(doc);
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors });
-    console.error('Update contract doc error:', err);
+    log.error({ err }, 'Update contract doc error');
     res.status(500).json({ error: 'Error al actualizar documento' });
   }
 });
@@ -172,7 +175,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     res.json(doc);
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors });
-    console.error('Create contract doc error:', err);
+    log.error({ err }, 'Create contract doc error');
     res.status(500).json({ error: 'Error al crear documento' });
   }
 });
@@ -185,7 +188,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
     await prisma.contractDocument.delete({ where: { id: req.params.id } });
     res.json({ ok: true });
   } catch (err) {
-    console.error('Delete contract doc error:', err);
+    log.error({ err }, 'Delete contract doc error');
     res.status(500).json({ error: 'Error al eliminar documento' });
   }
 });
@@ -217,7 +220,7 @@ router.post('/:id/upload', requireAuth, (req: Request, res: Response) => {
       });
       res.json({ ok: true, doc });
     } catch (e) {
-      console.error('Upload contract doc error:', e);
+      log.error({ err: e }, 'Upload contract doc error');
       res.status(500).json({ error: 'Error al guardar documento' });
     }
   });

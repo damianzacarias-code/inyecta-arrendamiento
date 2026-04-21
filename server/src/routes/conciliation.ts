@@ -23,6 +23,9 @@ import crypto from 'crypto';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
 import { parseCSV, ParsedTransaction } from '../services/csvParser';
+import { childLogger } from '../lib/logger';
+
+const log = childLogger('conciliation');
 
 const router = Router();
 
@@ -109,7 +112,7 @@ router.post('/upload', requireAuth, (req: Request, res: Response) => {
         warnings: parsed.errors,
       });
     } catch (error: any) {
-      console.error('Conciliation upload error:', error);
+      log.error({ err: error }, 'Conciliation upload error');
       res.status(500).json({ error: error.message || 'Error al procesar el archivo' });
     }
   });
@@ -131,7 +134,7 @@ router.get('/statements', requireAuth, async (_req: Request, res: Response) => {
       })),
     });
   } catch (error) {
-    console.error('Statements error:', error);
+    log.error({ err: error }, 'Statements error');
     res.status(500).json({ error: 'Error al listar estados de cuenta' });
   }
 });
@@ -155,7 +158,7 @@ router.get('/statements/:id', requireAuth, async (req: Request, res: Response) =
       })),
     });
   } catch (error) {
-    console.error('Statement detail error:', error);
+    log.error({ err: error }, 'Statement detail error');
     res.status(500).json({ error: 'Error al obtener detalle' });
   }
 });
@@ -306,7 +309,7 @@ router.post('/auto-match/:statementId', requireAuth, async (req: Request, res: R
       suggestions,
     });
   } catch (error: any) {
-    console.error('Auto-match error:', error);
+    log.error({ err: error }, 'Auto-match error');
     res.status(500).json({ error: error.message || 'Error en auto-match' });
   }
 });
@@ -388,7 +391,7 @@ router.post('/match', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ ok: true, transaction: { ...updated, monto: Number(updated.monto) }, paymentId });
   } catch (error: any) {
-    console.error('Match error:', error);
+    log.error({ err: error }, 'Match error');
     res.status(500).json({ error: error.message || 'Error al conciliar' });
   }
 });
@@ -409,7 +412,7 @@ router.post('/unmatch', requireAuth, async (req: Request, res: Response) => {
     });
     res.json({ ok: true, transaction: { ...tx, monto: Number(tx.monto) } });
   } catch (error: any) {
-    console.error('Unmatch error:', error);
+    log.error({ err: error }, 'Unmatch error');
     res.status(500).json({ error: error.message || 'Error al deshacer conciliación' });
   }
 });
@@ -420,7 +423,7 @@ router.delete('/statements/:id', requireAuth, async (req: Request, res: Response
     await prisma.bankStatement.delete({ where: { id: req.params.id } });
     res.json({ ok: true });
   } catch (error: any) {
-    console.error('Delete statement error:', error);
+    log.error({ err: error }, 'Delete statement error');
     res.status(500).json({ error: error.message || 'Error al borrar estado de cuenta' });
   }
 });

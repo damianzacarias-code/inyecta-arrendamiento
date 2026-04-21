@@ -4,6 +4,9 @@ import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
 import { calcularArrendamiento, generarOpcionesRiesgo } from '../services/leaseCalculator';
 import { notificar } from '../lib/notificar';
+import { childLogger } from '../lib/logger';
+
+const log = childLogger('quotations');
 
 const router = Router();
 
@@ -150,7 +153,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    console.error('Create quotation error:', error);
+    log.error({ err: error }, 'Create quotation error');
     return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
@@ -166,7 +169,7 @@ async function autoExpireQuotations(): Promise<void> {
       data: { estado: 'VENCIDA' },
     });
   } catch (err) {
-    console.error('autoExpireQuotations error:', err);
+    log.error({ err }, 'autoExpireQuotations error');
   }
 }
 
@@ -199,7 +202,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
     return res.json({ data: quotations, total, page: parseInt(page as string), pages: Math.ceil(total / parseInt(limit as string)) });
   } catch (error) {
-    console.error('List quotations error:', error);
+    log.error({ err: error }, 'List quotations error');
     return res.status(500).json({ error: 'Error interno' });
   }
 });
@@ -258,7 +261,7 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
 
     return res.json({ ...quotation, amortizacion });
   } catch (error) {
-    console.error('Get quotation error:', error);
+    log.error({ err: error }, 'Get quotation error');
     return res.status(500).json({ error: 'Error interno' });
   }
 });
@@ -301,7 +304,7 @@ router.post('/simulate', requireAuth, async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    console.error('Simulate error:', error);
+    log.error({ err: error }, 'Simulate error');
     return res.status(500).json({ error: 'Error interno' });
   }
 });
@@ -346,7 +349,7 @@ router.patch('/:id/estado', requireAuth, async (req: Request, res: Response) => 
     return res.json(updated);
   } catch (error) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
-    console.error('Update estado error:', error);
+    log.error({ err: error }, 'Update estado error');
     return res.status(500).json({ error: 'Error interno' });
   }
 });
@@ -448,7 +451,7 @@ router.post('/:id/convert', requireAuth, async (req: Request, res: Response) => 
 
     return res.status(201).json(contract);
   } catch (error) {
-    console.error('Convert quotation error:', error);
+    log.error({ err: error }, 'Convert quotation error');
     return res.status(500).json({ error: 'Error interno al convertir' });
   }
 });

@@ -3,6 +3,9 @@ import { z } from 'zod';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
 import { notificar, notificarPorRol } from '../lib/notificar';
+import { childLogger } from '../lib/logger';
+
+const log = childLogger('cobranza');
 
 const router = Router();
 const IVA = 0.16;
@@ -256,7 +259,7 @@ router.get('/calendar', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ month: targetMonth + 1, year: targetYear, data: filtered, summary });
   } catch (error) {
-    console.error('Calendar error:', error);
+    log.error({ err: error }, 'Calendar error');
     res.status(500).json({ error: 'Error al obtener calendario' });
   }
 });
@@ -343,7 +346,7 @@ router.get('/contract/:contractId', requireAuth, async (req: Request, res: Respo
       },
     });
   } catch (error) {
-    console.error('Contract schedule error:', error);
+    log.error({ err: error }, 'Contract schedule error');
     res.status(500).json({ error: 'Error al obtener tabla de pagos' });
   }
 });
@@ -516,7 +519,7 @@ router.post('/pay', requireAuth, async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    console.error('Payment error:', error);
+    log.error({ err: error }, 'Payment error');
     res.status(500).json({ error: 'Error al registrar pago' });
   }
 });
@@ -633,7 +636,7 @@ router.post('/pay-advance', requireAuth, async (req: Request, res: Response) => 
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    console.error('Advance payment error:', error);
+    log.error({ err: error }, 'Advance payment error');
     res.status(500).json({ error: 'Error al registrar pagos adelantados' });
   }
 });
@@ -712,7 +715,7 @@ router.get('/estado-cuenta/:contractId', requireAuth, async (req: Request, res: 
       periodos: conAdeudo,
     });
   } catch (error) {
-    console.error('Estado cuenta error:', error);
+    log.error({ err: error }, 'Estado cuenta error');
     res.status(500).json({ error: 'Error al generar estado de cuenta' });
   }
 });
@@ -914,7 +917,7 @@ router.post('/pay-extra', requireAuth, async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    console.error('Pay extra error:', error);
+    log.error({ err: error }, 'Pay extra error');
     res.status(500).json({ error: 'Error al aplicar abono extra' });
   }
 });
@@ -993,7 +996,7 @@ router.get('/payment/:id/recibo', requireAuth, async (req: Request, res: Respons
         : null,
     });
   } catch (error) {
-    console.error('Recibo error:', error);
+    log.error({ err: error }, 'Recibo error');
     res.status(500).json({ error: 'Error al obtener recibo' });
   }
 });
@@ -1070,7 +1073,7 @@ router.post('/seed-amortization', requireAuth, async (req: Request, res: Respons
 
     res.json({ seeded: results.length, contracts: results });
   } catch (error) {
-    console.error('Seed amortization error:', error);
+    log.error({ err: error }, 'Seed amortization error');
     res.status(500).json({ error: 'Error al generar amortizacion' });
   }
 });
@@ -1085,7 +1088,7 @@ router.delete('/payment/:id', requireAuth, async (req: Request, res: Response) =
     await prisma.payment.delete({ where: { id: req.params.id } });
     res.json({ ok: true, deleted: payment });
   } catch (error) {
-    console.error('Delete payment error:', error);
+    log.error({ err: error }, 'Delete payment error');
     res.status(500).json({ error: 'Error al cancelar pago' });
   }
 });

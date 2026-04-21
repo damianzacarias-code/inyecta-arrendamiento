@@ -3,6 +3,9 @@ import { z } from 'zod';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
 import { uploadCliente, publicUrl, deleteIfExists } from '../middleware/upload';
+import { childLogger } from '../lib/logger';
+
+const log = childLogger('documents');
 
 const router = Router();
 
@@ -156,7 +159,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    console.error('Documents error:', error);
+    log.error({ err: error }, 'Documents error');
     res.status(500).json({ error: 'Error al obtener documentos' });
   }
 });
@@ -188,7 +191,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     res.status(201).json(doc);
   } catch (error) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
-    console.error('Create document error:', error);
+    log.error({ err: error }, 'Create document error');
     res.status(500).json({ error: 'Error al crear documento' });
   }
 });
@@ -232,7 +235,7 @@ router.post('/init-checklist', requireAuth, async (req: Request, res: Response) 
 
     res.json({ created: toCreate.length, tipos: toCreate.map(c => c.tipo) });
   } catch (error) {
-    console.error('Init checklist error:', error);
+    log.error({ err: error }, 'Init checklist error');
     res.status(500).json({ error: 'Error al inicializar checklist' });
   }
 });
@@ -252,7 +255,7 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
     res.json(doc);
   } catch (error) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
-    console.error('Update document error:', error);
+    log.error({ err: error }, 'Update document error');
     res.status(500).json({ error: 'Error al actualizar documento' });
   }
 });
@@ -265,7 +268,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
     await prisma.clientDocument.delete({ where: { id: req.params.id } });
     res.json({ ok: true });
   } catch (error) {
-    console.error('Delete document error:', error);
+    log.error({ err: error }, 'Delete document error');
     res.status(500).json({ error: 'Error al eliminar documento' });
   }
 });
@@ -306,7 +309,7 @@ router.post('/:id/upload', requireAuth, (req: Request, res: Response) => {
       });
       res.json({ ok: true, doc, fileSize: req.file.size, fileName: req.file.originalname });
     } catch (e) {
-      console.error('Upload doc error:', e);
+      log.error({ err: e }, 'Upload doc error');
       res.status(500).json({ error: 'Error al guardar documento' });
     }
   });

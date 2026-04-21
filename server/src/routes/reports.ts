@@ -1,6 +1,9 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
+import { childLogger } from '../lib/logger';
+
+const log = childLogger('reports');
 
 const router = Router();
 
@@ -92,7 +95,7 @@ router.get('/cartera', requireAuth, async (_req: Request, res: Response) => {
 
     res.json({ totales, filas });
   } catch (err) {
-    console.error('Reporte cartera error:', err);
+    log.error({ err }, 'Reporte cartera error');
     res.status(500).json({ error: 'Error al generar reporte de cartera' });
   }
 });
@@ -153,7 +156,7 @@ router.get('/cobranza-mensual', requireAuth, async (req: Request, res: Response)
 
     res.json({ year, meses, totales, eficienciaAnual });
   } catch (err) {
-    console.error('Reporte cobranza mensual error:', err);
+    log.error({ err }, 'Reporte cobranza mensual error');
     res.status(500).json({ error: 'Error al generar reporte mensual' });
   }
 });
@@ -208,7 +211,7 @@ router.get('/rentabilidad', requireAuth, async (_req: Request, res: Response) =>
 
     res.json({ totales, filas });
   } catch (err) {
-    console.error('Reporte rentabilidad error:', err);
+    log.error({ err }, 'Reporte rentabilidad error');
     res.status(500).json({ error: 'Error al generar reporte de rentabilidad' });
   }
 });
@@ -313,7 +316,7 @@ router.get('/portafolio', requireAuth, async (_req: Request, res: Response) => {
       topContratos: top,
     });
   } catch (err) {
-    console.error('Reporte portafolio error:', err);
+    log.error({ err }, 'Reporte portafolio error');
     res.status(500).json({ error: 'Error al generar reporte de portafolio' });
   }
 });
@@ -405,7 +408,7 @@ router.get('/produccion-mensual', requireAuth, async (req: Request, res: Respons
 
     res.json({ year, meses, totales, ticketPromedioAnual });
   } catch (err) {
-    console.error('Reporte producción mensual error:', err);
+    log.error({ err }, 'Reporte producción mensual error');
     res.status(500).json({ error: 'Error al generar reporte de producción' });
   }
 });
@@ -561,7 +564,7 @@ router.get('/metricas', requireAuth, async (_req: Request, res: Response) => {
       },
     });
   } catch (err) {
-    console.error('Reporte métricas error:', err);
+    log.error({ err }, 'Reporte métricas error');
     res.status(500).json({ error: 'Error al generar métricas generales' });
   }
 });

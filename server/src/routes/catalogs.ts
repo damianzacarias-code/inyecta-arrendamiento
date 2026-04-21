@@ -1,6 +1,9 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
+import { childLogger } from '../lib/logger';
+
+const log = childLogger('catalogs');
 
 const router = Router();
 
@@ -13,7 +16,7 @@ router.get('/asset-categories', requireAuth, async (_req: Request, res: Response
     });
     return res.json(categories);
   } catch (error) {
-    console.error('Error fetching categories:', error);
+    log.error({ err: error }, 'Error fetching categories');
     return res.status(500).json({ error: 'Error interno' });
   }
 });

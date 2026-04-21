@@ -2,6 +2,9 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
+import { childLogger } from '../lib/logger';
+
+const log = childLogger('gps');
 
 const router = Router();
 
@@ -103,7 +106,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ data: devices, sinGPS, summary });
   } catch (error) {
-    console.error('List GPS error:', error);
+    log.error({ err: error }, 'List GPS error');
     res.status(500).json({ error: 'Error al obtener dispositivos GPS' });
   }
 });
@@ -125,7 +128,7 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
     if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
     res.json(device);
   } catch (error) {
-    console.error('Get GPS error:', error);
+    log.error({ err: error }, 'Get GPS error');
     res.status(500).json({ error: 'Error al obtener dispositivo' });
   }
 });
@@ -160,7 +163,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    console.error('Create GPS error:', error);
+    log.error({ err: error }, 'Create GPS error');
     res.status(500).json({ error: 'Error al crear dispositivo' });
   }
 });
@@ -183,7 +186,7 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
-    console.error('Update GPS error:', error);
+    log.error({ err: error }, 'Update GPS error');
     res.status(500).json({ error: 'Error al actualizar dispositivo' });
   }
 });
@@ -207,7 +210,7 @@ router.post('/:id/uninstall', requireAuth, async (req: Request, res: Response) =
 
     res.json(updated);
   } catch (error) {
-    console.error('Uninstall GPS error:', error);
+    log.error({ err: error }, 'Uninstall GPS error');
     res.status(500).json({ error: 'Error al retirar dispositivo' });
   }
 });
@@ -218,7 +221,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
     await prisma.gPSDevice.delete({ where: { id: req.params.id } });
     res.json({ ok: true });
   } catch (error) {
-    console.error('Delete GPS error:', error);
+    log.error({ err: error }, 'Delete GPS error');
     res.status(500).json({ error: 'Error al eliminar dispositivo' });
   }
 });
