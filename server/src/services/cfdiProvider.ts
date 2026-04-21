@@ -18,6 +18,7 @@
  */
 
 import crypto from 'crypto';
+import { config } from '../config/env';
 
 export interface CfdiInvoiceInput {
   serie: string;
@@ -85,13 +86,14 @@ export interface ICfdiProvider {
   cancelar(uuid: string, motivo: string): Promise<CfdiCancelacionResult>;
 }
 
-// Datos del emisor (configurables vía .env)
+// Datos del emisor (configurables vía config/env tipado).
 function emisor() {
+  const e = config.cfdi.emisor;
   return {
-    rfc:     process.env.CFDI_EMISOR_RFC     || 'FSC123456ABC',
-    nombre:  process.env.CFDI_EMISOR_NOMBRE  || 'FSMP SOLUCIONES DE CAPITAL SA DE CV',
-    regimen: process.env.CFDI_EMISOR_REGIMEN || '601',
-    cp:      process.env.CFDI_LUGAR_EXPEDICION || '78215', // SLP, sede Inyecta
+    rfc:     e.rfc             || 'FSC123456ABC',
+    nombre:  e.nombre          || 'FSMP SOLUCIONES DE CAPITAL SA DE CV',
+    regimen: e.regimen         || '601',
+    cp:      e.lugarExpedicion || '78215', // SLP, sede Inyecta
   };
 }
 
@@ -208,14 +210,15 @@ class FacturamaProvider implements ICfdiProvider {
   private readonly authHeader: string;
 
   constructor() {
-    const user = process.env.FACTURAMA_USER;
-    const pass = process.env.FACTURAMA_PASS;
+    const { user, pass, sandbox } = config.cfdi.facturama;
+    // env.ts ya valida que si CFDI_PROVIDER=FACTURAMA, user/pass existen.
+    // Este check es defensa en profundidad por si alguien instancia FacturamaProvider
+    // directamente sin pasar por getCfdiProvider().
     if (!user || !pass) {
       throw new Error(
         'Provider FACTURAMA requiere FACTURAMA_USER y FACTURAMA_PASS en el entorno.',
       );
     }
-    const sandbox = (process.env.FACTURAMA_SANDBOX || 'true').toLowerCase() === 'true';
     this.baseUrl = sandbox
       ? 'https://apisandbox.facturama.mx'
       : 'https://api.facturama.mx';
@@ -388,10 +391,10 @@ let _instance: ICfdiProvider | null = null;
 
 export function getCfdiProvider(): ICfdiProvider {
   if (_instance) return _instance;
-  const provider = (process.env.CFDI_PROVIDER || 'MOCK').toUpperCase();
-  switch (provider) {
+  switch (config.cfdi.provider) {
     case 'FACTURAMA': _instance = new FacturamaProvider(); break;
     case 'SW': _instance = new SwSapienProvider(); break;
+    case 'MOCK':
     default: _instance = new MockCfdiProvider(); break;
   }
   return _instance;

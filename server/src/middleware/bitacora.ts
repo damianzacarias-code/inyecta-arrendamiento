@@ -25,6 +25,7 @@
  */
 import type { Request, Response, NextFunction } from 'express';
 import prisma from '../config/db';
+import { config } from '../config/env';
 
 // ───────────────────────────────────────────────────────────────────
 // Sanitización de payloads
@@ -126,7 +127,7 @@ export interface BitacoraOptions {
   logReads?: boolean;
 }
 
-const LOG_GETS = process.env.BITACORA_LOG_GETS === 'true';
+const LOG_GETS = config.bitacoraLogGets;
 
 export function bitacora(opts: BitacoraOptions = {}) {
   return (req: Request, res: Response, next: NextFunction) => {
