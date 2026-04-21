@@ -792,6 +792,7 @@ model Notificacion {
 
 model Bitacora {
   id          String   @id @default(cuid())
+  requestId   String?                       // X-Request-ID propagado por requestId middleware (correlación con logs pino)
   usuarioId   String?
   usuarioEmail String?            // snapshot del email al momento del evento
   usuarioRol  String?             // snapshot del rol
@@ -813,5 +814,7 @@ model Bitacora {
   // Útil para "actividad del usuario X en los últimos 30 días" del visor
   // de bitácora (filtros usuarioId + rango de fechas).
   @@index([usuarioId, createdAt])
+  // Lookup directo por correlation-id desde un log estructurado de pino.
+  @@index([requestId])
   @@map("bitacora")
 }

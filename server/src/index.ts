@@ -25,6 +25,9 @@ import bitacoraRoutes from './routes/bitacora';
 import notificacionesRoutes from './routes/notificaciones';
 import { bitacora } from './middleware/bitacora';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
+import { requestId } from './middleware/requestId';
+import { logger, httpLogger } from './lib/logger';
+import { installShutdown } from './lib/shutdown';
 
 const app = express();
 
@@ -34,6 +37,19 @@ const app = express();
 // `1` = confía en el primer hop (típico setup de un solo proxy).
 // ─────────────────────────────────────────────────────────────────
 app.set('trust proxy', 1);
+
+// ─────────────────────────────────────────────────────────────────
+// Request ID — UUID por request para correlación de logs.
+// Debe ir ANTES de pino-http (para que el logger lo recoja) y ANTES
+// de la bitácora (para que se persista junto a la entrada).
+// ─────────────────────────────────────────────────────────────────
+app.use(requestId());
+
+// ─────────────────────────────────────────────────────────────────
+// HTTP logger — pino-http registra una línea por request con
+// { reqId, method, url, statusCode, responseTime }. Ignora /api/health*.
+// ─────────────────────────────────────────────────────────────────
+app.use(httpLogger);
 
 // ─────────────────────────────────────────────────────────────────
 // Helmet — security headers (HSTS, X-Frame-Options, X-Content-Type, etc.)
@@ -70,7 +86,7 @@ app.use(
       if (corsOrigins.includes(origin)) return cb(null, true);
       // Origen no autorizado: NO lanzamos error (eso devolvería 500).
       // Simplemente omitimos los headers CORS — el browser bloqueará.
-      console.warn(`[cors] Origen rechazado: ${origin}`);
+      logger.warn({ origin }, '[cors] origen rechazado');
       return cb(null, false);
     },
     credentials: true,
@@ -174,10 +190,19 @@ app.use('/api', notFoundHandler);
 // Error handler central — DEBE ir al final (4 args: err, req, res, next)
 app.use(errorHandler);
 
-// Start
-app.listen(config.port, () => {
-  console.log(`🏢 Inyecta Arrendamiento API running on port ${config.port}`);
-  console.log(`   Environment: ${config.nodeEnv}`);
+// ─────────────────────────────────────────────────────────────────
+// Start + graceful shutdown
+// ─────────────────────────────────────────────────────────────────
+const server = app.listen(config.port, () => {
+  logger.info(
+    { port: config.port, env: config.nodeEnv },
+    `🏢 Inyecta Arrendamiento API escuchando en :${config.port}`,
+  );
 });
+
+// SIGTERM / SIGINT → cierra HTTP server primero (drena requests en
+// vuelo, deja de aceptar nuevos), después libera Prisma. Si algo se
+// cuelga, hard-kill a los 10s para no quedarnos atorados en producción.
+installShutdown(server, prisma);
 
 export default app;

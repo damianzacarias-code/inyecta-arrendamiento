@@ -172,6 +172,8 @@ async function registrar(req: Request, res: Response, opts: BitacoraOptions) {
 
   await prisma.bitacora.create({
     data: {
+      // pino-http amplía Request.id como string|number; nosotros guardamos string.
+      requestId: req.id != null ? String(req.id) : null,
       usuarioId: req.user?.userId ?? null,
       usuarioEmail: req.user?.email ?? null,
       usuarioRol: req.user?.rol ?? null,

@@ -25,6 +25,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { Prisma } from '@prisma/client';
 import { ZodError } from 'zod';
 import { config } from '../config/env';
+import { logger } from '../lib/logger';
 
 // ───────────────────────────────────────────────────────────────────
 // AppError — para errores de negocio explícitos
@@ -100,6 +101,7 @@ export function notFoundHandler(req: Request, res: Response, _next: NextFunction
     error: {
       code: 'ROUTE_NOT_FOUND',
       message: `Ruta no encontrada: ${req.method} ${req.originalUrl}`,
+      ...(req.id ? { requestId: String(req.id) } : {}),
     },
   });
 }
@@ -111,7 +113,7 @@ export function notFoundHandler(req: Request, res: Response, _next: NextFunction
 export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction) {
   // Si ya se enviaron headers, delegamos a Express (para que cierre el stream)
   if (res.headersSent) {
-    console.error('[errorHandler] Headers ya enviados, error:', err);
+    logger.error({ err, reqId: req.id }, '[errorHandler] headers ya enviados');
     return;
   }
 
@@ -193,8 +195,13 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
 
   // ── 6. Catch-all ──────────────────────────────────────────────
   const message = err instanceof Error ? err.message : 'Error interno';
-  // Loggea el stack siempre — clave para debugging post-mortem
-  console.error('[errorHandler] Error no manejado:', err);
+  // Loggea el stack siempre — clave para debugging post-mortem.
+  // Usamos pino (no console) para que en producción salga JSON una-línea
+  // con los campos correctos (incluido reqId para correlación).
+  logger.error(
+    { err, reqId: req.id, method: req.method, url: req.originalUrl },
+    '[errorHandler] error no manejado',
+  );
   return res.status(500).json({
     error: {
       code: 'INTERNAL_ERROR',
@@ -203,6 +210,8 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
       ...(config.nodeEnv === 'development' && err instanceof Error
         ? { details: { stack: err.stack?.split('\n').slice(0, 6) } }
         : {}),
+      // Eco del requestId — el cliente puede pegárnoslo para soporte.
+      ...(req.id ? { requestId: String(req.id) } : {}),
     },
   });
 }
