@@ -12,7 +12,7 @@
 
 import { useEffect } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { FormSection, SelectField, TextField } from './fields';
+import { FormSection, SelectField, TextField } from '@/components/wizard/fields';
 import {
   estadoCivilOptions,
   estadosOptions,

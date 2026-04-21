@@ -29,7 +29,10 @@ import {
   type CreateClientInput,
 } from '@/schemas/client';
 import { WIZARD_STEPS } from './clienteNuevo/constants';
-import { WizardShell, type WizardStep } from './clienteNuevo/WizardShell';
+import {
+  WizardShell,
+  type WizardStep,
+} from '@/components/wizard/WizardShell';
 import { Step1Identidad } from './clienteNuevo/Step1Identidad';
 import { Step2Domicilio } from './clienteNuevo/Step2Domicilio';
 import { Step3RepresentanteLegal } from './clienteNuevo/Step3RepresentanteLegal';

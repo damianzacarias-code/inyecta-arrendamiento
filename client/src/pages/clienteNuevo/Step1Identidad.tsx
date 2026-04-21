@@ -9,7 +9,7 @@
 import { useFormContext } from 'react-hook-form';
 import { Building2, User } from 'lucide-react';
 import { clsx } from 'clsx';
-import { FormSection, TextField } from './fields';
+import { FormSection, TextField } from '@/components/wizard/fields';
 
 export function Step1Identidad() {
   const { watch, setValue } = useFormContext();

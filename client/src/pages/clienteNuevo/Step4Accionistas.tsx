@@ -16,7 +16,7 @@ import {
   FormSection,
   SelectField,
   TextField,
-} from './fields';
+} from '@/components/wizard/fields';
 import {
   estadoCivilOptions,
   estadosOptions,

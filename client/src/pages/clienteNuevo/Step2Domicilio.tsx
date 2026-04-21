@@ -6,7 +6,7 @@
 
 import { useEffect } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { FormSection, SelectField, TextField } from './fields';
+import { FormSection, SelectField, TextField } from '@/components/wizard/fields';
 import { estadosOptions } from './constants';
 
 /** Campos del domicilio fiscal que se espejean al de operación. */
