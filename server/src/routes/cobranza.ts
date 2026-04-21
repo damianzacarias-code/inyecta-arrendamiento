@@ -397,33 +397,48 @@ router.post('/pay', requireAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Este periodo ya está completamente pagado' });
     }
 
-    // Aplicar pago en orden: moratorios (+IVA) → renta (+IVA)
+    // Aplicar pago: prelación legal (moratorio → renta), pero DENTRO de cada
+    // bucket el efectivo se reparte PROPORCIONAL entre principal e IVA
+    // (regla 86.21% / 13.79% — el IVA no se paga "antes", se causa con cada
+    //  peso de ingreso reconocido). Si el bucket no tiene IVA pendiente
+    //  (p. ej. ya se cubrió en pagos previos), todo va al principal.
     let restante = data.monto;
 
-    // 1. Moratorios pendientes
-    let aplicadoMoratorio = 0;
-    let aplicadoIVAMoratorio = 0;
-    if (conceptos.desglose.moratorioPendiente > 0 && restante > 0) {
-      aplicadoMoratorio = Math.min(restante, conceptos.desglose.moratorioPendiente);
-      restante -= aplicadoMoratorio;
-      // IVA del moratorio
-      const ivaDelMoratorio = Math.round(aplicadoMoratorio * IVA * 100) / 100;
-      aplicadoIVAMoratorio = Math.min(restante, Math.min(ivaDelMoratorio, conceptos.desglose.ivaMoratorioPendiente));
-      restante -= aplicadoIVAMoratorio;
+    /** Reparte `cash` entre (principal, iva) en proporción a sus saldos pendientes. */
+    function splitProporcional(cash: number, principalPendiente: number, ivaPendiente: number) {
+      const totalBucket = principalPendiente + ivaPendiente;
+      if (totalBucket <= 0.005 || cash <= 0) return { aPrincipal: 0, aIva: 0, used: 0 };
+      const aplica = Math.min(cash, totalBucket);
+      // Si no hay IVA pendiente, todo va a principal (evita división y deja saldo limpio).
+      if (ivaPendiente <= 0.005) return { aPrincipal: round2(aplica), aIva: 0, used: round2(aplica) };
+      if (principalPendiente <= 0.005) return { aPrincipal: 0, aIva: round2(aplica), used: round2(aplica) };
+      // Split proporcional
+      const aPrincipalRaw = aplica * (principalPendiente / totalBucket);
+      const aIvaRaw       = aplica - aPrincipalRaw; // garantiza suma exacta antes de redondeo
+      const aPrincipal = round2(aPrincipalRaw);
+      const aIva       = round2(aplica - aPrincipal); // residuo de redondeo cae en IVA
+      return { aPrincipal, aIva, used: round2(aPrincipal + aIva) };
     }
 
-    // 2. Renta pendiente
-    let aplicadoRenta = 0;
-    let aplicadoIVARenta = 0;
-    if (conceptos.desglose.rentaPendiente > 0 && restante > 0) {
-      aplicadoRenta = Math.min(restante, conceptos.desglose.rentaPendiente);
-      restante -= aplicadoRenta;
-      // IVA de la renta
-      if (conceptos.desglose.ivaPendiente > 0 && restante > 0) {
-        aplicadoIVARenta = Math.min(restante, conceptos.desglose.ivaPendiente);
-        restante -= aplicadoIVARenta;
-      }
-    }
+    // 1. Bucket MORATORIO (interés moratorio + su IVA, repartidos proporcional)
+    const splitMor = splitProporcional(
+      restante,
+      conceptos.desglose.moratorioPendiente,
+      conceptos.desglose.ivaMoratorioPendiente,
+    );
+    const aplicadoMoratorio    = splitMor.aPrincipal;
+    const aplicadoIVAMoratorio = splitMor.aIva;
+    restante = round2(restante - splitMor.used);
+
+    // 2. Bucket RENTA (renta + IVA renta, repartidos proporcional)
+    const splitRenta = splitProporcional(
+      restante,
+      conceptos.desglose.rentaPendiente,
+      conceptos.desglose.ivaPendiente,
+    );
+    const aplicadoRenta    = splitRenta.aPrincipal;
+    const aplicadoIVARenta = splitRenta.aIva;
+    restante = round2(restante - splitRenta.used);
 
     const montoTotal = aplicadoMoratorio + aplicadoIVAMoratorio + aplicadoRenta + aplicadoIVARenta;
 
