@@ -735,6 +735,283 @@ Sesión de pulido (post-T13):
 Limpieza post-T13: secuencia D→B→A→C→E→H ejecutada en una sola
 pasada autónoma. tsc --noEmit limpio + 38/38 tests pasan después
 de cada commit.
+
+──────────────────────────────────────────────────────────────────
+Sesión de hardening — Bloque A (20-04-2026, autónoma)
+──────────────────────────────────────────────────────────────────
+Objetivo: 6 mejoras de bajo riesgo que NO tocan reglas de negocio,
+ejecutadas como una pasada para hacer el backend production-ready.
+Verificación end-to-end con curl después de cada paso. tsc --noEmit
+limpio en todo el bloque. Backend en watch (tsx) no rompió.
+
+  - [x] A1: ENV validation con Zod
+        server/src/config/env.ts reescrito con esquema Zod estricto:
+        * NODE_ENV / PORT / DATABASE_URL (regex postgres://) /
+          JWT_SECRET / JWT_EXPIRES_IN / BITACORA_LOG_GETS /
+          CFDI_PROVIDER (enum MOCK|FACTURAMA|SW) + bloque emisor +
+          bloque Facturama + CORS_ALLOWED_ORIGINS.
+        * superRefine: en production exige JWT_SECRET ≥32 chars y
+          rechaza el secret de desarrollo. Si CFDI_PROVIDER=FACTURAMA,
+          exige FACTURAMA_USER+PASS.
+        * boolFromString: coerciona "true"/"1"/"yes"/"on" → boolean
+          (dotenv solo entrega strings).
+        * Si la validación falla → process.exit(1) con reporte
+          formateado a stderr (path + mensaje por error).
+        * Export `config` retro-compatible: agrega config.cfdi.*,
+          config.cors.*, config.bitacoraLogGets sin romper imports
+          existentes.
+        Migrados a tipo de `config` (en vez de process.env crudo):
+          - server/src/config/db.ts (config.nodeEnv)
+          - server/src/middleware/bitacora.ts (config.bitacoraLogGets)
+          - server/src/services/cfdiProvider.ts (config.cfdi.emisor.*,
+            .facturama.*, .provider con enum tipado)
+        server/.env.example actualizado con las 13 variables
+        documentadas (descripción, valores aceptados, ejemplos).
+        Verificado: backend reload OK, GET /api/health 200; pruebas
+        con DATABASE_URL inválido y JWT_SECRET corto en production
+        abortan con mensaje claro.
+
+  - [x] A2: Health check con DB ping
+        GET /api/health ahora pingea Prisma (`SELECT 1`) con timeout
+        defensivo de 3s:
+          * 200 OK: { status, db:{status, latencyMs}, uptime, env, ts }
+          * 503 degraded: { status:'degraded', db:{status:'fail',
+            latencyMs, error}, ... } — para que k8s/LB dejen de mandar
+            tráfico cuando la DB se cae.
+        GET /api/health/live agregado: liveness puro (no toca DB),
+        para k8s livenessProbe que NO debe matar el pod por una caída
+        transitoria de Postgres.
+        Smoke test: latency ~5ms en local. Endpoints fuera de auth y
+        fuera de bitácora (no inflan la tabla).
+
+  - [x] A3: Error middleware global normalizado
+        server/src/middleware/errorHandler.ts (NUEVO) — formato único
+        para errores no atrapados:
+          { error: { code: string, message: string, details?: unknown } }
+        Mapping:
+          * AppError (clase exportada) → status custom + code + details
+          * ZodError → 400 VALIDATION_ERROR + lista [{path,message,code}]
+          * Prisma.PrismaClientKnownRequestError →
+              P2000 → 400 VALUE_TOO_LONG
+              P2002 → 409 UNIQUE_VIOLATION (con campos del meta.target)
+              P2003 → 409 FOREIGN_KEY_VIOLATION
+              P2014 → 400 RELATION_VIOLATION
+              P2025 → 404 NOT_FOUND
+              P2021/P2022 → 500 SCHEMA_MISMATCH
+              default → 400 PRISMA_<code>
+          * Prisma.PrismaClientValidationError → 400 PRISMA_VALIDATION
+          * SyntaxError de body-parser → 400 INVALID_JSON
+          * PayloadTooLargeError → 413 PAYLOAD_TOO_LARGE
+          * Catch-all → 500 INTERNAL_ERROR (oculta stack en prod)
+        Helper exportado: `asyncHandler(fn)` para wrappear handlers
+        async (Express 4 no atrapa promises rechazadas).
+        notFoundHandler exportado para /api/* sin match → 404
+        ROUTE_NOT_FOUND.
+        Mounted en index.ts AL FINAL: `app.use('/api', notFoundHandler)`
+        + `app.use(errorHandler)`.
+        NOTA: rutas legacy con `{error:'string'}` inline NO se tocaron
+        (out of scope). El nuevo formato cubre 404s, body-parser
+        errors, errores no atrapados y futuras rutas que usen
+        AppError + asyncHandler.
+        Smoke test: 404 → ROUTE_NOT_FOUND; bad JSON → INVALID_JSON;
+        body >1mb → PAYLOAD_TOO_LARGE.
+
+  - [x] A4: Rate limit en /api/auth/login
+        Instalado: express-rate-limit ^8.x.
+        server/src/middleware/rateLimit.ts (NUEVO):
+          * loginLimiter: 5 intentos / 15min / IP, con
+            skipSuccessfulRequests:true (logins OK no queman cuota,
+            usuarios legítimos no se bloquean tras typo).
+          * Devuelve 429 con shape normalizado:
+              { error: {code:'RATE_LIMITED', message,
+                        details:{retryAfter}} }
+          * standardHeaders:true (RateLimit-* RFC), legacy off.
+        Mounted en routes/auth.ts: `router.post('/login',
+        loginLimiter, async ...)`.
+        Smoke test: intentos 1-5 → 401 normal, intentos 6-7 → 429
+        RATE_LIMITED con retryAfter:900.
+        Identificador = IP solo (no email) para no leak user-enum.
+        Reservado en el archivo: pattern para apiLimiter futuro.
+
+  - [x] A5: Helmet + CORS whitelist + body size
+        Instalado: helmet ^8.x.
+        server/src/index.ts:
+          * `app.set('trust proxy', 1)` — para que req.ip refleje
+            X-Forwarded-For cuando estemos detrás de LB/nginx.
+          * `app.use(helmet({...}))` con dos overrides:
+              - contentSecurityPolicy:false (somos API, sin HTML)
+              - crossOriginResourcePolicy:'cross-origin' (para que
+                el frontend en otro origen consuma /uploads)
+            Resultado: HSTS + X-Frame + X-Content-Type-Options +
+            X-DNS-Prefetch-Control + X-Powered-By removed.
+          * CORS: whitelist desde config.cors.allowedOrigins
+            (CSV en ENV). Sin var en development → default
+            ['http://localhost:5173','http://localhost:3000'].
+            En production sin var → array vacío (failsafe: bloquea
+            todo en lugar de permitir todo).
+            Origen no autorizado: omite headers CORS y deja que el
+            browser bloquee (NO lanza Error → no 500 en logs).
+            Loggea warn una vez por origen rechazado.
+          * express.json({limit:'1mb'}) (antes 10mb).
+            express.urlencoded({extended:true, limit:'1mb'}).
+            Las cargas pesadas pasan por multer (middleware/upload.ts
+            y routes/conciliation.ts), no por body parser.
+        Smoke test: helmet headers presentes; CORS allow para
+        localhost:5173, deny para evil.com (sin Access-Control-*);
+        body 1.1mb → 413 PAYLOAD_TOO_LARGE (mapeo de A3).
+
+  - [x] A6: Índices DB faltantes
+        Migración: 20260421025102_add_perf_indexes — 5 índices nuevos:
+          * payments(contractId, periodo) — buscar pago de un periodo
+            específico (cobranza /pay-status, conciliación, mora).
+          * payments(contractId, fechaPago) — estado de cuenta y
+            portal del arrendatario en orden cronológico.
+          * payments(fechaPago) — reportes de cobranza por rango.
+          * bitacora(usuarioId, createdAt) — composite para timeline
+            por usuario en visor de bitácora (filtros usuarioId +
+            rango). Antes había usuarioId y createdAt sueltos.
+          * notificaciones(userId, leida, createdAt) — composite
+            para la query estrella de la campana ("últimas N no
+            leídas del usuario X desc"). Antes había (userId,leida)
+            y (userId,createdAt) por separado.
+        SKIP: clients(rfc) ya tiene índice único auto-creado por
+        `rfc String? @unique`.
+        Verificado: prisma migrate dev OK, prisma generate OK,
+        backend reload OK, /api/health 200.
+
+Bloque A — resumen rápido:
+  • 1 archivo nuevo de config (env.ts)
+  • 3 middlewares nuevos (errorHandler, rateLimit, helmet config)
+  • 1 migración Prisma (5 índices)
+  • 2 dependencias nuevas (express-rate-limit, helmet)
+  • 0 cambios a reglas de negocio
+  • 0 cambios a rutas existentes (excepto auth.ts: agregar limiter)
+  • 38/38 tests del cliente siguen pasando (corridos al final)
+  • tsc --noEmit limpio en cada paso intermedio
+  • Backend en tsx watch sobrevivió toda la sesión sin reiniciar
+    manualmente (HMR captó cada edit).
+
+──────────────────────────────────────────────────────────────────
+Cierre de gaps — Bloque A (mismo día, post-auditoría honesta)
+──────────────────────────────────────────────────────────────────
+La primera pasada de A1-A6 dejó verificaciones happy-path pero NO
+validó casos negativos ni que los índices/middlewares se usaran de
+verdad. Tras una auditoría honesta, se cerraron los gaps así:
+
+  - [x] G1: Queries reales vs índices de A6
+        Auditadas las 5 nuevas indexaciones contra los handlers que
+        las consumen:
+        • payments(contractId, periodo) ✓ usado en cobranza.ts:387
+          (/pay), :551 (/pay-advance) — WHERE de ambos campos.
+        • payments(fechaPago) ✓ usado en reports.ts (producción
+          mensual: WHERE fechaPago BETWEEN yearStart AND yearEnd).
+        • payments(contractId, fechaPago) ⚠ PREVENTIVO:
+          portal.ts ordena por fechaPago pero filtra por
+          contract.clientId (join, no filtro directo sobre
+          payment.contractId). Se queda como índice "barato"
+          esperando un caso de uso futuro tipo "estado de cuenta
+          de contrato X cronológico".
+        • bitacora(usuarioId, createdAt) ✓ usado en bitacora.ts:28-53
+          (filter usuarioId + range createdAt + orderBy createdAt
+          desc) — la query estrella del visor.
+        • notificaciones(userId, leida, createdAt) ✓ usado en
+          notificaciones.ts:35-47 (where {userId, leida?} orderBy
+          createdAt desc) — la query del polling de la campana.
+
+  - [x] G2: .env actual vs schema Zod de A1
+        Verificación explícita (no inferencia): el .env de
+        development satisface el schema (DATABASE_URL postgres OK,
+        JWT_SECRET 43 chars distinto al de dev rejected, JWT_EXPIRES_IN
+        "24h", PORT 3001, NODE_ENV development). El resto toma defaults
+        (BITACORA_LOG_GETS=false, CFDI_PROVIDER=MOCK,
+        FACTURAMA_SANDBOX=true).
+
+  - [x] G3: Prisma errors REALES contra errorHandler de A3
+        Script: server/src/__verify__/errorHandler.verify.ts —
+        levanta una mini-app Express con rutas que disparan errores
+        REALES (no mocks) y valida la respuesta del middleware.
+        Casos verificados (6/6 OK):
+          • AppError 422 'CUSTOM_BIZ_RULE'   → 422 + code+details
+          • Zod parse de email inválido      → 400 VALIDATION_ERROR
+          • Prisma P2002 (duplicar email)    → 409 UNIQUE_VIOLATION
+          • Prisma P2025 (update id falso)   → 404 NOT_FOUND
+          • Prisma validation (tipo errado)  → 400 PRISMA_VALIDATION_ERROR
+          • Error genérico (`throw`)         → 500 INTERNAL_ERROR
+        Cleanup: el script borra los users 'verify-*' que crea para
+        el caso P2002 antes de salir.
+        Correr cuando se cambie errorHandler:
+          npx tsx src/__verify__/errorHandler.verify.ts
+
+  - [x] G4: skipSuccessfulRequests + trust-proxy de A4
+        skipSuccessfulRequests=true validado:
+          4 falladas → login OK (no quema cuota) → 5ta fallida pasa
+          → 6ta fallida → 429.
+          Si la opción no funcionara, la 5ta fallida ya bloquearía
+          (ya que el OK contaría como intento 5). El comportamiento
+          observado confirma que el OK NO incrementó el contador.
+        trust-proxy validado:
+          6 IPs distintas vía X-Forwarded-For desde la misma máquina
+          → todas pasan (cada IP cuenta independiente).
+          6 hits con la MISMA XFF "192.168.99.99" → 6ta = 429.
+          La librería confía correctamente en XFF por
+          `app.set('trust proxy', 1)` y no agrupa por IP de socket.
+
+  - [x] G5: /uploads cross-origin + preflight OPTIONS de A5
+        Preflight OPTIONS desde origen permitido (localhost:5173):
+          → 204 No Content + Access-Control-Allow-{Origin,Methods,
+            Headers,Credentials} todos presentes con valores correctos.
+        Preflight OPTIONS desde origen NO autorizado:
+          → 200 sin headers Access-Control-* → el browser bloquea
+            la preflight, evitando que la request real se envíe.
+        GET cross-origin a /uploads/contratos/<pdf real>:
+          → 200 con Cross-Origin-Resource-Policy: cross-origin +
+            Access-Control-Allow-Origin: http://localhost:5173 +
+            Content-Type: application/pdf. Frontend en otro origen
+            puede embeber/descargar PDFs sin error de CORS/CORP.
+
+  - [x] G6: Rama 503 degraded de A2 (DB caída) sin tirar la DB real
+        Script: server/src/__verify__/health.verify.ts — duplica el
+        handler /api/health 1:1 de index.ts y lo prueba con dos
+        PrismaClient distintos:
+          • Caso A: PrismaClient apuntando al .env real
+            → 200 status:'ok' db:{status:'ok', latencyMs:N}
+          • Caso B: PrismaClient apuntando a 127.0.0.1:54399 (dead)
+            → 503 status:'degraded' db:{status:'fail',
+              error:"Can't reach database server at 127.0.0.1:54399"}
+        2/2 casos OK. La rama de degradación responde con código
+        503 y mensaje útil para el LB/k8s.
+        Limitación honesta: el handler de health LIVE en index.ts
+        está duplicado en el script. Si alguien edita uno y olvida
+        el otro, el test deja de proteger; documentado en el header
+        del script.
+
+  - [x] G7: notFoundHandler vs rutas legacy
+        `grep next(` en src/routes → 0 ocurrencias. Ninguna ruta
+        delega al siguiente handler con `next()`. Las únicas
+        llamadas a `next()` están en src/middleware/auth.ts (en
+        cadena de middlewares, dentro de un router montado — no
+        caen al notFoundHandler).
+        Smoke real:
+          • GET /api/health → 200 (ruta directa)
+          • POST /api/auth/login (creds reales) → 200 con token
+          • GET /api/auth/me sin auth → 401 de requireAuth
+            (NO 404, requireAuth responde y termina la cadena)
+          • GET /api/bitacora sin auth → 401
+          • GET /api/contracts sin auth → 401
+          • GET /api/no-existe → 404 ROUTE_NOT_FOUND ✓
+        Conclusión: el notFoundHandler NO atrapa rutas legítimas;
+        solo dispara para paths sin matcher. Cero regresiones.
+
+Notas finales del cierre:
+  • Se agregaron 2 scripts standalone en server/src/__verify__/
+    (errorHandler.verify.ts, health.verify.ts) que sirven como
+    tests de regresión cuando se cambien estos middlewares.
+    Correr manualmente con `npx tsx src/__verify__/<name>.verify.ts`.
+    NO entran en `npm run build` porque están bajo __verify__/.
+  • 38/38 tests del cliente siguen pasando (vitest run).
+  • tsc --noEmit limpio.
+  • Backend operativo durante TODA la sesión de gaps; ningún
+    request real del usuario habría fallado por estas pruebas.
 ```
 
 ---
