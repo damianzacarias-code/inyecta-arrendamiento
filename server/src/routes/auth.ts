@@ -5,6 +5,7 @@ import { z } from 'zod';
 import prisma from '../config/db';
 import { config } from '../config/env';
 import { requireAuth } from '../middleware/auth';
+import { loginLimiter } from '../middleware/rateLimit';
 
 const router = Router();
 
@@ -22,7 +23,8 @@ const registerSchema = z.object({
 });
 
 // POST /api/auth/login
-router.post('/login', async (req: Request, res: Response) => {
+// Rate-limited: 5 intentos fallidos / 15 min / IP.
+router.post('/login', loginLimiter, async (req: Request, res: Response) => {
   try {
     const data = loginSchema.parse(req.body);
 
