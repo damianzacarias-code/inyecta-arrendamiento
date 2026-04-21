@@ -1,233 +1,263 @@
-import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import api from '@/lib/api';
-import { ArrowLeft, Save, Building2, User } from 'lucide-react';
+// Nuevo Arrendatario — wizard de 4 pasos con react-hook-form + Zod.
+//
+// Estado global del formulario vive aquí; cada paso consume los campos
+// vía useFormContext (dentro del FormProvider). El schema Zod
+// espejado desde `server/src/schemas/client.ts` es la única fuente
+// de validación.
+//
+// Flujo:
+//   1. Identidad (tipo + datos del solicitante)
+//   2. Domicilio fiscal + operación
+//   3. Representante legal (obligatorio PM, opcional PFAE)
+//   4. Accionistas (solo PM)
+//
+// Navegación:
+//   - "Siguiente" valida SOLO los paths del paso actual con trigger();
+//     si pasan, avanza. Los errores de otros pasos (surgen de refines
+//     a nivel raíz) no bloquean la navegación hasta el envío final.
+//   - "Registrar arrendatario" dispara handleSubmit con el schema
+//     completo. Si falla, saltamos al primer paso que contenga error.
 
-const estados = [
-  'Aguascalientes', 'Baja California', 'Baja California Sur', 'Campeche', 'Chiapas',
-  'Chihuahua', 'Coahuila', 'Colima', 'CDMX', 'Durango', 'Estado de Mexico',
-  'Guanajuato', 'Guerrero', 'Hidalgo', 'Jalisco', 'Michoacan', 'Morelos', 'Nayarit',
-  'Nuevo Leon', 'Oaxaca', 'Puebla', 'Queretaro', 'Quintana Roo', 'San Luis Potosi',
-  'Sinaloa', 'Sonora', 'Tabasco', 'Tamaulipas', 'Tlaxcala', 'Veracruz', 'Yucatan', 'Zacatecas',
-];
+import { useMemo, useState } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { FormProvider, useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { ArrowLeft } from 'lucide-react';
+import api from '@/lib/api';
+import {
+  createClientSchema,
+  type CreateClientInput,
+} from '@/schemas/client';
+import { WIZARD_STEPS } from './clienteNuevo/constants';
+import { WizardShell, type WizardStep } from './clienteNuevo/WizardShell';
+import { Step1Identidad } from './clienteNuevo/Step1Identidad';
+import { Step2Domicilio } from './clienteNuevo/Step2Domicilio';
+import { Step3RepresentanteLegal } from './clienteNuevo/Step3RepresentanteLegal';
+import { Step4Accionistas } from './clienteNuevo/Step4Accionistas';
+
+// ── Paths que se validan individualmente en cada paso ───────────
+//
+// Nota: no enumeramos TODOS los campos (muchos son opcionales). Solo
+// los que el schema marca como requeridos por refinamiento de tipo.
+// El superRefine del schema completo se corre al enviar.
+const STEP_PATHS: Record<string, string[]> = {
+  identidad: [
+    'tipo',
+    'nombre',
+    'apellidoPaterno',
+    'curp',
+    'razonSocial',
+    'fechaConstitucion',
+    'capitalSocial',
+    'folioMercantil',
+    'rfc',
+    'email',
+    'telefono',
+  ],
+  domicilio: ['calle', 'numExterior', 'colonia', 'municipio', 'estado', 'cp'],
+  representante: [
+    'representanteLegal.nombre',
+    'representanteLegal.apellidoPaterno',
+    'representanteLegal.fechaInscripcionPoderes',
+    'representanteLegal.folioInscripcionPoderes',
+    'representanteLegal.regimenMatrimonial',
+    'representanteLegal.nombreConyuge',
+  ],
+  accionistas: ['socios'],
+};
+
+/**
+ * Inspecciona los errores y devuelve el índice del primer paso VISIBLE
+ * que los contiene. Usado cuando el submit final falla para saltar al
+ * lugar correcto.
+ */
+function firstStepWithError(
+  errors: Record<string, unknown>,
+  visible: WizardStep[],
+): number {
+  const errorPaths = Object.keys(errors);
+  for (let i = 0; i < visible.length; i++) {
+    const step = visible[i];
+    const paths = STEP_PATHS[step.key] ?? [];
+    const prefixes: string[] = [];
+    if (step.key === 'representante') prefixes.push('representanteLegal');
+    if (step.key === 'accionistas') prefixes.push('socios');
+    const hit = errorPaths.some(
+      (p) =>
+        paths.some((q) => p === q || p.startsWith(q + '.')) ||
+        prefixes.some((pre) => p === pre || p.startsWith(pre + '.')),
+    );
+    if (hit) return i;
+  }
+  return 0;
+}
+
+// Form shape incluye flags de UI (prefijo `_`) que NO van al POST.
+type WizardFormShape = CreateClientInput & {
+  _mismoDomicilioOp?: boolean;
+  _declararRL?: boolean;
+};
+
+/** Quita los flags internos del payload antes de enviar al API. */
+function stripInternal(data: WizardFormShape): CreateClientInput {
+  const { _mismoDomicilioOp, _declararRL, ...rest } = data;
+  // Referenciar los descartados para que TS no marque no-unused-vars.
+  void _mismoDomicilioOp;
+  void _declararRL;
+  // En PFAE el array de socios NO aplica — el backend lo rechazaría.
+  if (rest.tipo === 'PFAE' && Array.isArray(rest.socios)) {
+    return { ...rest, socios: undefined };
+  }
+  return rest;
+}
 
 export default function ClienteNuevo() {
   const navigate = useNavigate();
-  const [tipo, setTipo] = useState<'PFAE' | 'PM'>('PM');
-  const [form, setForm] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const update = (field: string, value: string) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
-  };
+  const methods = useForm<WizardFormShape>({
+    resolver: zodResolver(createClientSchema) as never,
+    mode: 'onSubmit',
+    reValidateMode: 'onChange',
+    defaultValues: {
+      tipo: 'PM',
+      pais: 'México',
+      socios: [],
+      _mismoDomicilioOp: true,
+      _declararRL: false,
+    },
+  });
+  const tipo = methods.watch('tipo');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    setError('');
-    try {
-      const res = await api.post('/clients', { ...form, tipo });
-      navigate(`/clientes/${res.data.id}`);
-    } catch (err: any) {
-      const msg = err.response?.data?.error;
-      if (typeof msg === 'string') setError(msg);
-      else if (Array.isArray(msg)) setError(msg.map((e: any) => e.message).join(', '));
-      else setError('Error al crear cliente');
-    } finally {
-      setSaving(false);
+  // Paso de accionistas se oculta para PFAE.
+  const steps: WizardStep[] = useMemo(
+    () =>
+      WIZARD_STEPS.map((s) => ({
+        ...s,
+        visible: s.key === 'accionistas' ? tipo === 'PM' : true,
+      })),
+    [tipo],
+  );
+  const visibleSteps = useMemo(
+    () => steps.filter((s) => s.visible !== false),
+    [steps],
+  );
+
+  // Si se cambia de PM → PFAE estando en el paso de accionistas,
+  // retrocedemos al último visible.
+  if (currentIndex > visibleSteps.length - 1) {
+    setCurrentIndex(visibleSteps.length - 1);
+  }
+
+  const currentStep = visibleSteps[currentIndex];
+
+  const handleNext = async () => {
+    const paths = STEP_PATHS[currentStep.key] ?? [];
+    // trigger sin args valida todo el form; con args valida solo esos paths.
+    const ok =
+      paths.length === 0
+        ? true
+        : await methods.trigger(paths as Parameters<typeof methods.trigger>[0]);
+    if (ok) {
+      setCurrentIndex((i) => Math.min(i + 1, visibleSteps.length - 1));
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
 
+  const handleBack = () => {
+    setCurrentIndex((i) => Math.max(0, i - 1));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const onSubmit = methods.handleSubmit(
+    async (values) => {
+      setSubmitError(null);
+      setSubmitting(true);
+      try {
+        const payload = stripInternal(values);
+        const res = await api.post('/clients', payload);
+        navigate(`/clientes/${res.data.id}`);
+      } catch (err: unknown) {
+        const msg = extractApiError(err);
+        setSubmitError(msg);
+        setSubmitting(false);
+      }
+    },
+    (errors) => {
+      // El submit falló por validación local: saltamos al primer paso con error.
+      const target = firstStepWithError(
+        errors as Record<string, unknown>,
+        visibleSteps,
+      );
+      setCurrentIndex(target);
+      setSubmitError(
+        'Hay campos por corregir en la solicitud. Revisa los errores marcados en rojo.',
+      );
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+  );
+
   return (
-    <div className="max-w-3xl mx-auto">
-      <div className="flex items-center gap-3 mb-6">
+    <div>
+      <div className="flex items-center gap-3 mb-6 max-w-4xl mx-auto">
         <Link to="/clientes" className="text-gray-400 hover:text-gray-600">
           <ArrowLeft size={20} />
         </Link>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Nuevo Cliente</h1>
-          <p className="text-gray-500 text-sm">Registrar cliente para arrendamiento</p>
+          <h1 className="text-2xl font-bold text-gray-900">
+            Nuevo Arrendatario
+          </h1>
+          <p className="text-gray-500 text-sm">
+            Solicitud completa de arrendamiento (CNBV / KYC)
+          </p>
         </div>
       </div>
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm mb-4">
-          {error}
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Tipo */}
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h3 className="font-semibold text-gray-900 mb-4">Tipo de Cliente</h3>
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={() => setTipo('PM')}
-              className={`flex-1 flex items-center gap-3 p-4 rounded-xl border-2 transition-colors ${
-                tipo === 'PM' ? 'border-inyecta-600 bg-inyecta-50' : 'border-gray-200 hover:border-gray-300'
-              }`}
-            >
-              <Building2 size={24} className={tipo === 'PM' ? 'text-inyecta-600' : 'text-gray-400'} />
-              <div className="text-left">
-                <div className="font-medium text-gray-900">Persona Moral (PM)</div>
-                <div className="text-xs text-gray-500">S.A., S. de R.L., S.P.R., etc.</div>
-              </div>
-            </button>
-            <button
-              type="button"
-              onClick={() => setTipo('PFAE')}
-              className={`flex-1 flex items-center gap-3 p-4 rounded-xl border-2 transition-colors ${
-                tipo === 'PFAE' ? 'border-inyecta-600 bg-inyecta-50' : 'border-gray-200 hover:border-gray-300'
-              }`}
-            >
-              <User size={24} className={tipo === 'PFAE' ? 'text-inyecta-600' : 'text-gray-400'} />
-              <div className="text-left">
-                <div className="font-medium text-gray-900">Persona Fisica (PFAE)</div>
-                <div className="text-xs text-gray-500">Persona fisica con actividad empresarial</div>
-              </div>
-            </button>
-          </div>
-        </div>
-
-        {/* Identity */}
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h3 className="font-semibold text-gray-900 mb-4">
-            {tipo === 'PM' ? 'Datos de la Empresa' : 'Datos Personales'}
-          </h3>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {tipo === 'PM' ? (
-              <>
-                <div className="lg:col-span-2">
-                  <label className="block text-sm font-medium text-gray-600 mb-1">Razon Social *</label>
-                  <input type="text" value={form.razonSocial || ''} onChange={(e) => update('razonSocial', e.target.value)} required
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1">Representante Legal</label>
-                  <input type="text" value={form.representanteLegal || ''} onChange={(e) => update('representanteLegal', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
-                </div>
-              </>
-            ) : (
-              <>
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1">Nombre(s) *</label>
-                  <input type="text" value={form.nombre || ''} onChange={(e) => update('nombre', e.target.value)} required
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1">Apellido Paterno *</label>
-                  <input type="text" value={form.apellidoPaterno || ''} onChange={(e) => update('apellidoPaterno', e.target.value)} required
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1">Apellido Materno</label>
-                  <input type="text" value={form.apellidoMaterno || ''} onChange={(e) => update('apellidoMaterno', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1">CURP</label>
-                  <input type="text" value={form.curp || ''} onChange={(e) => update('curp', e.target.value.toUpperCase())} maxLength={18}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
-                </div>
-              </>
-            )}
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">RFC</label>
-              <input type="text" value={form.rfc || ''} onChange={(e) => update('rfc', e.target.value.toUpperCase())} maxLength={13}
-                placeholder={tipo === 'PM' ? 'ABC123456XY0' : 'GARC850101AB1'}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Email</label>
-              <input type="email" value={form.email || ''} onChange={(e) => update('email', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Telefono</label>
-              <input type="tel" value={form.telefono || ''} onChange={(e) => update('telefono', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Sector</label>
-              <input type="text" value={form.sector || ''} onChange={(e) => update('sector', e.target.value)} placeholder="Transporte, Construccion, etc."
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Actividad Economica</label>
-              <input type="text" value={form.actividadEconomica || ''} onChange={(e) => update('actividadEconomica', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
-            </div>
-          </div>
-        </div>
-
-        {/* Domicilio Fiscal */}
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h3 className="font-semibold text-gray-900 mb-4">Domicilio Fiscal</h3>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2">
-              <label className="block text-sm font-medium text-gray-600 mb-1">Calle</label>
-              <input type="text" value={form.calle || ''} onChange={(e) => update('calle', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="block text-sm font-medium text-gray-600 mb-1">No. Ext</label>
-                <input type="text" value={form.numExterior || ''} onChange={(e) => update('numExterior', e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-600 mb-1">No. Int</label>
-                <input type="text" value={form.numInterior || ''} onChange={(e) => update('numInterior', e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Colonia</label>
-              <input type="text" value={form.colonia || ''} onChange={(e) => update('colonia', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Municipio / Delegacion</label>
-              <input type="text" value={form.municipio || ''} onChange={(e) => update('municipio', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Ciudad</label>
-              <input type="text" value={form.ciudad || ''} onChange={(e) => update('ciudad', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Estado</label>
-              <select value={form.estado || ''} onChange={(e) => update('estado', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none">
-                <option value="">Seleccionar...</option>
-                {estados.map((e) => <option key={e} value={e}>{e}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">C.P.</label>
-              <input type="text" value={form.cp || ''} onChange={(e) => update('cp', e.target.value)} maxLength={5}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none" />
-            </div>
-          </div>
-        </div>
-
-        {/* Submit */}
-        <button
-          type="submit"
-          disabled={saving}
-          className="w-full bg-inyecta-700 hover:bg-inyecta-800 disabled:bg-inyecta-400 text-white py-3 rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+      <FormProvider {...methods}>
+        <WizardShell
+          steps={steps}
+          currentIndex={currentIndex}
+          onBack={handleBack}
+          onNext={handleNext}
+          onSubmit={onSubmit}
+          isSubmitting={submitting}
+          formError={submitError ?? undefined}
         >
-          {saving ? (
-            <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
-          ) : (
-            <><Save size={16} /> Registrar Cliente</>
-          )}
-        </button>
-      </form>
+          {currentStep.key === 'identidad' && <Step1Identidad />}
+          {currentStep.key === 'domicilio' && <Step2Domicilio />}
+          {currentStep.key === 'representante' && <Step3RepresentanteLegal />}
+          {currentStep.key === 'accionistas' && <Step4Accionistas />}
+        </WizardShell>
+      </FormProvider>
     </div>
   );
+}
+
+// ── Helpers ─────────────────────────────────────────────────────
+
+/** Extrae un mensaje legible del error de axios (zod issues, string o fallback). */
+function extractApiError(err: unknown): string {
+  if (typeof err !== 'object' || err === null) return 'Error al crear cliente';
+  const e = err as {
+    response?: { data?: { error?: unknown; message?: string } };
+    message?: string;
+  };
+  const raw = e.response?.data?.error;
+  if (typeof raw === 'string') return raw;
+  if (Array.isArray(raw)) {
+    return raw
+      .map((item: { path?: string[]; message?: string }) => {
+        const path = Array.isArray(item?.path) ? item.path.join('.') : '';
+        return path ? `${path}: ${item?.message ?? ''}` : item?.message ?? '';
+      })
+      .filter(Boolean)
+      .join(' · ');
+  }
+  if (raw && typeof raw === 'object') {
+    const o = raw as { code?: string; message?: string };
+    if (o.message) return o.message;
+  }
+  return e.response?.data?.message ?? e.message ?? 'Error al crear cliente';
 }
