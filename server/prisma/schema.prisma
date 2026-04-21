@@ -509,6 +509,15 @@ model Payment {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  // Índices de performance:
+  //   (contractId, periodo) — buscar el pago de un periodo concreto
+  //     (cobranza /pay-status, conciliación, reportes de morosidad).
+  //   (contractId, fechaPago) — listar pagos cronológicos por contrato
+  //     (estado de cuenta, portal del arrendatario).
+  //   (fechaPago) — reportes de cobranza por rango de fechas.
+  @@index([contractId, periodo])
+  @@index([contractId, fechaPago])
+  @@index([fechaPago])
   @@map("payments")
 }
 
@@ -773,6 +782,10 @@ model Notificacion {
 
   @@index([userId, leida])
   @@index([userId, createdAt])
+  // Composite (userId, leida, createdAt): combina las dos anteriores en
+  // una sola lectura de índice para la query estrella de la campana
+  // ("últimas N no leídas del usuario X ordenadas por fecha desc").
+  @@index([userId, leida, createdAt])
   @@index([entidad, entidadId])
   @@map("notificaciones")
 }
@@ -796,5 +809,9 @@ model Bitacora {
   @@index([usuarioId])
   @@index([entidad, entidadId])
   @@index([createdAt])
+  // Composite (usuarioId, createdAt): timeline por usuario sin scan.
+  // Útil para "actividad del usuario X en los últimos 30 días" del visor
+  // de bitácora (filtros usuarioId + rango de fechas).
+  @@index([usuarioId, createdAt])
   @@map("bitacora")
 }
