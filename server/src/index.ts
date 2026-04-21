@@ -23,6 +23,7 @@ import searchRoutes from './routes/search';
 import alertsRoutes from './routes/alerts';
 import bitacoraRoutes from './routes/bitacora';
 import notificacionesRoutes from './routes/notificaciones';
+import guarantorsRoutes from './routes/guarantors';
 import { bitacora } from './middleware/bitacora';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { requestId } from './middleware/requestId';
@@ -183,6 +184,12 @@ app.use('/api/search', searchRoutes);
 app.use('/api/alerts', alertsRoutes);
 app.use('/api/bitacora', bitacoraRoutes);
 app.use('/api/notificaciones', notificacionesRoutes);
+// guarantorsRoutes monta endpoints con distintos prefijos:
+//   POST/GET  /api/clients/:clientId/guarantors
+//   GET/PUT   /api/guarantors/:id
+//   DELETE    /api/guarantors/:id
+// Por eso se monta en /api (no en un subpath fijo).
+app.use('/api', guarantorsRoutes);
 
 // 404 para /api/* sin match — devuelve el mismo formato { error: {...} }
 app.use('/api', notFoundHandler);

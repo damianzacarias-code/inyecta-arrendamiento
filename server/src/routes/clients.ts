@@ -3,56 +3,16 @@ import { z } from 'zod';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
 import { childLogger } from '../lib/logger';
+import { createClientSchema, updateClientSchema } from '../schemas/client';
 
 const log = childLogger('clients');
 
 const router = Router();
 
-// ── Schemas ──────────────────────────────────────────────────────
-
-const createClientSchema = z.object({
-  tipo: z.enum(['PFAE', 'PM']),
-  // PF
-  nombre: z.string().optional(),
-  apellidoPaterno: z.string().optional(),
-  apellidoMaterno: z.string().optional(),
-  curp: z.string().optional(),
-  // PM
-  razonSocial: z.string().optional(),
-  // Compartidos
-  rfc: z.string().min(12).max(13).optional(),
-  email: z.string().email().optional(),
-  telefono: z.string().optional(),
-  // Domicilio fiscal
-  calle: z.string().optional(),
-  numExterior: z.string().optional(),
-  numInterior: z.string().optional(),
-  colonia: z.string().optional(),
-  municipio: z.string().optional(),
-  ciudad: z.string().optional(),
-  estado: z.string().optional(),
-  cp: z.string().optional(),
-  // Domicilio operacion
-  calleOp: z.string().optional(),
-  numExteriorOp: z.string().optional(),
-  numInteriorOp: z.string().optional(),
-  coloniaOp: z.string().optional(),
-  municipioOp: z.string().optional(),
-  ciudadOp: z.string().optional(),
-  estadoOp: z.string().optional(),
-  cpOp: z.string().optional(),
-  // PM especificos
-  actaConstitutiva: z.string().optional(),
-  registroPublico: z.string().optional(),
-  representanteLegal: z.string().optional(),
-  // Meta
-  sector: z.string().optional(),
-  actividadEconomica: z.string().optional(),
-}).refine(data => {
-  if (data.tipo === 'PFAE') return !!data.nombre && !!data.apellidoPaterno;
-  if (data.tipo === 'PM') return !!data.razonSocial;
-  return false;
-}, { message: 'PFAE requiere nombre y apellido. PM requiere razon social.' });
+// ── Schemas locales (solo update de documentos) ──────────────────
+// El schema del Cliente vive en src/schemas/client.ts porque es
+// compartido con el wizard del frontend y con los tests de
+// validación condicional KYC.
 
 const updateDocumentSchema = z.object({
   estado: z.enum(['PENDIENTE', 'RECIBIDO', 'VENCIDO', 'RECHAZADO']),
@@ -110,9 +70,38 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       }
     }
 
-    const client = await prisma.client.create({ data: data as any });
+    // Separar los bloques anidados del resto de columnas del Client
+    const { representanteLegal, socios, ...clientCols } = data;
 
-    // Auto-crear checklist de documentos
+    // Crear cliente + RL (si viene) + socios (si PM) en una transacción
+    // para que no queden huérfanos si cualquier paso falla.
+    const client = await prisma.$transaction(async (tx) => {
+      const created = await tx.client.create({ data: clientCols as any });
+
+      if (representanteLegal) {
+        await tx.representanteLegal.create({
+          data: {
+            ...representanteLegal,
+            clientId: created.id,
+          } as any,
+        });
+      }
+
+      if (socios && socios.length > 0) {
+        await tx.shareholder.createMany({
+          data: socios.map((s) => ({
+            ...s,
+            porcentaje: String(s.porcentaje),
+            clientId: created.id,
+          })) as any,
+        });
+      }
+
+      return created;
+    });
+
+    // Auto-crear checklist de documentos (fuera de la transacción —
+    // si falla, el cliente queda creado; el checklist se puede regenerar)
     const docs = data.tipo === 'PFAE' ? pfaeDocuments : pmDocuments;
     await prisma.clientDocument.createMany({
       data: docs.map(d => ({
@@ -124,10 +113,15 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       })),
     });
 
-    // Reload con documentos
+    // Reload completo con todas las relaciones KYC
     const clientFull = await prisma.client.findUnique({
       where: { id: client.id },
-      include: { documentos: { orderBy: { requerido: 'desc' } }, avales: true, socios: true },
+      include: {
+        documentos: { orderBy: { requerido: 'desc' } },
+        avales: true,
+        socios: true,
+        representanteLegalData: true,
+      },
     });
 
     return res.status(201).json(clientFull);
@@ -209,6 +203,7 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
         documentos: { orderBy: [{ requerido: 'desc' }, { tipo: 'asc' }] },
         avales: true,
         socios: true,
+        representanteLegalData: true,
         cotizaciones: {
           select: { id: true, folio: true, producto: true, valorBien: true, rentaMensualIVA: true, plazo: true, estado: true, createdAt: true },
           orderBy: { createdAt: 'desc' },
@@ -245,21 +240,74 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
     const existing = await prisma.client.findUnique({ where: { id: req.params.id } });
     if (!existing) return res.status(404).json({ error: 'Cliente no encontrado' });
 
-    // Permitimos update parcial
-    const { id, createdAt, updatedAt, documentos, avales, socios, cotizaciones, contratos, notas, ...updateData } = req.body;
+    // Validar shape parcial (sin regenerar reglas condicionales de creación,
+    // ya que el registro existe y solo se actualiza lo enviado).
+    const parsed = updateClientSchema.parse(req.body);
 
-    const client = await prisma.client.update({
+    // Separar bloques anidados de columnas del Client. `tipo` NO se
+    // actualiza post-creación: las reglas condicionales (PFAE/PM)
+    // dependen de él. Si el usuario necesita cambiar tipo, debe crear
+    // otro Client.
+    const {
+      representanteLegal,
+      socios,
+      tipo: _tipoIgnored, // no se actualiza
+      ...clientCols
+    } = parsed;
+
+    await prisma.$transaction(async (tx) => {
+      if (Object.keys(clientCols).length > 0) {
+        await tx.client.update({
+          where: { id: req.params.id },
+          data: clientCols as any,
+        });
+      }
+
+      // Upsert del representante legal (1:1). Si el cliente ya tiene
+      // uno, se actualiza; si no, se crea.
+      if (representanteLegal) {
+        await tx.representanteLegal.upsert({
+          where: { clientId: req.params.id },
+          update: representanteLegal as any,
+          create: {
+            ...representanteLegal,
+            clientId: req.params.id,
+          } as any,
+        });
+      }
+
+      // Socios: la actualización completa borra los anteriores y re-crea
+      // (strategy "replace"). No intentamos hacer diff porcentajes.
+      // El frontend siempre debe enviar la lista completa o omitir.
+      if (Array.isArray(socios)) {
+        await tx.shareholder.deleteMany({ where: { clientId: req.params.id } });
+        if (socios.length > 0) {
+          await tx.shareholder.createMany({
+            data: socios.map((s) => ({
+              ...s,
+              porcentaje: String(s.porcentaje),
+              clientId: req.params.id,
+            })) as any,
+          });
+        }
+      }
+    });
+
+    const client = await prisma.client.findUnique({
       where: { id: req.params.id },
-      data: updateData,
       include: {
         documentos: { orderBy: [{ requerido: 'desc' }, { tipo: 'asc' }] },
         avales: true,
         socios: true,
+        representanteLegalData: true,
       },
     });
 
     return res.json(client);
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
     log.error({ err: error }, 'Update client error');
     return res.status(500).json({ error: 'Error interno' });
   }

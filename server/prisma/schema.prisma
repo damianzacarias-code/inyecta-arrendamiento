@@ -58,7 +58,13 @@ model Client {
   // Compartidos
   rfc             String?    @unique
   email           String?
-  telefono        String?
+  telefono        String?      // celular primario (mantenido por compatibilidad)
+  telefonoOficina String?
+  // Identidad fiscal y actividad (campos de solicitud CNBV/KYC)
+  regimenFiscal   String?      // catálogo SAT: 601, 603, 606, 612, 621, 625, 626...
+  fiel            String?      // FIEL/e.firma. Obligatorio en PM, opcional PFAE.
+  anosAntiguedadActividad Int?
+  registroIMSS    String?      // registro patronal (PFAE con empleados)
   // Domicilio fiscal
   calle           String?
   numExterior     String?
@@ -67,6 +73,7 @@ model Client {
   municipio       String?
   ciudad          String?
   estado          String?
+  pais            String?    @default("México")
   cp              String?
   // Domicilio de operación (puede diferir del fiscal)
   calleOp         String?
@@ -80,7 +87,11 @@ model Client {
   // PM específicos
   actaConstitutiva     String?
   registroPublico      String?
-  representanteLegal   String?
+  representanteLegal   String?       // DEPRECATED — usar modelo RepresentanteLegal (1:1)
+  fechaConstitucion    DateTime?
+  capitalSocial        Decimal?
+  folioMercantil       String?       // folio del Registro Público de Comercio
+  fechaInscripcionRPC  DateTime?     // fecha de inscripción de la escritura constitutiva
   // Metadata
   sector          String?
   actividadEconomica String?
@@ -91,13 +102,14 @@ model Client {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  documentos    ClientDocument[]
-  avales        Guarantor[]
-  socios        Shareholder[]
-  cotizaciones  Quotation[]
-  contratos     Contract[]
-  notas         Note[]
-  facturas      Invoice[]
+  documentos         ClientDocument[]
+  avales             Guarantor[]
+  socios             Shareholder[]
+  cotizaciones       Quotation[]
+  contratos          Contract[]
+  notas              Note[]
+  facturas           Invoice[]
+  representanteLegalData RepresentanteLegal?
 
   @@map("clients")
 }
@@ -105,6 +117,38 @@ model Client {
 enum ClientType {
   PFAE
   PM
+}
+
+// ────────────────────────────────────────────────────────────
+// Enums compartidos KYC / solicitud CNBV
+// (usados por RepresentanteLegal, Shareholder, Guarantor,
+// PerfilTransaccional, DeclaracionPEP).
+// ────────────────────────────────────────────────────────────
+
+enum EstadoCivil {
+  SOLTERO
+  CASADO
+}
+
+enum RegimenMatrimonial {
+  SEPARACION_BIENES
+  SOCIEDAD_CONYUGAL
+}
+
+enum SituacionInstalaciones {
+  PROPIAS
+  RENTADAS
+  PAGANDOSE
+  FAMILIARES
+  COMODATO
+  HIPOTECADAS
+}
+
+enum Genero {
+  M
+  F
+  OTRO
+  NO_ESPECIFICA
 }
 
 model ClientDocument {
@@ -136,19 +180,61 @@ model Guarantor {
   id              String   @id @default(cuid())
   clientId        String
   client          Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  // Identidad básica
   nombre          String
   apellidoPaterno String
   apellidoMaterno String?
   rfc             String?
   curp            String?
-  telefono        String?
+  fiel            String?
+  genero          Genero?
+  relacion        String?   // parentesco/relación con el solicitante
+
+  // Si el obligado solidario es persona moral
+  razonSocial                 String?
+  representanteNombre         String?
+  representanteApellidoPaterno String?
+  representanteApellidoMaterno String?
+  representanteRfc            String?
+  fechaInscripcionEscrituraConst DateTime?
+  folioInscripcionEscrituraConst String?
+  fechaInscripcionPoderes     DateTime?
+  folioInscripcionPoderes     String?
+
+  // Estado civil
+  estadoCivil        EstadoCivil?
+  regimenMatrimonial RegimenMatrimonial?
+  nombreConyuge      String?
+
+  // Nacimiento / nacionalidad
+  fechaNacimiento DateTime?
+  lugarNacimiento String?
+  nacionalidad    String?
+
+  // Domicilio particular (estructurado; `domicilio` texto plano queda por compatibilidad)
+  domicilio       String?   // DEPRECATED — usar campos estructurados
+  calle           String?
+  numExterior     String?
+  numInterior     String?
+  colonia         String?
+  municipio       String?
+  ciudad          String?
+  estado          String?
+  pais            String?    @default("México")
+  cp              String?
+
+  // Contacto
+  telefono        String?    // DEPRECATED — usar telefonoCelular
+  telefonoFijo    String?
+  telefonoCelular String?
   email           String?
-  domicilio       String?
-  relacion        String?  // relación con el solicitante
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  documentos GarantorDocument[]
+  documentos          GarantorDocument[]
+  contratosAsociados  ContractGuarantor[]
 
   @@map("guarantors")
 }
@@ -172,16 +258,120 @@ model Shareholder {
   id              String  @id @default(cuid())
   clientId        String
   client          Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  // Identidad (persona física)
   nombre          String
   apellidoPaterno String
   apellidoMaterno String?
   rfc             String?
-  porcentaje      Decimal // porcentaje de participación accionaria
-  esRepLegal      Boolean @default(false)
+  curp            String?
+  fiel            String?
+  genero          Genero?
+
+  // Si el accionista es persona moral
+  razonSocial                    String?
+  fechaInscripcionEscrituraConst DateTime?
+  folioInscripcionEscrituraConst String?
+
+  // Participación
+  porcentaje      Decimal   // porcentaje de participación accionaria
+  esRepLegal      Boolean   @default(false)
+  anosExperiencia Int?
+
+  // Nacimiento / nacionalidad
+  fechaNacimiento DateTime?
+  lugarNacimiento String?
+  nacionalidad    String?
+
+  // Estado civil
+  estadoCivil        EstadoCivil?
+  regimenMatrimonial RegimenMatrimonial?
+  nombreConyuge      String?
+
+  // Domicilio particular
+  calle           String?
+  numExterior     String?
+  numInterior     String?
+  colonia         String?
+  municipio       String?
+  ciudad          String?
+  estado          String?
+  pais            String?    @default("México")
+  cp              String?
+  situacionInstalaciones SituacionInstalaciones?
+  tiempoResidenciaAnos   Int?
+
+  // Contacto
+  telefonoFijo    String?
+  telefonoCelular String?
+  email           String?
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@map("shareholders")
+}
+
+// ────────────────────────────────────────────────────────────
+// RepresentanteLegal — datos completos del apoderado (PM) o
+// del solicitante mismo (PFAE). 1:1 con Client.
+// Cubre la sección "DATOS GENERALES DEL REPRESENTANTE/APODERADO
+// LEGAL O PERSONA FÍSICA CON ACTIVIDAD EMPRESARIAL" del PDF.
+// ────────────────────────────────────────────────────────────
+model RepresentanteLegal {
+  id              String   @id @default(cuid())
+  clientId        String   @unique
+  client          Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  // Identidad
+  nombre          String
+  apellidoPaterno String
+  apellidoMaterno String?
+  rfc             String?
+  curp            String?
+  fiel            String?
+  genero          Genero?
+
+  // Carrera
+  ocupacion       String?
+  anosExperiencia Int?
+
+  // Nacimiento / nacionalidad
+  fechaNacimiento DateTime?
+  lugarNacimiento String?
+  nacionalidad    String?
+
+  // Estado civil
+  estadoCivil        EstadoCivil?
+  regimenMatrimonial RegimenMatrimonial?
+  nombreConyuge      String?
+
+  // Domicilio particular
+  calle           String?
+  numExterior     String?
+  numInterior     String?
+  colonia         String?
+  municipio       String?
+  ciudad          String?
+  estado          String?
+  pais            String?    @default("México")
+  cp              String?
+  situacionInstalaciones SituacionInstalaciones?
+  tiempoResidenciaAnos   Int?
+
+  // Contacto
+  telefonoFijo    String?
+  telefonoCelular String?
+  email           String?
+
+  // Solo PM: inscripción de poderes en RPC
+  fechaInscripcionPoderes DateTime?
+  folioInscripcionPoderes String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("representantes_legales")
 }
 
 // ============================================================
@@ -334,6 +524,19 @@ model Contract {
   etapaFecha      DateTime        @default(now())
   comiteResolucion String?        // APROBADO, APROBADO_CONDICIONES, RECHAZADO
 
+  // Datos de la solicitud (página 1 del formato KYC → Nueva Operación)
+  lugarSolicitud       String?
+  fechaSolicitud       DateTime?
+  promotor             String?
+  montoSolicitado      Decimal?   // monto originalmente solicitado; puede diferir del aprobado
+  destinoArrendamiento String?
+
+  // Terceros (del bloque "DATOS COMPLEMENTARIOS" del PDF)
+  tercerBeneficiarioExiste Boolean?
+  tercerBeneficiarioInfo   String?
+  tercerAportanteExiste    Boolean?
+  tercerAportanteInfo      String?
+
   // Datos del bien
   bienDescripcion String
   bienMarca       String?
@@ -341,7 +544,7 @@ model Contract {
   bienAnio        Int?
   bienNumSerie    String?
   bienEstado      String?         // nuevo/seminuevo
-  proveedor       String?
+  proveedor       String?         // DEPRECATED — usar modelo Proveedor (1:1)
 
   // Parámetros financieros
   producto        LeaseType
@@ -391,7 +594,130 @@ model Contract {
   documentos      ContractDocument[]
   facturas        Invoice[]
 
+  // Relaciones KYC / solicitud
+  obligadosSolidarios  ContractGuarantor[]
+  perfilTransaccional  PerfilTransaccional?
+  proveedorData        Proveedor?
+  declaracionesPEP     DeclaracionPEP[]
+
   @@map("contracts")
+}
+
+// ────────────────────────────────────────────────────────────
+// ContractGuarantor — asocia Guarantors al Contract con orden
+// (1, 2, 3). Permite que un mismo aval sea reutilizado entre
+// operaciones sin duplicar datos del titular.
+// ────────────────────────────────────────────────────────────
+model ContractGuarantor {
+  contractId  String
+  contract    Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  guarantorId String
+  guarantor   Guarantor @relation(fields: [guarantorId], references: [id], onDelete: Cascade)
+  orden       Int       // 1, 2 o 3 (el PDF marca hasta 3 obligados solidarios)
+  createdAt   DateTime  @default(now())
+
+  @@id([contractId, guarantorId])
+  @@unique([contractId, orden])
+  @@map("contract_guarantors")
+}
+
+// ────────────────────────────────────────────────────────────
+// PerfilTransaccional — PLD/KYC sección "PERFIL TRANSACCIONAL"
+// 1:1 con Contract.
+// ────────────────────────────────────────────────────────────
+model PerfilTransaccional {
+  id                    String   @id @default(cuid())
+  contractId            String   @unique
+  contract              Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  productosQueAdquirira String?
+  origenRecursos        String?
+  destinoRecursos       String?
+  montoMensualRango     MontoRango?
+  frecuencia            FrecuenciaTrans?
+  numOperacionesRango   NumOpsRango?
+  realizaPagosEfectivo  Boolean?
+  efectivoMotivos       String?    // condicional: solo si realizaPagosEfectivo=true
+  efectivoMontoMensual  Decimal?   // condicional: solo si realizaPagosEfectivo=true
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@map("perfil_transaccional")
+}
+
+enum MontoRango {
+  HASTA_50K
+  ENTRE_50K_100K
+  MAS_100K
+}
+
+enum FrecuenciaTrans {
+  DIARIA
+  SEMANAL
+  QUINCENAL
+  MENSUAL
+}
+
+enum NumOpsRango {
+  UNO_A_TREINTA
+  TREINTAIUNO_A_CINCUENTA
+  MAS_DE_CINCUENTA
+}
+
+// ────────────────────────────────────────────────────────────
+// Proveedor del bien (sección "DETALLES PARA LA COMPRA DEL BIEN")
+// 1:1 con Contract.
+// ────────────────────────────────────────────────────────────
+model Proveedor {
+  id             String   @id @default(cuid())
+  contractId     String   @unique
+  contract       Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  nombre         String
+  nombreContacto String?
+  telefono       String?
+  email          String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("proveedores")
+}
+
+// ────────────────────────────────────────────────────────────
+// DeclaracionPEP — Persona Políticamente Expuesta (sección
+// "DECLARACIONES DEL CLIENTE" del PDF). 1:n con Contract,
+// hasta 3 tipos: SOLICITANTE, PARIENTE, SOCIO_ACCIONISTA.
+// Todos los campos de detalle son condicionales a esPep=true.
+// ────────────────────────────────────────────────────────────
+model DeclaracionPEP {
+  id                   String   @id @default(cuid())
+  contractId           String
+  contract             Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  tipo                 PepTipo
+  esPep                Boolean   // Sí/No
+
+  // Condicionales a esPep=true:
+  nombre               String?   // para PARIENTE (nombre del pariente PEP)
+  parentesco           String?   // para PARIENTE (relación con el titular)
+  dependencia          String?
+  puesto               String?
+  periodoEjercicio     String?
+  principalesFunciones String?
+
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([contractId, tipo])
+  @@map("declaraciones_pep")
+}
+
+enum PepTipo {
+  SOLICITANTE
+  PARIENTE
+  SOCIO_ACCIONISTA
 }
 
 model ContractDocument {

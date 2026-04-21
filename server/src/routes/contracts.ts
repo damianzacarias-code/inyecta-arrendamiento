@@ -4,6 +4,14 @@ import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
 import { notificar } from '../lib/notificar';
 import { childLogger } from '../lib/logger';
+import {
+  contractKycFieldsObject,
+  contractKycRefine,
+  declaracionPEPSchema,
+  perfilTransaccionalSchema,
+  proveedorSchema,
+} from '../schemas/contract';
+import { linkContractGuarantorSchema } from '../schemas/guarantor';
 
 const log = childLogger('contracts');
 
@@ -35,7 +43,13 @@ const STAGE_LABELS: Record<string, string> = {
   ACTIVO: 'Activo',
 };
 
-const createContractSchema = z.object({
+// ── Campos base del contrato (financieros + datos del bien) ──────
+//
+// Los campos KYC adicionales (proveedor, perfil transaccional, PEP,
+// obligados solidarios, datos de solicitud y terceros) vienen de
+// `contractKycFieldsObject` y se fusionan abajo. El modelo `Proveedor`
+// 1:1 reemplaza al string legacy `Contract.proveedor`.
+const createContractBaseSchema = z.object({
   clientId: z.string(),
   quotationId: z.string().optional(),
   categoriaId: z.string().optional(),
@@ -45,7 +59,10 @@ const createContractSchema = z.object({
   bienAnio: z.number().optional(),
   bienNumSerie: z.string().optional(),
   bienEstado: z.string().optional(),
-  proveedor: z.string().optional(),
+  /** Legacy string — si se envía, se copia a Contract.proveedor por
+   *  compatibilidad. El wizard nuevo envía `proveedor` como objeto
+   *  anidado (ver contractKycFieldsObject). */
+  proveedorLegacy: z.string().optional(),
   producto: z.enum(['PURO', 'FINANCIERO']),
   valorBien: z.number().min(150000),
   plazo: z.number().min(12).max(48),
@@ -62,6 +79,12 @@ const createContractSchema = z.object({
   rentaMensual: z.number(),
   rentaMensualIVA: z.number(),
 });
+
+// Schema compuesto: campos base del contrato + bloque KYC + reglas
+// condicionales del bloque KYC (terceros, unicidad de aval, PEP).
+const createContractSchema = createContractBaseSchema
+  .merge(contractKycFieldsObject)
+  .superRefine(contractKycRefine);
 
 // POST /api/contracts - Crear contrato
 router.post('/', requireAuth, async (req: Request, res: Response) => {
@@ -112,7 +135,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
           bienAnio: data.bienAnio,
           bienNumSerie: data.bienNumSerie,
           bienEstado: data.bienEstado,
-          proveedor: data.proveedor,
+          proveedor: data.proveedorLegacy, // legacy string column
           producto: data.producto,
           valorBien: data.valorBien,
           valorBienIVA,
@@ -129,6 +152,16 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
           montoFinanciar: data.montoFinanciar,
           rentaMensual: data.rentaMensual,
           rentaMensualIVA: data.rentaMensualIVA,
+          // ── Datos de la solicitud CNBV ────────────────────────
+          lugarSolicitud: data.lugarSolicitud,
+          fechaSolicitud: data.fechaSolicitud,
+          promotor: data.promotor,
+          montoSolicitado: data.montoSolicitado,
+          destinoArrendamiento: data.destinoArrendamiento,
+          tercerBeneficiarioExiste: data.tercerBeneficiarioExiste,
+          tercerBeneficiarioInfo: data.tercerBeneficiarioInfo,
+          tercerAportanteExiste: data.tercerAportanteExiste,
+          tercerAportanteInfo: data.tercerAportanteInfo,
           etapa: 'SOLICITUD',
           stageHistory: {
             create: {
@@ -146,6 +179,49 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
           stageHistory: { orderBy: { fecha: 'desc' } },
         },
       });
+
+      // ── Bloques KYC anidados (opcionales) ───────────────────
+      if (data.proveedor) {
+        await tx.proveedor.create({
+          data: { ...data.proveedor, contractId: created.id } as any,
+        });
+      }
+      if (data.perfilTransaccional) {
+        await tx.perfilTransaccional.create({
+          data: {
+            ...data.perfilTransaccional,
+            contractId: created.id,
+          } as any,
+        });
+      }
+      if (data.declaracionesPEP && data.declaracionesPEP.length > 0) {
+        await tx.declaracionPEP.createMany({
+          data: data.declaracionesPEP.map((d) => ({
+            ...d,
+            contractId: created.id,
+          })) as any,
+        });
+      }
+      if (data.obligadosSolidarios && data.obligadosSolidarios.length > 0) {
+        // Validar que todos los Guarantor existan y pertenezcan al cliente
+        const guarantorIds = data.obligadosSolidarios.map((g) => g.guarantorId);
+        const found = await tx.guarantor.findMany({
+          where: { id: { in: guarantorIds }, clientId: data.clientId },
+          select: { id: true },
+        });
+        if (found.length !== guarantorIds.length) {
+          throw new Error(
+            'Uno o más obligados solidarios no existen o no pertenecen al cliente',
+          );
+        }
+        await tx.contractGuarantor.createMany({
+          data: data.obligadosSolidarios.map((g) => ({
+            contractId: created.id,
+            guarantorId: g.guarantorId,
+            orden: g.orden,
+          })),
+        });
+      }
 
       if (data.quotationId) {
         await tx.quotation.update({
@@ -236,6 +312,14 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
         user: { select: { nombre: true, apellidos: true, email: true } },
         categoria: { select: { nombre: true, requiereGPS: true } },
         stageHistory: { orderBy: { fecha: 'desc' } },
+        // Bloques KYC CNBV
+        proveedorData: true,
+        perfilTransaccional: true,
+        declaracionesPEP: true,
+        obligadosSolidarios: {
+          orderBy: { orden: 'asc' },
+          include: { guarantor: true },
+        },
         notas: {
           orderBy: { createdAt: 'desc' },
           take: 30,
@@ -416,6 +500,147 @@ router.post('/:id/notes', requireAuth, async (req: Request, res: Response) => {
     return res.status(201).json(note);
   } catch (error) {
     log.error({ err: error }, 'Create note error');
+    return res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// ═════════════════════════════════════════════════════════════════
+// ENDPOINTS KYC / SOLICITUD CNBV — editan bloques anidados del
+// contrato después de creación (útil cuando el wizard guarda en
+// borradores o para correcciones posteriores a la solicitud).
+// ═════════════════════════════════════════════════════════════════
+
+// PUT /api/contracts/:id/proveedor — upsert del proveedor (1:1)
+router.put('/:id/proveedor', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const contract = await prisma.contract.findUnique({ where: { id: req.params.id } });
+    if (!contract) return res.status(404).json({ error: 'Contrato no encontrado' });
+
+    const data = proveedorSchema.parse(req.body);
+    const proveedor = await prisma.proveedor.upsert({
+      where: { contractId: req.params.id },
+      update: data as any,
+      create: { ...data, contractId: req.params.id } as any,
+    });
+    return res.json(proveedor);
+  } catch (error) {
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
+    log.error({ err: error }, 'Upsert proveedor error');
+    return res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// PUT /api/contracts/:id/perfil-transaccional — upsert (1:1)
+router.put('/:id/perfil-transaccional', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const contract = await prisma.contract.findUnique({ where: { id: req.params.id } });
+    if (!contract) return res.status(404).json({ error: 'Contrato no encontrado' });
+
+    const data = perfilTransaccionalSchema.parse(req.body);
+    const perfil = await prisma.perfilTransaccional.upsert({
+      where: { contractId: req.params.id },
+      update: data as any,
+      create: { ...data, contractId: req.params.id } as any,
+    });
+    return res.json(perfil);
+  } catch (error) {
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
+    log.error({ err: error }, 'Upsert perfil error');
+    return res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// PUT /api/contracts/:id/declaraciones-pep — upsert por tipo (1:n)
+router.put('/:id/declaraciones-pep', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const contract = await prisma.contract.findUnique({ where: { id: req.params.id } });
+    if (!contract) return res.status(404).json({ error: 'Contrato no encontrado' });
+
+    const data = z.array(declaracionPEPSchema).parse(req.body);
+
+    // Validar unicidad de `tipo` en el payload (DB lo enforcea vía
+    // @@unique([contractId, tipo]) pero damos mejor error aquí)
+    const tipos = data.map((d) => d.tipo);
+    if (new Set(tipos).size !== tipos.length) {
+      return res.status(400).json({
+        error: 'Solo una declaración PEP por tipo (SOLICITANTE, PARIENTE, SOCIO_ACCIONISTA)',
+      });
+    }
+
+    const declaraciones = await prisma.$transaction(async (tx) => {
+      await tx.declaracionPEP.deleteMany({ where: { contractId: req.params.id } });
+      if (data.length > 0) {
+        await tx.declaracionPEP.createMany({
+          data: data.map((d) => ({ ...d, contractId: req.params.id })) as any,
+        });
+      }
+      return tx.declaracionPEP.findMany({ where: { contractId: req.params.id } });
+    });
+
+    return res.json(declaraciones);
+  } catch (error) {
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
+    log.error({ err: error }, 'Upsert PEP error');
+    return res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// ── Obligados solidarios: vincular/desvincular aval existente ──
+//
+// POST /api/contracts/:id/guarantors — vincula un aval existente del
+//                                      mismo cliente con un `orden`
+// DELETE /api/contracts/:id/guarantors/:guarantorId — desvincula
+
+router.post('/:id/guarantors', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const contract = await prisma.contract.findUnique({ where: { id: req.params.id } });
+    if (!contract) return res.status(404).json({ error: 'Contrato no encontrado' });
+
+    const { guarantorId, orden } = linkContractGuarantorSchema.parse(req.body);
+
+    // Validar que el aval pertenezca al mismo cliente del contrato
+    const guarantor = await prisma.guarantor.findUnique({ where: { id: guarantorId } });
+    if (!guarantor) return res.status(404).json({ error: 'Aval no encontrado' });
+    if (guarantor.clientId !== contract.clientId) {
+      return res.status(400).json({ error: 'El aval no pertenece al cliente del contrato' });
+    }
+
+    try {
+      const link = await prisma.contractGuarantor.create({
+        data: { contractId: req.params.id, guarantorId, orden },
+        include: { guarantor: true },
+      });
+      return res.status(201).json(link);
+    } catch (err: any) {
+      // P2002: violación de @@unique([contractId, orden]) o @@id
+      if (err?.code === 'P2002') {
+        return res.status(409).json({
+          error: 'Ya existe un aval con ese orden o el aval ya está vinculado al contrato',
+        });
+      }
+      throw err;
+    }
+  } catch (error) {
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
+    log.error({ err: error }, 'Link guarantor error');
+    return res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+router.delete('/:id/guarantors/:guarantorId', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await prisma.contractGuarantor.delete({
+      where: {
+        contractId_guarantorId: {
+          contractId: req.params.id,
+          guarantorId: req.params.guarantorId,
+        },
+      },
+    });
+    return res.status(204).end();
+  } catch (error: any) {
+    if (error?.code === 'P2025') return res.status(404).json({ error: 'Vínculo no encontrado' });
+    log.error({ err: error }, 'Unlink guarantor error');
     return res.status(500).json({ error: 'Error interno' });
   }
 });
