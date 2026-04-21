@@ -1111,6 +1111,58 @@ Bloque B — resumen rápido:
   • 40/40 tests del server pasan; 38/38 del cliente siguen pasando.
   • tsc --noEmit limpio en cada paso.
   • Backend en tsx watch sobrevivió sin reiniciar manualmente.
+
+──────────────────────────────────────────────────────────────────
+Sesión de DX y operación — Bloque C (20-04-2026, autónoma)
+──────────────────────────────────────────────────────────────────
+Cuatro mejoras independientes que reducen la fricción de onboarding
+y operación. Ningún cambio a código de aplicación.
+
+  - [x] C1: README.md (root)
+        Setup en 5 minutos: requisitos, clone+install, Postgres
+        (docker o nativo), .env, prisma migrate + seed,
+        npm run dev. Tabla de comandos comunes. Endpoints clave.
+        Sección de observabilidad (X-Request-ID, pino, bitácora,
+        formato uniforme de error). Apunta a server/CLAUDE.md como
+        fuente de verdad de fórmulas — no las duplica.
+
+  - [x] C2: docker-compose.yml
+        Servicio `db`: Postgres 16-alpine en :5432 con healthcheck
+        pg_isready, volumen `inyecta_pgdata` (persiste entre up/down,
+        se borra solo con down -v). Solo dockeriza la BD; server y
+        client se siguen corriendo nativos para mejor DX.
+
+  - [x] C3: scripts/backup_db.sh + restore_db.sh
+        backup_db.sh: pg_dump --format=custom | gzip -9 con
+        timestamp UTC, rotación por días (RETENTION_DAYS, default
+        30). Lee DATABASE_URL del entorno o de server/.env. Apto
+        para cron (sale != 0 si falla). Verificado: dump 36K,
+        rotación borra archivos > 30 días.
+        restore_db.sh: contraparte destructiva con confirmación
+        interactiva ("RESTAURAR"); bypasseable con NONINTERACTIVE=1
+        para automatización. pg_restore --clean --if-exists
+        --exit-on-error.
+
+  - [x] C4: .github/workflows/ci.yml
+        Trigger: push a main + PRs. Concurrency group por branch
+        (cancela corridas viejas).
+        Job client: npm ci → lint (soft gate, ver nota) → build
+        (incl. tsc -b) → npm test.
+        Job server: npm ci → prisma generate → prisma validate →
+        tsc --noEmit → npm test.
+        No requiere Postgres en CI (tests unitarios). Los tests con
+        BD viven en server/src/__verify__/ y se ejecutan manualmente.
+        Nota: lint del cliente queda como continue-on-error porque
+        hay 127 issues legacy (90× no-explicit-any + 13× set-state-
+        in-effect + etc.). Se limpian en el Bloque D.
+
+Bloque C — resumen rápido:
+  • README.md, docker-compose.yml, scripts/backup_db.sh +
+    restore_db.sh, .github/workflows/ci.yml.
+  • 0 cambios a código de aplicación.
+  • Backup verificado contra Postgres real local (36K dump +
+    rotación borrando archivos > 30 días).
+  • CI listo para correr en cuanto el repo se conecte a GitHub.
 ```
 
 ---
