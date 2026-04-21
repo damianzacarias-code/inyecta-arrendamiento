@@ -9,7 +9,8 @@ import {
   StickyNote, Info, History, AlertTriangle, XCircle,
   Table2, Coins, X, TrendingDown, Download,
 } from 'lucide-react';
-import { generateEstadoCuentaPDF } from '@/lib/estadoCuentaPDF';
+import { pdf } from '@react-pdf/renderer';
+import { EstadoCuentaPDF, type EstadoCuentaProps } from '@/lib/pdf/EstadoCuentaPDF';
 
 interface StageHistoryEntry {
   id: string;
@@ -153,6 +154,91 @@ function clientName(c: ContractDetail['client']): string {
   return [c.nombre, c.apellidoPaterno, c.apellidoMaterno].filter(Boolean).join(' ');
 }
 
+// Adapter: respuesta de /api/cobranza/estado-cuenta/:id  →  props de EstadoCuentaPDF.
+// El endpoint internal trae datos de adeudo y de contrato anidados, pero no
+// los campos contractuales completos (rentaMensual, fechaInicio, etc.) — esos
+// los tomamos del `contract` ya cargado en la página. Así evitamos un round-trip
+// extra y reusamos el mismo componente que el Portal del Arrendatario (T11).
+//
+// La forma del response viene definida en server/src/routes/cobranza.ts
+// (handler GET /estado-cuenta/:contractId).
+interface EstadoCuentaApiResponse {
+  fechaCorte: string;
+  contrato: { folio: string; producto: string; plazo: number; tasaAnual: number };
+  resumen: {
+    rentaVencida: number;
+    moratorios: number;
+    rentaPendiente: number;
+    totalAdeudo: number;
+    periodosVencidos: number;
+    periodosParciales: number;
+  };
+  periodos: Array<{
+    periodo: number;
+    fechaPago: string;
+    estatus: 'PAGADO' | 'PARCIAL' | 'VENCIDO' | 'PENDIENTE' | 'FUTURO';
+    diasAtraso: number;
+    renta: number;
+    ivaRenta: number;
+    moratorio: { pendiente: number; ivaPendiente: number };
+    desglose: { rentaPendiente: number; ivaPendiente: number; totalAdeudado: number };
+  }>;
+}
+
+function mapEstadoCuentaProps(
+  data: EstadoCuentaApiResponse,
+  contract: ContractDetail,
+): EstadoCuentaProps {
+  // Próximo pago = primer periodo PENDIENTE (orden temporal natural del backend).
+  // Si todo está pagado/futuro, queda null y el PDF muestra "Al corriente".
+  const proximo = data.periodos.find(p => p.estatus === 'PENDIENTE');
+  return {
+    cliente: {
+      nombre: clientName(contract.client),
+      rfc: contract.client.rfc ?? null,
+      email: contract.client.email ?? null,
+    },
+    contrato: {
+      folio: contract.folio,
+      producto: contract.producto,
+      plazo: contract.plazo,
+      tasaAnual: contract.tasaAnual,
+      rentaMensual: contract.rentaMensual,
+      rentaMensualIVA: contract.rentaMensualIVA,
+      fechaInicio: contract.fechaInicio ?? null,
+      fechaVencimiento: contract.fechaVencimiento ?? null,
+      estatus: contract.estatus,
+    },
+    resumen: {
+      totalAdeudado: data.resumen.totalAdeudo,
+      // El PDF muestra una métrica única; sumamos vencidos + parciales para
+      // reflejar todos los periodos en mora real (un PARCIAL también está vencido).
+      periodosVencidos: data.resumen.periodosVencidos + data.resumen.periodosParciales,
+      proximoPago: proximo
+        ? {
+            periodo: proximo.periodo,
+            fecha: proximo.fechaPago,
+            monto: proximo.desglose.totalAdeudado,
+          }
+        : null,
+    },
+    periodos: data.periodos.map(p => ({
+      periodo: p.periodo,
+      fechaPago: p.fechaPago,
+      renta: p.renta,
+      ivaRenta: p.ivaRenta,
+      rentaPendiente: p.desglose.rentaPendiente,
+      ivaPendiente: p.desglose.ivaPendiente,
+      moratorio: p.moratorio.pendiente,
+      ivaMoratorio: p.moratorio.ivaPendiente,
+      totalAdeudado: p.desglose.totalAdeudado,
+      diasAtraso: p.diasAtraso,
+      estatus: p.estatus,
+    })),
+    fechaCorte: new Date(data.fechaCorte),
+  };
+}
+
 export default function ContratoDetalle() {
   const { id } = useParams();
   const { user } = useAuth();
@@ -242,11 +328,23 @@ export default function ContratoDetalle() {
 
   const [downloadingEdoCta, setDownloadingEdoCta] = useState(false);
   const handleDownloadEstadoCuenta = async () => {
-    if (!id) return;
+    if (!id || !contract) return;
     setDownloadingEdoCta(true);
     try {
       const res = await api.get(`/cobranza/estado-cuenta/${id}`);
-      generateEstadoCuentaPDF(res.data);
+      const props = mapEstadoCuentaProps(res.data, contract);
+      // Generación imperativa: el botón hace fetch y luego dispara el blob.
+      // Usamos pdf().toBlob() en vez de <PDFDownloadLink> porque la data
+      // viene del server al hacer click (no podemos pre-renderizar el doc).
+      const blob = await pdf(<EstadoCuentaPDF {...props} />).toBlob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `EstadoCuenta_${contract.folio}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Error generando estado de cuenta:', err);
       alert('No se pudo generar el estado de cuenta. Verifica que el contrato esté activo.');

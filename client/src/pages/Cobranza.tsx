@@ -9,7 +9,25 @@ import {
   ArrowRightLeft, FastForward, X, FileText, CircleDot, Receipt, FileCheck2,
   Eye,
 } from 'lucide-react';
-import { generateReciboPDF } from '@/lib/reciboPDF';
+import { pdf } from '@react-pdf/renderer';
+import { ReciboPDF, type ReciboData } from '@/lib/pdf/ReciboPDF';
+
+// Genera el recibo de pago via @react-pdf/renderer y dispara la descarga.
+// El click hace fetch del payload del recibo (folio + montos + cliente)
+// y lo renderiza al vuelo a Blob para no requerir un PDFDownloadLink
+// pre-renderizado por cada pago de cada periodo.
+async function descargarRecibo(paymentId: string) {
+  const res = await api.get<ReciboData>(`/cobranza/payment/${paymentId}/recibo`);
+  const blob = await pdf(<ReciboPDF {...res.data} />).toBlob();
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `Recibo_${res.data.folio}_${res.data.contrato.folio}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -544,8 +562,7 @@ export default function Cobranza() {
                                 <button
                                   onClick={async () => {
                                     try {
-                                      const res = await api.get(`/cobranza/payment/${p.id}/recibo`);
-                                      generateReciboPDF(res.data);
+                                      await descargarRecibo(p.id);
                                     } catch {
                                       alert('No se pudo generar el recibo');
                                     }
