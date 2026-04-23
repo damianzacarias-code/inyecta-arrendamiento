@@ -22,6 +22,7 @@ import alertsRoutes from './routes/alerts';
 import bitacoraRoutes from './routes/bitacora';
 import notificacionesRoutes from './routes/notificaciones';
 import expedienteRoutes from './routes/expediente';
+import { templateRouter as solicitudCnbvTemplateRoutes, contractRouter as solicitudCnbvContractRoutes } from './routes/solicitudCnbv';
 import { bitacora } from './middleware/bitacora';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { requestId } from './middleware/requestId';
@@ -180,6 +181,11 @@ app.use('/api/search', searchRoutes);
 app.use('/api/alerts', alertsRoutes);
 app.use('/api/bitacora', bitacoraRoutes);
 app.use('/api/notificaciones', notificacionesRoutes);
+// Solicitud CNBV — template (admin) y generador por contrato.
+//   POST/GET/DELETE  /api/templates/solicitud-cnbv
+//   GET              /api/contracts/:id/solicitud-cnbv (montado bajo el prefijo de contracts)
+app.use('/api/templates/solicitud-cnbv', solicitudCnbvTemplateRoutes);
+app.use('/api/contracts', solicitudCnbvContractRoutes);
 // expedienteRoutes monta endpoints con distintos prefijos:
 //   GET/POST  /api/contracts/:id/expediente[/...]
 //   PATCH/DEL /api/expediente/actores/:actorId

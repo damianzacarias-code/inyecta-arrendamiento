@@ -29,6 +29,7 @@ import ReportesPortafolio from '@/pages/reportes/Portafolio';
 import ReportesProduccion from '@/pages/reportes/Produccion';
 import ReportesMetricas from '@/pages/reportes/Metricas';
 import ReportesBitacora from '@/pages/reportes/Bitacora';
+import AdminTemplates from '@/pages/admin/Templates';
 import EnConstruccion from '@/pages/EnConstruccion';
 
 const queryClient = new QueryClient({
@@ -84,6 +85,7 @@ export default function App() {
               {/* ─── Administración / Catálogos (stubs, fuera del menú) ─── */}
               <Route path="admin/tasas" element={<EnConstruccion titulo="Administración · Tasas de Interés" />} />
               <Route path="admin/comisiones" element={<EnConstruccion titulo="Administración · Comisiones" />} />
+              <Route path="admin/templates" element={<AdminTemplates />} />
 
               {/* ─── CRM (stubs, fuera del menú) ─── */}
               <Route path="crm" element={<EnConstruccion titulo="CRM · Prospectos" />} />

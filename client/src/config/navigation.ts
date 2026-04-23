@@ -30,6 +30,7 @@ import {
   TrendingUp,
   Activity,
   ScrollText,
+  FileCheck2,
 } from 'lucide-react';
 
 export interface NavSubItem {
@@ -105,6 +106,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: 'Métricas generales',  icon: Activity,       path: '/reportes/metricas'        },
       { label: 'Reportes operativos', icon: FileBarChart,   path: '/reportes'                 },
       { label: 'Bitácora',            icon: ScrollText,     path: '/reportes/bitacora'        },
+      { label: 'Plantillas (admin)',  icon: FileCheck2,     path: '/admin/templates'          },
     ],
   },
 ];
