@@ -192,6 +192,90 @@ Para programarlo, ver `scripts/backup_db.sh` (incluye snippet de cron).
 
 ---
 
+## Extracción automática de PDFs (Claude Vision)
+
+El backend expone `POST /api/extract` para extraer datos estructurados
+de PDFs e imágenes (CSF, INE, comprobante de domicilio, factura del
+bien, acta constitutiva). El frontend lo consume desde los wizards de
+Cliente Nuevo y Nueva Operación con el botón "Autollenar desde…".
+
+### Activación
+
+Por default está en modo `MOCK` (devuelve datos hardcodeados marcados
+con un warning, útil para desarrollo y para que el botón siga vivo
+cuando la API key no esté configurada).
+
+Para activar Claude Vision real:
+
+```bash
+# server/.env
+EXTRACT_PROVIDER=CLAUDE
+ANTHROPIC_API_KEY=sk-ant-...      # se obtiene en console.anthropic.com
+ANTHROPIC_MODEL=claude-sonnet-4-5-20250929   # opcional, este es el default
+```
+
+Si `EXTRACT_PROVIDER=CLAUDE` pero falta `ANTHROPIC_API_KEY`, el
+endpoint responde `503 EXTRACT_DISABLED` con mensaje legible (el
+frontend lo muestra al usuario sin tumbar el wizard).
+
+### Tipos soportados
+
+| `tipo`                  | Descripción                       | Schema (campos)                                                                                  |
+|-------------------------|-----------------------------------|--------------------------------------------------------------------------------------------------|
+| `CSF`                   | Constancia de Situación Fiscal    | rfc, razonSocial, curp, regimenFiscal, codigoPostal, domicilioFiscal, fechaInicioOperaciones, estatusPadron |
+| `INE`                   | Identificación oficial (anverso)  | nombre, apellidoPaterno, apellidoMaterno, curp, claveElector, fechaNacimiento, vigencia, domicilio, sexo |
+| `COMPROBANTE_DOMICILIO` | CFE / Telmex / agua / predial     | emisor, titular, direccion, codigoPostal, fechaEmision, periodo                                  |
+| `FACTURA_BIEN`          | Factura del proveedor del bien    | proveedor, rfcProveedor, bienDescripcion, bienMarca, bienModelo, bienAnio, bienNumSerie, valorBienSinIVA, ivaTrasladado, valorBienConIVA, fechaFactura, folio |
+| `ACTA_CONSTITUTIVA`     | Acta constitutiva (PM)            | razonSocial, fechaConstitucion, numeroEscritura, notario, numeroNotaria, ciudadNotaria, capitalSocial, duracion, objetoSocial, representanteLegal |
+
+### Request / Response
+
+```http
+POST /api/extract
+Authorization: Bearer <jwt>
+Content-Type: multipart/form-data
+
+archivo=@CSF.pdf
+tipo=CSF
+```
+
+```json
+{
+  "ok": true,
+  "provider": "CLAUDE",
+  "confidence": 0.875,
+  "data": { "rfc": "XAXX010101000", "...": "..." },
+  "warning": "Confianza baja (0.42). Verifica los campos extraídos."
+}
+```
+
+### Límites y errores
+
+- **Formatos**: pdf, jpg, jpeg, png, webp.
+- **Tamaño**: máximo 10 MB.
+- **Errores**: `400 INVALID_TIPO`, `400 FILE_REQUIRED`,
+  `400 FILE_TYPE_INVALID`, `400 FILE_TOO_LARGE`,
+  `502 EXTRACT_PROVIDER_ERROR`, `503 EXTRACT_DISABLED`.
+
+### Costos (estimación 04-2026)
+
+Con `claude-sonnet-4-5-20250929`, un PDF típico de 2–4 páginas cuesta
+≈ **$0.012 USD por extracción** ($3/M input + $15/M output, ~3500
+tokens input + ~400 tokens output). Para 1000 extracciones/mes ≈
+$12 USD. La extracción es **on-demand** (solo cuando el usuario hace
+click en "Autollenar"), no automática.
+
+### Política de mapeo en el frontend
+
+Los handlers del wizard **NUNCA sobreescriben** un campo que ya tenga
+valor. Esto permite:
+- Extraer múltiples documentos del mismo cliente (CSF + INE) y que
+  cada uno complemente al anterior.
+- Que el usuario corrija manualmente un campo extraído mal y siga
+  extrayendo otros documentos sin perder la corrección.
+
+---
+
 ## Continuous Integration
 
 GitHub Actions corre en cada PR a `main`:
