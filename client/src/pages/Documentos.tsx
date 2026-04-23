@@ -408,7 +408,13 @@ export default function Documentos() {
                                     <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${estadoBadge[doc.estado]}`}>
                                       {ec.label}
                                     </span>
-                                    {doc.requerido && <span className="text-[10px] text-gray-400">Requerido</span>}
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                      doc.requerido
+                                        ? 'bg-red-50 text-red-600 border border-red-100'
+                                        : 'bg-gray-50 text-gray-500 border border-gray-200'
+                                    }`}>
+                                      {doc.requerido ? 'Requerido' : 'Opcional'}
+                                    </span>
                                     {doc.fechaRecepcion && (
                                       <span className="text-[10px] text-gray-400">{formatDate(doc.fechaRecepcion)}</span>
                                     )}
@@ -436,9 +442,15 @@ export default function Documentos() {
                               className="border border-dashed border-gray-300 rounded-lg p-3 flex items-center gap-2 hover:border-inyecta-300 hover:bg-inyecta-50/20 transition-colors text-left"
                             >
                               <Plus size={13} className="text-gray-400 flex-shrink-0" />
-                              <div className="min-w-0">
+                              <div className="min-w-0 flex-1">
                                 <p className="text-xs text-gray-500 leading-tight">{f.nombre}</p>
-                                {f.requerido && <span className="text-[10px] text-red-400">Requerido</span>}
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium inline-block mt-1 ${
+                                  f.requerido
+                                    ? 'bg-red-50 text-red-600 border border-red-100'
+                                    : 'bg-gray-50 text-gray-500 border border-gray-200'
+                                }`}>
+                                  {f.requerido ? 'Requerido' : 'Opcional'}
+                                </span>
                               </div>
                             </button>
                           ))}
