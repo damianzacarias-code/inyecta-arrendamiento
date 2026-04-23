@@ -374,7 +374,7 @@ export default function Documentos() {
                                         <Upload size={11} />
                                         <input
                                           type="file"
-                                          accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.doc,.docx,.xls,.xlsx"
+                                          accept=".pdf,.jpg,.jpeg,.png,.webp"
                                           className="hidden"
                                           onChange={(e) => {
                                             const f = e.target.files?.[0];

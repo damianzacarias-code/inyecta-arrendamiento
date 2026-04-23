@@ -1,5 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import path from 'path';
+import fs from 'fs';
+import archiver from 'archiver';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
 import { notificar } from '../lib/notificar';
@@ -599,5 +602,176 @@ router.put('/:id/declaraciones-pep', requireAuth, async (req: Request, res: Resp
 //   PATCH  /api/expediente/actores/:actorId
 //   DELETE /api/expediente/actores/:actorId
 // Ver routes/expediente.ts.
+
+// ─────────────────────────────────────────────────────────────────
+// GET /api/contracts/:id/expediente.zip
+//
+// Descarga el expediente completo del contrato en un ZIP con la
+// siguiente estructura:
+//
+//   <folio>/
+//     cliente/<tipo>__<archivoOriginal>
+//     contrato_<etapa>/<tipo>__<archivoOriginal>
+//     aval_<orden>/<tipo>__<archivoOriginal>
+//
+// Solo se incluyen documentos con archivoUrl no nulo (es decir, los
+// que tienen archivo físico subido). Si un actor no tiene docs, se
+// omite su carpeta. Los archivos faltantes en disco se reportan en
+// un archivo `_FALTANTES.txt` dentro del ZIP.
+// ─────────────────────────────────────────────────────────────────
+
+const UPLOADS_ROOT = path.resolve(__dirname, '..', '..', 'uploads');
+
+/** Resuelve `/uploads/clientes/foo.pdf` → ruta absoluta segura dentro de UPLOADS_ROOT.
+ *  Devuelve null si la ruta no es válida (path traversal, fuera de uploads, etc.). */
+function resolveSafeUpload(relativeUrl: string): string | null {
+  if (!relativeUrl) return null;
+  const safe = relativeUrl.replace(/^\/+/, '');
+  if (!safe.startsWith('uploads/')) return null;
+  const inside = safe.slice('uploads/'.length);
+  const full = path.resolve(UPLOADS_ROOT, inside);
+  // Defensa contra path traversal: el resultado debe seguir bajo UPLOADS_ROOT.
+  if (!full.startsWith(UPLOADS_ROOT + path.sep) && full !== UPLOADS_ROOT) return null;
+  return full;
+}
+
+/** Sanitiza un fragmento de path para uso dentro del ZIP. */
+function safePathFragment(s: string): string {
+  return (s || 'sin_nombre').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80);
+}
+
+router.get('/:id/expediente.zip', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const contract = await prisma.contract.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        folio: true,
+        clientId: true,
+        client: {
+          select: {
+            id: true,
+            documentos: { where: { archivoUrl: { not: null } } },
+          },
+        },
+        obligadosSolidarios: {
+          orderBy: { orden: 'asc' },
+          include: {
+            guarantor: {
+              select: {
+                id: true,
+                nombre: true,
+                apellidoPaterno: true,
+                razonSocial: true,
+                documentos: { where: { archivoUrl: { not: null } } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!contract) {
+      return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Contrato no encontrado' } });
+    }
+
+    const contractDocs = await prisma.contractDocument.findMany({
+      where: { contractId: contract.id, archivoUrl: { not: null } },
+      orderBy: [{ etapa: 'asc' }, { tipo: 'asc' }],
+    });
+
+    const folio = safePathFragment(contract.folio || `contrato_${contract.id}`);
+
+    res.status(200);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${folio}_expediente.zip"`);
+
+    const archive = archiver('zip', { zlib: { level: 9 } });
+
+    const faltantes: string[] = [];
+
+    archive.on('warning', (err) => {
+      if (err.code === 'ENOENT') {
+        log.warn({ err }, 'archiver warning ENOENT');
+      } else {
+        log.error({ err }, 'archiver warning');
+      }
+    });
+    archive.on('error', (err) => {
+      log.error({ err }, 'archiver error');
+      // No podemos cambiar el status code en este punto; cerramos la conexión.
+      try { res.end(); } catch (_) { /* ignore */ }
+    });
+
+    archive.pipe(res);
+
+    // ── Carpeta cliente ──────────────────────────────────────────
+    for (const doc of contract.client?.documentos || []) {
+      if (!doc.archivoUrl) continue;
+      const abs = resolveSafeUpload(doc.archivoUrl);
+      const original = path.basename(doc.archivoUrl);
+      const entryName = `${folio}/cliente/${safePathFragment(doc.tipo)}__${safePathFragment(original)}`;
+      if (abs && fs.existsSync(abs)) {
+        archive.file(abs, { name: entryName });
+      } else {
+        faltantes.push(`${entryName} (archivo no encontrado en disco: ${doc.archivoUrl})`);
+      }
+    }
+
+    // ── Carpetas por etapa del contrato ──────────────────────────
+    for (const doc of contractDocs) {
+      if (!doc.archivoUrl) continue;
+      const abs = resolveSafeUpload(doc.archivoUrl);
+      const original = doc.archivoNombre || path.basename(doc.archivoUrl);
+      const carpeta = `contrato_${safePathFragment(doc.etapa)}`;
+      const entryName = `${folio}/${carpeta}/${safePathFragment(doc.tipo)}__${safePathFragment(original)}`;
+      if (abs && fs.existsSync(abs)) {
+        archive.file(abs, { name: entryName });
+      } else {
+        faltantes.push(`${entryName} (archivo no encontrado en disco: ${doc.archivoUrl})`);
+      }
+    }
+
+    // ── Carpetas por aval ────────────────────────────────────────
+    for (const link of contract.obligadosSolidarios) {
+      const docs = link.guarantor?.documentos || [];
+      if (docs.length === 0) continue; // omitir aval sin docs
+      const carpeta = `aval_${link.orden}`;
+      for (const doc of docs) {
+        if (!doc.archivoUrl) continue;
+        const abs = resolveSafeUpload(doc.archivoUrl);
+        const original = path.basename(doc.archivoUrl);
+        const entryName = `${folio}/${carpeta}/${safePathFragment(doc.tipo)}__${safePathFragment(original)}`;
+        if (abs && fs.existsSync(abs)) {
+          archive.file(abs, { name: entryName });
+        } else {
+          faltantes.push(`${entryName} (archivo no encontrado en disco: ${doc.archivoUrl})`);
+        }
+      }
+    }
+
+    if (faltantes.length > 0) {
+      const txt = [
+        `Reporte de archivos faltantes — generado ${new Date().toISOString()}`,
+        `Folio: ${contract.folio}`,
+        '',
+        'Los siguientes documentos están registrados en BD pero su archivo físico',
+        'no fue encontrado en el servidor:',
+        '',
+        ...faltantes.map((f, i) => `  ${i + 1}. ${f}`),
+      ].join('\n');
+      archive.append(txt, { name: `${folio}/_FALTANTES.txt` });
+    }
+
+    await archive.finalize();
+  } catch (error) {
+    log.error({ err: error }, 'Expediente ZIP error');
+    if (!res.headersSent) {
+      res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Error al generar ZIP del expediente' } });
+    } else {
+      try { res.end(); } catch (_) { /* ignore */ }
+    }
+  }
+});
 
 export default router;

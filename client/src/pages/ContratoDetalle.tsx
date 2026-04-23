@@ -888,7 +888,6 @@ export default function ContratoDetalle() {
                     </button>
                   </div>
                 </div>
-
                 {cnbvCoverage && (
                   <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-3 gap-3 text-center">
                     <CoverageStat label="Campos de texto" value={cnbvCoverage.text} color="emerald" />
