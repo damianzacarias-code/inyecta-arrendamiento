@@ -61,9 +61,15 @@ router.get('/preview', requireAuth, async (req: Request, res: Response) => {
       include: {
         client: {
           include: {
-            avales: true,
             socios: true,
           },
+        },
+        // Avales viven en el expediente del contrato: ExpedienteActor
+        // con tipo='AVAL'. Los datos extendidos (apellidos, curp, etc.)
+        // se almacenan en `datosAdicionales` (Json) del actor.
+        actores: {
+          where: { tipo: 'AVAL' },
+          orderBy: { orden: 'asc' },
         },
         amortizacion: { orderBy: { periodo: 'asc' } },
         pagos: { orderBy: [{ periodo: 'asc' }, { createdAt: 'asc' }] },
@@ -225,16 +231,23 @@ router.get('/preview', requireAuth, async (req: Request, res: Response) => {
           porcentaje: Number(s.porcentaje),
         }));
 
-        // Avales
-        const avales = client.avales.map(a => ({
-          nombre: a.nombre,
-          apellidoPaterno: a.apellidoPaterno,
-          apellidoMaterno: a.apellidoMaterno || '',
-          rfc: a.rfc || '',
-          curp: a.curp || '',
-          telefono: a.telefono || '',
-          domicilio: a.domicilio || '',
-        }));
+        // Avales: ahora viven en el expediente del contrato como
+        // ExpedienteActor de tipo AVAL. Los campos extendidos
+        // (apellidos, curp, teléfono, domicilio) están en
+        // `datosAdicionales` (Json) cuando el operador los captura.
+        const avales = contract.actores.map((a) => {
+          const extra = (a.datosAdicionales as Record<string, unknown> | null) ?? {};
+          const str = (k: string) => (typeof extra[k] === 'string' ? (extra[k] as string) : '');
+          return {
+            nombre: a.nombre || '',
+            apellidoPaterno: str('apellidoPaterno'),
+            apellidoMaterno: str('apellidoMaterno'),
+            rfc: a.rfc || '',
+            curp: str('curp'),
+            telefono: str('telefono'),
+            domicilio: str('domicilio'),
+          };
+        });
 
         reportesPM.push({
           ...commonData,
@@ -314,9 +327,18 @@ router.get('/solicitud/:contractId', requireAuth, async (req: Request, res: Resp
       include: {
         client: {
           include: {
-            avales: true,
             socios: true,
-            documentos: true,
+          },
+        },
+        // Expediente: actores con sus documentos. El estado de los
+        // documentos requeridos del Círculo se infiere de los
+        // ExpedienteDocumento del actor SOLICITANTE.
+        actores: {
+          orderBy: [{ tipo: 'asc' }, { orden: 'asc' }],
+          include: {
+            documentos: {
+              select: { tipoDocumento: true, estatus: true, fechaSubida: true },
+            },
           },
         },
         amortizacion: { orderBy: { periodo: 'asc' } },
@@ -329,17 +351,37 @@ router.get('/solicitud/:contractId', requireAuth, async (req: Request, res: Resp
     const client = contract.client;
     const isPF = client.tipo === 'PFAE';
 
-    // Documentos relevantes
+    // Documentos requeridos para el reporte CC: se buscan en el
+    // expediente del SOLICITANTE (cualquier orden).
     const docsRequeridos = isPF
       ? ['INE', 'CSF', 'CURP', 'AUTORIZACION_BURO']
-      : ['ACTA_CONSTITUTIVA', 'CSF', 'INE_REP_LEGAL', 'AUTORIZACION_BURO'];
+      : ['ACTA_CONSTITUTIVA', 'CSF', 'INE', 'AUTORIZACION_BURO'];
 
-    const docsEstado = docsRequeridos.map(tipo => {
-      const doc = client.documentos.find(d => d.tipo === tipo);
+    const solicitanteActor = contract.actores.find((a) => a.tipo === 'SOLICITANTE');
+    const documentosSolicitante = solicitanteActor?.documentos ?? [];
+
+    const docsEstado = docsRequeridos.map((tipo) => {
+      const doc = documentosSolicitante.find((d) => d.tipoDocumento === tipo);
       return {
         tipo,
-        estado: doc?.estado || 'SIN_REGISTRAR',
-        fechaRecepcion: doc?.fechaRecepcion,
+        estado: doc?.estatus ?? 'SIN_REGISTRAR',
+        fechaRecepcion: doc?.fechaSubida ?? null,
+      };
+    });
+
+    // Avales del contrato (ExpedienteActor tipo='AVAL').
+    const avalesActores = contract.actores.filter((a) => a.tipo === 'AVAL');
+    const avales = avalesActores.map((a) => {
+      const extra = (a.datosAdicionales as Record<string, unknown> | null) ?? {};
+      const str = (k: string) => (typeof extra[k] === 'string' ? (extra[k] as string) : '');
+      return {
+        nombre: a.nombre || '',
+        apellidoPaterno: str('apellidoPaterno'),
+        apellidoMaterno: str('apellidoMaterno'),
+        rfc: a.rfc || '',
+        curp: str('curp'),
+        telefono: str('telefono'),
+        domicilio: str('domicilio'),
       };
     });
 
@@ -411,7 +453,7 @@ router.get('/solicitud/:contractId', requireAuth, async (req: Request, res: Resp
         cp: client.cp,
       },
       socios: client.socios,
-      avales: client.avales,
+      avales,
       documentos: docsEstado,
       camposFaltantes,
       listo: camposFaltantes.length === 0,

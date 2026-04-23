@@ -8,9 +8,11 @@ import {
   Gavel, PenTool, Banknote, CheckCircle2, ChevronRight, Send,
   StickyNote, Info, History, AlertTriangle, XCircle,
   Table2, Coins, X, TrendingDown, Download,
+  FileCheck2, RefreshCw, Eye, ExternalLink,
 } from 'lucide-react';
 import { pdf } from '@react-pdf/renderer';
 import { EstadoCuentaPDF, type EstadoCuentaProps } from '@/lib/pdf/EstadoCuentaPDF';
+import ExpedienteTab from '@/components/ExpedienteTab';
 
 interface StageHistoryEntry {
   id: string;
@@ -115,6 +117,7 @@ const tabs = [
   { id: 'pipeline', label: 'Pipeline', icon: History },
   { id: 'info', label: 'Informacion', icon: Info },
   { id: 'documentos', label: 'Documentos', icon: ClipboardCheck },
+  { id: 'solicitud-cnbv', label: 'Solicitud CNBV', icon: FileCheck2 },
   { id: 'amortizacion', label: 'Amortizacion', icon: Table2 },
   { id: 'notas', label: 'Bitacora', icon: StickyNote },
 ];
@@ -245,8 +248,6 @@ export default function ContratoDetalle() {
   const [contract, setContract] = useState<ContractDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('pipeline');
-  const [docsData, setDocsData] = useState<any | null>(null);
-  const [loadingDocs, setLoadingDocs] = useState(false);
   const [advancing, setAdvancing] = useState(false);
   const [advanceObs, setAdvanceObs] = useState('');
   const [comiteRes, setComiteRes] = useState('');
@@ -271,6 +272,22 @@ export default function ContratoDetalle() {
     ahorroPorPeriodo: number;
   } | null>(null);
 
+  // Solicitud CNBV (PDF auto-llenado)
+  const [cnbvTplStatus, setCnbvTplStatus] = useState<{
+    exists: boolean;
+    size?: number;
+    mtime?: string;
+  } | null>(null);
+  const [cnbvLoadingTpl, setCnbvLoadingTpl] = useState(false);
+  const [cnbvGenerating, setCnbvGenerating] = useState(false);
+  const [cnbvPdfUrl, setCnbvPdfUrl] = useState<string | null>(null);
+  const [cnbvCoverage, setCnbvCoverage] = useState<{
+    text: number;
+    check: number;
+    missing: number;
+  } | null>(null);
+  const [cnbvError, setCnbvError] = useState<string | null>(null);
+
   const fetchContract = () => {
     api.get(`/contracts/${id}`)
       .then((res) => setContract(res.data))
@@ -291,40 +308,22 @@ export default function ContratoDetalle() {
     if (tab === 'amortizacion' && !schedule && !loadingSchedule) {
       fetchSchedule();
     }
-    if (tab === 'documentos' && !docsData && !loadingDocs) {
-      setLoadingDocs(true);
-      api.get(`/contract-documents/contract/${id}`)
-        .then(r => setDocsData(r.data))
-        .catch(() => {})
-        .finally(() => setLoadingDocs(false));
+    if (tab === 'solicitud-cnbv' && !cnbvTplStatus && !cnbvLoadingTpl) {
+      setCnbvLoadingTpl(true);
+      api.get('/templates/solicitud-cnbv/status')
+        .then((r) => setCnbvTplStatus(r.data))
+        .catch(() => setCnbvTplStatus({ exists: false }))
+        .finally(() => setCnbvLoadingTpl(false));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  const updateDoc = async (docId: string, payload: { estado?: string; archivoUrl?: string | null; archivoNombre?: string | null; observaciones?: string | null }) => {
-    try {
-      await api.patch(`/contract-documents/${docId}`, payload);
-      const r = await api.get(`/contract-documents/contract/${id}`);
-      setDocsData(r.data);
-    } catch (err) {
-      console.error(err);
-      alert('Error al actualizar documento');
-    }
-  };
-
-  const uploadContractDoc = async (docId: string, file: File) => {
-    const fd = new FormData();
-    fd.append('archivo', file);
-    try {
-      await api.post(`/contract-documents/${docId}/upload`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      const r = await api.get(`/contract-documents/contract/${id}`);
-      setDocsData(r.data);
-    } catch (err: any) {
-      alert(err.response?.data?.error || 'Error al subir el archivo');
-    }
-  };
+  // Limpia el blob al desmontar / cambiar contrato (no leakear memoria)
+  useEffect(() => {
+    return () => {
+      if (cnbvPdfUrl) URL.revokeObjectURL(cnbvPdfUrl);
+    };
+  }, [cnbvPdfUrl]);
 
   const [downloadingEdoCta, setDownloadingEdoCta] = useState(false);
   const handleDownloadEstadoCuenta = async () => {
@@ -351,6 +350,52 @@ export default function ContratoDetalle() {
     } finally {
       setDownloadingEdoCta(false);
     }
+  };
+
+  const generateCnbv = async () => {
+    if (!id) return;
+    setCnbvGenerating(true);
+    setCnbvError(null);
+    if (cnbvPdfUrl) {
+      URL.revokeObjectURL(cnbvPdfUrl);
+      setCnbvPdfUrl(null);
+    }
+    try {
+      const res = await api.get(`/contracts/${id}/solicitud-cnbv`, {
+        responseType: 'blob',
+      });
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      setCnbvPdfUrl(URL.createObjectURL(blob));
+      setCnbvCoverage({
+        text: Number(res.headers['x-solicitud-text-fields'] || 0),
+        check: Number(res.headers['x-solicitud-check-fields'] || 0),
+        missing: Number(res.headers['x-solicitud-missing-fields'] || 0),
+      });
+    } catch (err: any) {
+      // Cuando responseType es blob, el cuerpo de error también llega como blob.
+      let msg = 'No se pudo generar la solicitud';
+      try {
+        const blob = err.response?.data;
+        if (blob instanceof Blob) {
+          const txt = await blob.text();
+          const json = JSON.parse(txt);
+          msg = json?.error?.message || msg;
+        }
+      } catch { /* ignore */ }
+      setCnbvError(msg);
+    } finally {
+      setCnbvGenerating(false);
+    }
+  };
+
+  const downloadCnbv = () => {
+    if (!cnbvPdfUrl || !contract) return;
+    const a = document.createElement('a');
+    a.href = cnbvPdfUrl;
+    a.download = `SolicitudCNBV_${contract.folio}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
   const submitExtraPayment = async () => {
@@ -745,146 +790,149 @@ export default function ContratoDetalle() {
         </div>
       )}
 
-      {/* Tab: Documentos por Etapa */}
-      {tab === 'documentos' && (
+      {/* Tab: Expediente del contrato (por actor) */}
+      {tab === 'documentos' && id && <ExpedienteTab contractId={id} />}
+
+      {/* Tab: Amortización */}
+      {/* Tab: Solicitud CNBV (PDF auto-llenado) */}
+      {tab === 'solicitud-cnbv' && (
         <div className="space-y-4">
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
-            <strong>Documentos por etapa:</strong> Cada etapa del pipeline requiere ciertos documentos. Marca como recibido conforme los obtengas. El avance de etapa requiere completar los documentos requeridos (puedes anular el bloqueo agregando una observación).
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800 flex items-start gap-2">
+            <FileCheck2 size={14} className="mt-0.5 flex-shrink-0" />
+            <div>
+              <strong>Solicitud de Crédito CNBV pre-llenada.</strong> El sistema toma los
+              datos del contrato (cliente, representante legal, socios, avales, perfil
+              transaccional, declaraciones PEP, proveedor) y los inserta en el PDF
+              editable que subió el administrador. <em>El archivo NO se aplana</em> —
+              puedes corregir cualquier campo desde Acrobat antes de imprimirlo y
+              firmarlo.
+            </div>
           </div>
 
-          {loadingDocs && (
+          {cnbvLoadingTpl && (
             <div className="flex items-center justify-center py-12">
               <div className="animate-spin rounded-full h-6 w-6 border-2 border-inyecta-600 border-t-transparent" />
             </div>
           )}
 
-          {!loadingDocs && docsData && docsData.etapas.map((et: any) => (
-            <div key={et.etapa} className={`bg-white rounded-xl border p-4 ${
-              et.currentStage ? 'border-inyecta-300 ring-1 ring-inyecta-100' :
-              et.pasada ? 'border-gray-200 opacity-90' : 'border-gray-200'
-            }`}>
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <h3 className={`font-semibold ${
-                    et.currentStage ? 'text-inyecta-700' :
-                    et.pasada ? 'text-gray-700' : 'text-gray-500'
-                  }`}>
-                    {et.etapa.replace('_', ' ')}
-                  </h3>
-                  {et.currentStage && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-inyecta-100 text-inyecta-700">ETAPA ACTUAL</span>
-                  )}
-                  {et.pasada && (
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-100 text-emerald-700">COMPLETADA</span>
-                  )}
+          {!cnbvLoadingTpl && cnbvTplStatus && !cnbvTplStatus.exists && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center">
+              <AlertTriangle size={32} className="mx-auto text-amber-500 mb-2" />
+              <h3 className="font-semibold text-amber-800">Template no disponible</h3>
+              <p className="text-sm text-amber-700 mt-1 max-w-md mx-auto">
+                Aún no se ha subido el formato editable de la Solicitud CNBV. Pide a un
+                administrador que lo cargue desde
+                <Link
+                  to="/admin/templates"
+                  className="text-amber-900 underline hover:text-amber-700 mx-1"
+                >
+                  Administración › Plantillas
+                </Link>
+                para poder generar el PDF.
+              </p>
+            </div>
+          )}
+
+          {!cnbvLoadingTpl && cnbvTplStatus?.exists && (
+            <>
+              <div className="bg-white rounded-xl border border-gray-200 p-4">
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div className="text-xs text-gray-500">
+                    Template:{' '}
+                    <span className="font-medium text-gray-700">solicitud-cnbv.pdf</span>
+                    {cnbvTplStatus.size != null && (
+                      <> · {(cnbvTplStatus.size / 1024).toFixed(1)} KB</>
+                    )}
+                    {cnbvTplStatus.mtime && (
+                      <> · subido {formatDate(cnbvTplStatus.mtime)}</>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {cnbvPdfUrl && (
+                      <>
+                        <a
+                          href={cnbvPdfUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-medium"
+                        >
+                          <ExternalLink size={12} /> Abrir en pestaña
+                        </a>
+                        <button
+                          onClick={downloadCnbv}
+                          className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-medium"
+                        >
+                          <Download size={12} /> Descargar
+                        </button>
+                      </>
+                    )}
+                    <button
+                      onClick={generateCnbv}
+                      disabled={cnbvGenerating}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-inyecta-700 hover:bg-inyecta-800 text-white rounded-lg text-xs font-medium shadow-sm disabled:opacity-50"
+                    >
+                      {cnbvGenerating ? (
+                        <>
+                          <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-white border-t-transparent" />
+                          Generando…
+                        </>
+                      ) : cnbvPdfUrl ? (
+                        <>
+                          <RefreshCw size={12} /> Regenerar
+                        </>
+                      ) : (
+                        <>
+                          <Eye size={12} /> Generar y previsualizar
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
-                <div className="text-xs text-gray-500">
-                  {et.completos} / {et.total} requeridos · {et.progreso}%
-                </div>
-              </div>
-              {et.total > 0 && (
-                <div className="w-full bg-gray-100 rounded-full h-1.5 mb-3">
-                  <div className={`h-1.5 rounded-full transition-all ${
-                    et.progreso === 100 ? 'bg-emerald-500' :
-                    et.progreso >= 50 ? 'bg-amber-500' : 'bg-red-400'
-                  }`} style={{ width: `${et.progreso}%` }} />
-                </div>
-              )}
-              <div className="space-y-1.5">
-                {et.documentos.map((d: any) => {
-                  const recibido = d.estado === 'RECIBIDO';
-                  const rechazado = d.estado === 'RECHAZADO';
-                  return (
-                    <div key={d.id} className={`flex items-start justify-between gap-2 p-2 rounded border text-sm ${
-                      recibido ? 'border-emerald-200 bg-emerald-50' :
-                      rechazado ? 'border-red-200 bg-red-50' : 'border-gray-100 hover:bg-gray-50'
-                    }`}>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className={`font-medium ${recibido ? 'text-emerald-800' : rechazado ? 'text-red-800' : 'text-gray-800'}`}>
-                            {d.nombre}
-                          </span>
-                          {d.requerido && !recibido && (
-                            <span className="text-[10px] font-bold text-red-600">REQUERIDO</span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-gray-500 mt-0.5">
-                          {d.tipo}
-                          {d.fechaRecepcion && (
-                            <> · Recibido {formatDate(d.fechaRecepcion)}{d.uploadedByUser && ` por ${d.uploadedByUser.nombre}`}</>
-                          )}
-                          {d.archivoNombre && <> · 📎 {d.archivoNombre}</>}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        <label className="text-[10px] px-2 py-1 bg-inyecta-600 hover:bg-inyecta-700 text-white rounded font-medium cursor-pointer">
-                          📤 Subir
-                          <input
-                            type="file"
-                            accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
-                            className="hidden"
-                            onChange={(e) => {
-                              const f = e.target.files?.[0];
-                              if (f) uploadContractDoc(d.id, f);
-                              e.target.value = '';
-                            }}
-                          />
-                        </label>
-                        {d.archivoUrl && (
-                          <a
-                            href={`${(api.defaults.baseURL || '').replace(/\/api$/, '')}${d.archivoUrl}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[10px] px-2 py-1 text-emerald-700 hover:bg-emerald-100 rounded"
-                            title="Ver archivo"
-                          >
-                            📎
-                          </a>
-                        )}
-                        {!recibido && (
-                          <button
-                            onClick={() => {
-                              const nombre = prompt('Nombre del archivo (opcional):') || undefined;
-                              updateDoc(d.id, { estado: 'RECIBIDO', archivoNombre: nombre || null });
-                            }}
-                            className="text-[10px] px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium"
-                          >
-                            Marcar
-                          </button>
-                        )}
-                        {recibido && (
-                          <button
-                            onClick={() => updateDoc(d.id, { estado: 'PENDIENTE', archivoNombre: null })}
-                            className="text-[10px] px-2 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded"
-                          >
-                            Quitar
-                          </button>
-                        )}
-                        {!rechazado && !recibido && (
-                          <button
-                            onClick={() => {
-                              const obs = prompt('Motivo del rechazo:');
-                              if (obs) updateDoc(d.id, { estado: 'RECHAZADO', observaciones: obs });
-                            }}
-                            className="text-[10px] px-2 py-1 text-red-600 hover:bg-red-50 rounded"
-                          >
-                            Rechazar
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-                {et.documentos.length === 0 && (
-                  <p className="text-xs text-gray-400 italic">Sin documentos definidos para esta etapa.</p>
+
+                {cnbvCoverage && (
+                  <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-3 gap-3 text-center">
+                    <CoverageStat label="Campos de texto" value={cnbvCoverage.text} color="emerald" />
+                    <CoverageStat label="Casillas marcadas" value={cnbvCoverage.check} color="blue" />
+                    <CoverageStat
+                      label="Sin datos"
+                      value={cnbvCoverage.missing}
+                      color={cnbvCoverage.missing > 50 ? 'amber' : 'gray'}
+                    />
+                  </div>
                 )}
               </div>
-            </div>
-          ))}
+
+              {cnbvError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 flex items-start gap-2">
+                  <XCircle size={16} className="mt-0.5 flex-shrink-0" />
+                  <span>{cnbvError}</span>
+                </div>
+              )}
+
+              {cnbvPdfUrl && (
+                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  <iframe
+                    src={cnbvPdfUrl}
+                    title="Solicitud CNBV"
+                    className="w-full"
+                    style={{ height: 'calc(100vh - 280px)', minHeight: 600 }}
+                  />
+                </div>
+              )}
+
+              {!cnbvPdfUrl && !cnbvGenerating && !cnbvError && (
+                <div className="bg-white rounded-xl border border-dashed border-gray-300 p-12 text-center">
+                  <FileCheck2 size={40} className="mx-auto text-gray-300 mb-3" />
+                  <p className="text-sm text-gray-500">
+                    Presiona <strong>Generar y previsualizar</strong> para crear la solicitud con los datos actuales del contrato.
+                  </p>
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
 
-      {/* Tab: Amortización */}
       {tab === 'amortizacion' && (
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-gray-200 p-4">
@@ -1124,6 +1172,31 @@ export default function ContratoDetalle() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function CoverageStat({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: number;
+  color: 'emerald' | 'blue' | 'amber' | 'gray';
+}) {
+  const colorClass: Record<typeof color, string> = {
+    emerald: 'text-emerald-700',
+    blue: 'text-blue-700',
+    amber: 'text-amber-700',
+    gray: 'text-gray-500',
+  };
+  return (
+    <div>
+      <div className={`text-2xl font-bold ${colorClass[color]}`}>{value}</div>
+      <div className="text-[10px] uppercase tracking-wide text-gray-500 mt-0.5">
+        {label}
+      </div>
     </div>
   );
 }

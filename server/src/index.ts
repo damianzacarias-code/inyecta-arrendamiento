@@ -12,10 +12,8 @@ import contractRoutes from './routes/contracts';
 import cobranzaRoutes from './routes/cobranza';
 import insuranceRoutes from './routes/insurance';
 import gpsRoutes from './routes/gps';
-import documentsRoutes from './routes/documents';
 import circuloCreditoRoutes from './routes/circuloCredito';
 import reportsRoutes from './routes/reports';
-import contractDocumentsRoutes from './routes/contractDocuments';
 import invoicesRoutes from './routes/invoices';
 import portalRoutes from './routes/portal';
 import conciliationRoutes from './routes/conciliation';
@@ -23,7 +21,7 @@ import searchRoutes from './routes/search';
 import alertsRoutes from './routes/alerts';
 import bitacoraRoutes from './routes/bitacora';
 import notificacionesRoutes from './routes/notificaciones';
-import guarantorsRoutes from './routes/guarantors';
+import expedienteRoutes from './routes/expediente';
 import { bitacora } from './middleware/bitacora';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { requestId } from './middleware/requestId';
@@ -173,10 +171,8 @@ app.use('/api/contracts', contractRoutes);
 app.use('/api/cobranza', cobranzaRoutes);
 app.use('/api/insurance', insuranceRoutes);
 app.use('/api/gps', gpsRoutes);
-app.use('/api/documents', documentsRoutes);
 app.use('/api/circulo-credito', circuloCreditoRoutes);
 app.use('/api/reports', reportsRoutes);
-app.use('/api/contract-documents', contractDocumentsRoutes);
 app.use('/api/invoices', invoicesRoutes);
 app.use('/api/portal', portalRoutes);
 app.use('/api/conciliation', conciliationRoutes);
@@ -184,12 +180,13 @@ app.use('/api/search', searchRoutes);
 app.use('/api/alerts', alertsRoutes);
 app.use('/api/bitacora', bitacoraRoutes);
 app.use('/api/notificaciones', notificacionesRoutes);
-// guarantorsRoutes monta endpoints con distintos prefijos:
-//   POST/GET  /api/clients/:clientId/guarantors
-//   GET/PUT   /api/guarantors/:id
-//   DELETE    /api/guarantors/:id
-// Por eso se monta en /api (no en un subpath fijo).
-app.use('/api', guarantorsRoutes);
+// expedienteRoutes monta endpoints con distintos prefijos:
+//   GET/POST  /api/contracts/:id/expediente[/...]
+//   PATCH/DEL /api/expediente/actores/:actorId
+//   POST      /api/expediente/actores/:actorId/documentos
+//   PATCH/DEL /api/expediente/documentos/:docId
+// Por eso se monta en /api.
+app.use('/api', expedienteRoutes);
 
 // 404 para /api/* sin match — devuelve el mismo formato { error: {...} }
 app.use('/api', notFoundHandler);

@@ -11,7 +11,7 @@ import {
   perfilTransaccionalSchema,
   proveedorSchema,
 } from '../schemas/contract';
-import { linkContractGuarantorSchema } from '../schemas/guarantor';
+import { sembrarActoresIniciales } from '../services/expedienteSeeder';
 
 const log = childLogger('contracts');
 
@@ -92,6 +92,17 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     const data = createContractSchema.parse(req.body);
     const userId = req.user!.userId;
 
+    // El tipoTitular se deriva del cliente (PFAE | PM) y se persiste
+    // en el contrato — ya no se infiere por joins porque el contrato
+    // tiene su propio expediente independiente.
+    const cliente = await prisma.client.findUnique({
+      where: { id: data.clientId },
+      select: { id: true, tipo: true },
+    });
+    if (!cliente) {
+      return res.status(400).json({ error: 'Cliente no encontrado' });
+    }
+
     // Generar folio
     const year = new Date().getFullYear();
     const count = await prisma.contract.count();
@@ -126,6 +137,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         data: {
           folio,
           clientId: data.clientId,
+          tipoTitular: cliente.tipo,
           quotationId: data.quotationId || null,
           userId,
           categoriaId: data.categoriaId || null,
@@ -202,26 +214,11 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
           })) as any,
         });
       }
-      if (data.obligadosSolidarios && data.obligadosSolidarios.length > 0) {
-        // Validar que todos los Guarantor existan y pertenezcan al cliente
-        const guarantorIds = data.obligadosSolidarios.map((g) => g.guarantorId);
-        const found = await tx.guarantor.findMany({
-          where: { id: { in: guarantorIds }, clientId: data.clientId },
-          select: { id: true },
-        });
-        if (found.length !== guarantorIds.length) {
-          throw new Error(
-            'Uno o más obligados solidarios no existen o no pertenecen al cliente',
-          );
-        }
-        await tx.contractGuarantor.createMany({
-          data: data.obligadosSolidarios.map((g) => ({
-            contractId: created.id,
-            guarantorId: g.guarantorId,
-            orden: g.orden,
-          })),
-        });
-      }
+      // Sembrar actores fijos del expediente (OPERACION, SOLICITANTE,
+      // FORMALIZACION, BIEN_ARRENDADO; +REP_LEGAL/PRINCIPAL_ACCIONISTA
+      // si tipoTitular=PM). Los AVALes se agregan después manualmente
+      // desde la UI vía /api/expediente/actores. Idempotente.
+      await sembrarActoresIniciales(tx, created.id, cliente.tipo);
 
       if (data.quotationId) {
         await tx.quotation.update({
@@ -316,9 +313,19 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
         proveedorData: true,
         perfilTransaccional: true,
         declaracionesPEP: true,
-        obligadosSolidarios: {
-          orderBy: { orden: 'asc' },
-          include: { guarantor: true },
+        // Expediente por actor (operación, solicitante, avales, etc.)
+        // Solo metadatos básicos aquí — el detalle completo (catálogos +
+        // documentos) se consulta vía GET /api/contracts/:id/expediente.
+        actores: {
+          orderBy: [{ tipo: 'asc' }, { orden: 'asc' }],
+          select: {
+            id: true,
+            tipo: true,
+            subtipo: true,
+            orden: true,
+            nombre: true,
+            rfc: true,
+          },
         },
         notas: {
           orderBy: { createdAt: 'desc' },
@@ -585,64 +592,12 @@ router.put('/:id/declaraciones-pep', requireAuth, async (req: Request, res: Resp
   }
 });
 
-// ── Obligados solidarios: vincular/desvincular aval existente ──
-//
-// POST /api/contracts/:id/guarantors — vincula un aval existente del
-//                                      mismo cliente con un `orden`
-// DELETE /api/contracts/:id/guarantors/:guarantorId — desvincula
-
-router.post('/:id/guarantors', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const contract = await prisma.contract.findUnique({ where: { id: req.params.id } });
-    if (!contract) return res.status(404).json({ error: 'Contrato no encontrado' });
-
-    const { guarantorId, orden } = linkContractGuarantorSchema.parse(req.body);
-
-    // Validar que el aval pertenezca al mismo cliente del contrato
-    const guarantor = await prisma.guarantor.findUnique({ where: { id: guarantorId } });
-    if (!guarantor) return res.status(404).json({ error: 'Aval no encontrado' });
-    if (guarantor.clientId !== contract.clientId) {
-      return res.status(400).json({ error: 'El aval no pertenece al cliente del contrato' });
-    }
-
-    try {
-      const link = await prisma.contractGuarantor.create({
-        data: { contractId: req.params.id, guarantorId, orden },
-        include: { guarantor: true },
-      });
-      return res.status(201).json(link);
-    } catch (err: any) {
-      // P2002: violación de @@unique([contractId, orden]) o @@id
-      if (err?.code === 'P2002') {
-        return res.status(409).json({
-          error: 'Ya existe un aval con ese orden o el aval ya está vinculado al contrato',
-        });
-      }
-      throw err;
-    }
-  } catch (error) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
-    log.error({ err: error }, 'Link guarantor error');
-    return res.status(500).json({ error: 'Error interno' });
-  }
-});
-
-router.delete('/:id/guarantors/:guarantorId', requireAuth, async (req: Request, res: Response) => {
-  try {
-    await prisma.contractGuarantor.delete({
-      where: {
-        contractId_guarantorId: {
-          contractId: req.params.id,
-          guarantorId: req.params.guarantorId,
-        },
-      },
-    });
-    return res.status(204).end();
-  } catch (error: any) {
-    if (error?.code === 'P2025') return res.status(404).json({ error: 'Vínculo no encontrado' });
-    log.error({ err: error }, 'Unlink guarantor error');
-    return res.status(500).json({ error: 'Error interno' });
-  }
-});
+// ── Obligados solidarios / Avales ───────────────────────────────────
+// Los avales ahora viven en el expediente del contrato como
+// ExpedienteActor de tipo AVAL. Endpoints:
+//   POST   /api/contracts/:id/expediente/actores  (con tipo='AVAL')
+//   PATCH  /api/expediente/actores/:actorId
+//   DELETE /api/expediente/actores/:actorId
+// Ver routes/expediente.ts.
 
 export default router;

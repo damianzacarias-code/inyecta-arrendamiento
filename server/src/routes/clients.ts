@@ -9,52 +9,11 @@ const log = childLogger('clients');
 
 const router = Router();
 
-// ── Schemas locales (solo update de documentos) ──────────────────
-// El schema del Cliente vive en src/schemas/client.ts porque es
-// compartido con el wizard del frontend y con los tests de
-// validación condicional KYC.
-
-const updateDocumentSchema = z.object({
-  estado: z.enum(['PENDIENTE', 'RECIBIDO', 'VENCIDO', 'RECHAZADO']),
-  observaciones: z.string().optional(),
-  fechaVencimiento: z.string().optional(),
-});
-
-// ── Document requirements per type ───────────────────────────────
-
-const pfaeDocuments = [
-  { tipo: 'AUTORIZACION_BURO', nombre: 'Autorizacion para consulta en Buro de Credito', requerido: true },
-  { tipo: 'INE', nombre: 'Identificacion oficial vigente (INE o Pasaporte)', requerido: true },
-  { tipo: 'ACTA_NACIMIENTO', nombre: 'Acta de Nacimiento', requerido: true },
-  { tipo: 'ACTA_MATRIMONIO', nombre: 'Acta de Matrimonio o de Divorcio', requerido: false },
-  { tipo: 'CSF', nombre: 'Constancia de Situacion Fiscal (max. 3 meses)', requerido: true },
-  { tipo: 'COMPROBANTE_DOMICILIO', nombre: 'Comprobante de domicilio vigente (max. 3 meses)', requerido: true },
-  { tipo: 'OPINION_FISCAL', nombre: 'Opinion de Cumplimiento de Obligaciones Fiscales', requerido: true },
-  { tipo: 'OPINION_IMSS', nombre: 'Opinion de Cumplimiento del IMSS o ultimo pago', requerido: true },
-  { tipo: 'ESTADOS_FINANCIEROS', nombre: 'Estados financieros (cierre ultimo ejercicio y parcial)', requerido: true },
-  { tipo: 'ESTADOS_CUENTA', nombre: 'Estados de cuenta bancarios (ultimos 12 meses)', requerido: true },
-  { tipo: 'DECLARACION_ANUAL', nombre: 'Declaracion anual de impuestos (ultimo ejercicio)', requerido: true },
-  { tipo: 'DECLARACION_PARCIAL', nombre: 'Declaracion parcial de impuestos (ultimo mes)', requerido: true },
-];
-
-const pmDocuments = [
-  { tipo: 'AUTORIZACION_BURO', nombre: 'Autorizacion para consulta en Buro de Credito', requerido: true },
-  { tipo: 'CSF', nombre: 'Constancia de Situacion Fiscal (max. 3 meses)', requerido: true },
-  { tipo: 'COMPROBANTE_DOMICILIO', nombre: 'Comprobante de domicilio vigente (max. 3 meses)', requerido: true },
-  { tipo: 'OPINION_FISCAL', nombre: 'Opinion de Cumplimiento de Obligaciones Fiscales', requerido: true },
-  { tipo: 'OPINION_IMSS', nombre: 'Opinion de Cumplimiento del IMSS o ultimo pago', requerido: true },
-  { tipo: 'ACTA_CONSTITUTIVA', nombre: 'Acta Constitutiva con boleta Reg. Publico del Comercio', requerido: true },
-  { tipo: 'ACTAS_ASAMBLEA', nombre: 'Actas de Asamblea y Poderes con inscripcion', requerido: true },
-  { tipo: 'ESTADOS_FINANCIEROS', nombre: 'Estados financieros (cierre ultimo ejercicio y parcial)', requerido: true },
-  { tipo: 'ESTADOS_CUENTA', nombre: 'Estados de cuenta bancarios (ultimos 12 meses)', requerido: true },
-  { tipo: 'DECLARACION_ANUAL', nombre: 'Declaracion anual de impuestos (ultimo ejercicio)', requerido: true },
-  { tipo: 'DECLARACION_PARCIAL', nombre: 'Declaracion parcial de impuestos (ultimo mes)', requerido: true },
-  { tipo: 'RL_INE', nombre: 'Rep. Legal / Socios - INE o Pasaporte', requerido: true },
-  { tipo: 'RL_ACTA_NACIMIENTO', nombre: 'Rep. Legal / Socios - Acta de Nacimiento', requerido: true },
-  { tipo: 'RL_ACTA_MATRIMONIO', nombre: 'Rep. Legal / Socios - Acta de Matrimonio/Divorcio', requerido: false },
-  { tipo: 'RL_CSF', nombre: 'Rep. Legal / Socios - Constancia de Situacion Fiscal', requerido: true },
-  { tipo: 'RL_COMPROBANTE_DOMICILIO', nombre: 'Rep. Legal / Socios - Comprobante de domicilio', requerido: true },
-];
+// NOTA: el checklist de documentos del CLIENTE (ClientDocument) fue
+// eliminado en favor del expediente POR CONTRATO (ExpedienteActor +
+// ExpedienteDocumento). Cada operación tiene su propio expediente,
+// porque los avales y el bien arrendado cambian operación a operación.
+// Ver routes/expediente.ts.
 
 // ── POST /api/clients - Crear cliente ────────────────────────────
 
@@ -100,25 +59,11 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       return created;
     });
 
-    // Auto-crear checklist de documentos (fuera de la transacción —
-    // si falla, el cliente queda creado; el checklist se puede regenerar)
-    const docs = data.tipo === 'PFAE' ? pfaeDocuments : pmDocuments;
-    await prisma.clientDocument.createMany({
-      data: docs.map(d => ({
-        clientId: client.id,
-        tipo: d.tipo,
-        nombre: d.nombre,
-        requerido: d.requerido,
-        estado: 'PENDIENTE' as const,
-      })),
-    });
-
-    // Reload completo con todas las relaciones KYC
+    // Reload completo con todas las relaciones KYC. El expediente de
+    // documentos vive a nivel de contrato — no se carga aquí.
     const clientFull = await prisma.client.findUnique({
       where: { id: client.id },
       include: {
-        documentos: { orderBy: { requerido: 'desc' } },
-        avales: true,
         socios: true,
         representanteLegalData: true,
       },
@@ -161,28 +106,14 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
         take: parseInt(limit as string),
         orderBy: { createdAt: 'desc' },
         include: {
-          documentos: { select: { id: true, estado: true, requerido: true } },
           _count: { select: { cotizaciones: true, contratos: true } },
         },
       }),
       prisma.client.count({ where }),
     ]);
 
-    // Add document progress
-    const enriched = clients.map(c => {
-      const totalDocs = c.documentos.length;
-      const recibidos = c.documentos.filter(d => d.estado === 'RECIBIDO').length;
-      const requeridosTotal = c.documentos.filter(d => d.requerido).length;
-      const requeridosRecibidos = c.documentos.filter(d => d.requerido && d.estado === 'RECIBIDO').length;
-      return {
-        ...c,
-        documentos: undefined,
-        docProgress: { total: totalDocs, recibidos, requeridosTotal, requeridosRecibidos },
-      };
-    });
-
     return res.json({
-      data: enriched,
+      data: clients,
       total,
       page: parseInt(page as string),
       pages: Math.ceil(total / parseInt(limit as string)),
@@ -200,8 +131,6 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
     const client = await prisma.client.findUnique({
       where: { id: req.params.id },
       include: {
-        documentos: { orderBy: [{ requerido: 'desc' }, { tipo: 'asc' }] },
-        avales: true,
         socios: true,
         representanteLegalData: true,
         cotizaciones: {
@@ -296,8 +225,6 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
     const client = await prisma.client.findUnique({
       where: { id: req.params.id },
       include: {
-        documentos: { orderBy: [{ requerido: 'desc' }, { tipo: 'asc' }] },
-        avales: true,
         socios: true,
         representanteLegalData: true,
       },
@@ -313,34 +240,11 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// ── PUT /api/clients/:id/documents/:docId - Actualizar estado doc ─
-
-router.put('/:id/documents/:docId', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const data = updateDocumentSchema.parse(req.body);
-
-    const doc = await prisma.clientDocument.findFirst({
-      where: { id: req.params.docId, clientId: req.params.id },
-    });
-    if (!doc) return res.status(404).json({ error: 'Documento no encontrado' });
-
-    const updated = await prisma.clientDocument.update({
-      where: { id: req.params.docId },
-      data: {
-        estado: data.estado as any,
-        fechaRecepcion: data.estado === 'RECIBIDO' ? new Date() : doc.fechaRecepcion,
-        fechaVencimiento: data.fechaVencimiento ? new Date(data.fechaVencimiento) : doc.fechaVencimiento,
-        observaciones: data.observaciones ?? doc.observaciones,
-      },
-    });
-
-    return res.json(updated);
-  } catch (error) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
-    log.error({ err: error }, 'Update document error');
-    return res.status(500).json({ error: 'Error interno' });
-  }
-});
+// NOTA: el endpoint PUT /api/clients/:id/documents/:docId fue
+// removido. Para gestionar documentos del expediente de un contrato:
+//   POST   /api/expediente/actores/:actorId/documentos
+//   PATCH  /api/expediente/documentos/:docId
+//   DELETE /api/expediente/documentos/:docId
 
 // ── POST /api/clients/:id/notes - Agregar nota ──────────────────
 

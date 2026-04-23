@@ -30,7 +30,12 @@ import {
   zNumOpsRango,
   zPepTipo,
 } from './common';
-import { linkContractGuarantorSchema } from './guarantor';
+
+// NOTA: el bloque de "obligados solidarios" del modelo legacy
+// (Guarantor + ContractGuarantor) fue eliminado. Los avales ahora
+// viven en el expediente del contrato como ExpedienteActor de tipo
+// AVAL y se manejan vía /api/expediente/* (no por el create de
+// contrato).
 
 // ── Proveedor (1:1 con Contract) ────────────────────────────────
 
@@ -190,7 +195,6 @@ export const contractKycFieldsObject = z.object({
   proveedor: proveedorSchema.optional(),
   perfilTransaccional: perfilTransaccionalSchema.optional(),
   declaracionesPEP: z.array(declaracionPEPSchema).optional(),
-  obligadosSolidarios: z.array(linkContractGuarantorSchema).max(3).optional(),
 });
 
 /**
@@ -204,7 +208,6 @@ export function contractKycRefine(
     tercerBeneficiarioInfo?: string;
     tercerAportanteExiste?: boolean;
     tercerAportanteInfo?: string;
-    obligadosSolidarios?: Array<{ orden: number; guarantorId: string }>;
     declaracionesPEP?: Array<{ tipo: string }>;
   },
   ctx: z.RefinementCtx,
@@ -223,27 +226,6 @@ export function contractKycRefine(
       path: ['tercerAportanteInfo'],
       message: 'Requerido cuando declara que existe tercer aportante',
     });
-  }
-
-  // Unicidad de `orden` en obligados solidarios (DB lo enforcea,
-  // pero lo atrapamos antes para dar mejor error)
-  if (data.obligadosSolidarios) {
-    const ordenes = data.obligadosSolidarios.map((g) => g.orden);
-    if (new Set(ordenes).size !== ordenes.length) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['obligadosSolidarios'],
-        message: 'Cada obligado solidario debe tener un orden distinto (1, 2, 3)',
-      });
-    }
-    const guarantorIds = data.obligadosSolidarios.map((g) => g.guarantorId);
-    if (new Set(guarantorIds).size !== guarantorIds.length) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['obligadosSolidarios'],
-        message: 'No puede repetirse el mismo aval en una operación',
-      });
-    }
   }
 
   // Unicidad de `tipo` en declaracionesPEP (DB lo enforcea vía

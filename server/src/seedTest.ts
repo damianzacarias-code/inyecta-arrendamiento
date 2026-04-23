@@ -16,6 +16,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
+import { sembrarActoresIniciales } from './services/expedienteSeeder';
 
 const prisma = new PrismaClient();
 
@@ -236,6 +237,8 @@ const SCENARIOS: Scenario[] = [
 ];
 
 // ─── Limpieza idempotente ───────────────────────────────────
+// El expediente (ExpedienteActor + ExpedienteDocumento) y stageHistory
+// se borran en cascada al eliminar el contrato (onDelete: Cascade).
 async function cleanScenario(rfcCliente: string) {
   const c = await prisma.client.findUnique({ where: { rfc: rfcCliente } });
   if (!c) return;
@@ -245,11 +248,8 @@ async function cleanScenario(rfcCliente: string) {
     await prisma.amortizationEntry.deleteMany({ where: { contractId: ct.id } });
     await prisma.insurancePolicy.deleteMany({ where: { contractId: ct.id } });
     await prisma.gPSDevice.deleteMany({ where: { contractId: ct.id } });
-    await prisma.stageHistory.deleteMany({ where: { contractId: ct.id } });
     await prisma.contract.delete({ where: { id: ct.id } });
   }
-  await prisma.guarantor.deleteMany({ where: { clientId: c.id } });
-  await prisma.clientDocument.deleteMany({ where: { clientId: c.id } });
   await prisma.client.delete({ where: { id: c.id } });
   console.log(`  ↺ limpieza previa de RFC ${rfcCliente}`);
 }
@@ -272,8 +272,8 @@ async function createScenario(s: Scenario, userId: string, seq: number) {
     },
   });
 
-  // 2. Aval
-  await prisma.guarantor.create({ data: { clientId: client.id, ...s.aval } });
+  // 2. (El aval se crea más abajo como ExpedienteActor del contrato — los
+  //     avales son por operación, no por cliente.)
 
   // 3. Cálculo financiero
   const valorSinIVA = s.valorBien / 1.16;
@@ -294,6 +294,7 @@ async function createScenario(s: Scenario, userId: string, seq: number) {
     data: {
       folio,
       clientId: client.id,
+      tipoTitular: s.tipoCliente,
       userId,
       bienDescripcion: s.bien.descripcion,
       bienMarca: s.bien.marca,
@@ -385,6 +386,26 @@ async function createScenario(s: Scenario, userId: string, seq: number) {
   await prisma.contract.update({
     where: { id: contract.id },
     data: { fechaVencimiento: entries[entries.length - 1].fechaPago },
+  });
+
+  // 5b. Expediente: sembrar actores fijos + agregar 1 aval (PF) por contrato.
+  await sembrarActoresIniciales(prisma, contract.id, s.tipoCliente);
+  await prisma.expedienteActor.create({
+    data: {
+      contractId: contract.id,
+      tipo: 'AVAL',
+      subtipo: 'PF',
+      orden: 1,
+      nombre: `${s.aval.nombre} ${s.aval.apellidoPaterno}${s.aval.apellidoMaterno ? ' ' + s.aval.apellidoMaterno : ''}`,
+      rfc: s.aval.rfc,
+      datosAdicionales: {
+        apellidoPaterno: s.aval.apellidoPaterno,
+        apellidoMaterno: s.aval.apellidoMaterno || '',
+        telefono: s.aval.telefono,
+        email: s.aval.email,
+        relacion: s.aval.relacion,
+      },
+    },
   });
 
   // 6. Pagos previos (períodos completos)

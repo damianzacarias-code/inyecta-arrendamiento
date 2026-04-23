@@ -26,7 +26,7 @@ model User {
   contratos     Contract[]
   pagosRegistrados Payment[]
   notas         Note[]
-  documentosSubidos ContractDocument[]
+  documentosSubidos ExpedienteDocumento[]
   notificaciones Notificacion[]
 
   @@map("users")
@@ -102,8 +102,6 @@ model Client {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  documentos         ClientDocument[]
-  avales             Guarantor[]
   socios             Shareholder[]
   cotizaciones       Quotation[]
   contratos          Contract[]
@@ -151,108 +149,10 @@ enum Genero {
   NO_ESPECIFICA
 }
 
-model ClientDocument {
-  id          String         @id @default(cuid())
-  clientId    String
-  client      Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  tipo        String         // e.g. "INE", "CSF", "ESTADOS_FINANCIEROS"
-  nombre      String         // nombre descriptivo
-  requerido   Boolean        @default(true)
-  estado      DocumentStatus @default(PENDIENTE)
-  archivoUrl  String?
-  fechaRecepcion DateTime?
-  fechaVencimiento DateTime?
-  observaciones String?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-
-  @@map("client_documents")
-}
-
-enum DocumentStatus {
-  PENDIENTE
-  RECIBIDO
-  VENCIDO
-  RECHAZADO
-}
-
-model Guarantor {
-  id              String   @id @default(cuid())
-  clientId        String
-  client          Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
-  // Identidad básica
-  nombre          String
-  apellidoPaterno String
-  apellidoMaterno String?
-  rfc             String?
-  curp            String?
-  fiel            String?
-  genero          Genero?
-  relacion        String?   // parentesco/relación con el solicitante
-
-  // Si el obligado solidario es persona moral
-  razonSocial                 String?
-  representanteNombre         String?
-  representanteApellidoPaterno String?
-  representanteApellidoMaterno String?
-  representanteRfc            String?
-  fechaInscripcionEscrituraConst DateTime?
-  folioInscripcionEscrituraConst String?
-  fechaInscripcionPoderes     DateTime?
-  folioInscripcionPoderes     String?
-
-  // Estado civil
-  estadoCivil        EstadoCivil?
-  regimenMatrimonial RegimenMatrimonial?
-  nombreConyuge      String?
-
-  // Nacimiento / nacionalidad
-  fechaNacimiento DateTime?
-  lugarNacimiento String?
-  nacionalidad    String?
-
-  // Domicilio particular (estructurado; `domicilio` texto plano queda por compatibilidad)
-  domicilio       String?   // DEPRECATED — usar campos estructurados
-  calle           String?
-  numExterior     String?
-  numInterior     String?
-  colonia         String?
-  municipio       String?
-  ciudad          String?
-  estado          String?
-  pais            String?    @default("México")
-  cp              String?
-
-  // Contacto
-  telefono        String?    // DEPRECATED — usar telefonoCelular
-  telefonoFijo    String?
-  telefonoCelular String?
-  email           String?
-
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  documentos          GarantorDocument[]
-  contratosAsociados  ContractGuarantor[]
-
-  @@map("guarantors")
-}
-
-model GarantorDocument {
-  id          String         @id @default(cuid())
-  guarantorId String
-  guarantor   Guarantor      @relation(fields: [guarantorId], references: [id], onDelete: Cascade)
-  tipo        String
-  nombre      String
-  estado      DocumentStatus @default(PENDIENTE)
-  archivoUrl  String?
-  fechaRecepcion DateTime?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-
-  @@map("guarantor_documents")
-}
+// NOTA: Los modelos ClientDocument, Guarantor, GarantorDocument,
+// ContractGuarantor y ContractDocument fueron reemplazados por
+// ExpedienteActor + ExpedienteDocumento (al final del archivo).
+// Ver migración: 20260422_expediente_por_actor.
 
 model Shareholder {
   id              String  @id @default(cuid())
@@ -584,6 +484,12 @@ model Contract {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  // Tipo de titular del expediente (PFAE/PM). Determina qué actores y
+  // catálogos de documentos aplican al expediente del contrato. Snapshot
+  // del Client.tipo al momento de crear el contrato — un cliente PFAE
+  // que se transforma a PM no rompe contratos previos.
+  tipoTitular     ClientType
+
   amortizacion    AmortizationEntry[]
   pagos           Payment[]
   seguros         InsurancePolicy[]
@@ -591,34 +497,18 @@ model Contract {
   mantenimientos  MaintenanceRecord[]
   notas           Note[]
   stageHistory    StageHistory[]
-  documentos      ContractDocument[]
   facturas        Invoice[]
 
+  // Expediente documental por contrato (Operación, Solicitante,
+  // Rep. Legal, Accionista, Avales 1..N, Bien, Formalización).
+  actores         ExpedienteActor[]
+
   // Relaciones KYC / solicitud
-  obligadosSolidarios  ContractGuarantor[]
   perfilTransaccional  PerfilTransaccional?
   proveedorData        Proveedor?
   declaracionesPEP     DeclaracionPEP[]
 
   @@map("contracts")
-}
-
-// ────────────────────────────────────────────────────────────
-// ContractGuarantor — asocia Guarantors al Contract con orden
-// (1, 2, 3). Permite que un mismo aval sea reutilizado entre
-// operaciones sin duplicar datos del titular.
-// ────────────────────────────────────────────────────────────
-model ContractGuarantor {
-  contractId  String
-  contract    Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  guarantorId String
-  guarantor   Guarantor @relation(fields: [guarantorId], references: [id], onDelete: Cascade)
-  orden       Int       // 1, 2 o 3 (el PDF marca hasta 3 obligados solidarios)
-  createdAt   DateTime  @default(now())
-
-  @@id([contractId, guarantorId])
-  @@unique([contractId, orden])
-  @@map("contract_guarantors")
 }
 
 // ────────────────────────────────────────────────────────────
@@ -718,27 +608,6 @@ enum PepTipo {
   SOLICITANTE
   PARIENTE
   SOCIO_ACCIONISTA
-}
-
-model ContractDocument {
-  id            String         @id @default(cuid())
-  contractId    String
-  contract      Contract       @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  etapa         ContractStage  // etapa donde se requiere el documento
-  tipo          String         // p.ej. "CONTRATO_FIRMADO", "PAGARE", "ACTA_ENTREGA"
-  nombre        String         // descripción humana
-  requerido     Boolean        @default(true)
-  estado        DocumentStatus @default(PENDIENTE)
-  archivoUrl    String?
-  archivoNombre String?
-  fechaRecepcion DateTime?
-  observaciones String?
-  uploadedBy    String?
-  uploadedByUser User?         @relation(fields: [uploadedBy], references: [id])
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-
-  @@map("contract_documents")
 }
 
 enum ContractStage {
@@ -1143,4 +1012,105 @@ model Bitacora {
   // Lookup directo por correlation-id desde un log estructurado de pino.
   @@index([requestId])
   @@map("bitacora")
+}
+
+// ============================================================
+// EXPEDIENTE DOCUMENTAL POR CONTRATO
+// ------------------------------------------------------------
+// Estructura por ACTORES del expediente, basada en los checklists
+// oficiales de Inyecta (PFAE y PM). Cada contrato tiene su propio
+// expediente — los actores y documentos cuelgan del contrato, NO
+// del cliente. Esto significa que un cliente con varios contratos
+// tendrá un expediente independiente por operación.
+//
+// Reemplaza por completo a los modelos legacy:
+//   - ClientDocument
+//   - GarantorDocument
+//   - ContractDocument
+//   - Guarantor
+//   - ContractGuarantor
+//
+// Actores fijos (únicos por contrato): OPERACION, SOLICITANTE,
+// REPRESENTANTE_LEGAL (PM), PRINCIPAL_ACCIONISTA (PM), BIEN_ARRENDADO,
+// FORMALIZACION.
+// Actores dinámicos: AVAL (0..N por contrato, distinguidos por orden
+// 1, 2, 3...). Cada AVAL puede ser PF o PM, lo cual cambia el catálogo
+// esperado de documentos.
+//
+// Los catálogos de tipos de documento por actor viven en código
+// (server/src/services/expedienteCatalogs.ts) — son metadatos/checklist
+// visual, NO bloquean la subida de archivos libres.
+// ============================================================
+
+enum ActorTipo {
+  OPERACION             // documentos del proceso de originación
+  SOLICITANTE           // titular del contrato (PFAE o PM)
+  REPRESENTANTE_LEGAL   // único, solo si tipoTitular = PM
+  PRINCIPAL_ACCIONISTA  // único, solo si tipoTitular = PM
+  AVAL                  // 0..N obligados solidarios por contrato
+  BIEN_ARRENDADO        // factura, avalúo, póliza, REPUVE, RUG, etc.
+  FORMALIZACION         // resolución, contrato firmado, RUG/RPP
+}
+
+enum ActorSubtipo {
+  PF
+  PM
+}
+
+enum DocumentoEstatus {
+  PENDIENTE
+  VALIDADO
+  RECHAZADO
+}
+
+model ExpedienteActor {
+  id              String        @id @default(cuid())
+  contractId      String
+  contract        Contract      @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  tipo            ActorTipo
+  subtipo         ActorSubtipo? // requerido cuando tipo = AVAL; null en los demás
+  orden           Int           @default(1) // 1 para fijos; 1..N para AVAL
+  nombre          String?       // nombre completo o razón social del actor
+  rfc             String?       // opcional — para actores con identidad propia
+  datosAdicionales Json?        // dirección, teléfono, % accionario, parentesco, etc.
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  documentos      ExpedienteDocumento[]
+
+  // Unicidad: para actores fijos (orden=1) garantiza un solo
+  // OPERACION/SOLICITANTE/REP_LEGAL/etc. por contrato. Para AVAL,
+  // orden distingue Aval 1, Aval 2, etc.
+  @@unique([contractId, tipo, orden])
+  @@index([contractId])
+  @@map("expediente_actores")
+}
+
+model ExpedienteDocumento {
+  id             String           @id @default(cuid())
+  actorId        String
+  actor          ExpedienteActor  @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  // Clave del catálogo del actor (ej. "INE", "ACTA_CONSTITUTIVA")
+  // o null si el promotor lo subió como "Libre/Sin clasificar".
+  tipoDocumento  String?
+  // Nombre original del archivo subido (para mostrar en UI).
+  nombreArchivo  String
+  // URL pública relativa (servida por express.static, ej. /uploads/expedientes/...).
+  archivoUrl     String
+  // Físico en oficina y digital en sistema son INDEPENDIENTES.
+  // tieneDigital se setea automáticamente al subir; tieneFisico se
+  // marca manualmente cuando llega la copia en papel.
+  tieneFisico    Boolean          @default(false)
+  tieneDigital   Boolean          @default(true)
+  estatus        DocumentoEstatus @default(PENDIENTE)
+  notas          String?
+  fechaSubida    DateTime         @default(now())
+  subidoPor      String?
+  subidoPorUser  User?            @relation(fields: [subidoPor], references: [id])
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([actorId])
+  @@index([actorId, tipoDocumento])
+  @@map("expediente_documentos")
 }

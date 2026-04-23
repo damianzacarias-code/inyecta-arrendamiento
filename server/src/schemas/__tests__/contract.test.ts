@@ -217,63 +217,6 @@ describe('contractKycFieldsSchema — terceros', () => {
   });
 });
 
-describe('contractKycFieldsSchema — obligados solidarios', () => {
-  it('acepta hasta 3 obligados con órdenes distintos', () => {
-    const result = contractKycFieldsSchema.safeParse({
-      obligadosSolidarios: [
-        { guarantorId: 'a', orden: 1 },
-        { guarantorId: 'b', orden: 2 },
-        { guarantorId: 'c', orden: 3 },
-      ],
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('rechaza más de 3 obligados solidarios', () => {
-    const result = contractKycFieldsSchema.safeParse({
-      obligadosSolidarios: [
-        { guarantorId: 'a', orden: 1 },
-        { guarantorId: 'b', orden: 2 },
-        { guarantorId: 'c', orden: 3 },
-        { guarantorId: 'd', orden: 4 },
-      ],
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('rechaza órdenes duplicados', () => {
-    const result = contractKycFieldsSchema.safeParse({
-      obligadosSolidarios: [
-        { guarantorId: 'a', orden: 1 },
-        { guarantorId: 'b', orden: 1 },
-      ],
-    });
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(
-        result.error.issues.some((i) => i.message.toLowerCase().includes('orden')),
-      ).toBe(true);
-    }
-  });
-
-  it('rechaza el mismo guarantorId usado dos veces', () => {
-    const result = contractKycFieldsSchema.safeParse({
-      obligadosSolidarios: [
-        { guarantorId: 'a', orden: 1 },
-        { guarantorId: 'a', orden: 2 },
-      ],
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('rechaza orden fuera de rango', () => {
-    const result = contractKycFieldsSchema.safeParse({
-      obligadosSolidarios: [{ guarantorId: 'a', orden: 4 }],
-    });
-    expect(result.success).toBe(false);
-  });
-});
-
 describe('contractKycFieldsSchema — unicidad PEP', () => {
   it('rechaza dos declaraciones PEP con el mismo tipo', () => {
     const result = contractKycFieldsSchema.safeParse({

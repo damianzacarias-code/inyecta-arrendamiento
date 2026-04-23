@@ -3,6 +3,7 @@ import { z } from 'zod';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
 import { calcularArrendamiento, generarOpcionesRiesgo } from '../services/leaseCalculator';
+import { sembrarActoresIniciales } from '../services/expedienteSeeder';
 import { notificar } from '../lib/notificar';
 import { childLogger } from '../lib/logger';
 
@@ -360,7 +361,10 @@ router.post('/:id/convert', requireAuth, async (req: Request, res: Response) => 
     const userId = req.user!.userId;
     const quotation = await prisma.quotation.findUnique({
       where: { id: req.params.id },
-      include: { contrato: { select: { id: true, folio: true } } },
+      include: {
+        contrato: { select: { id: true, folio: true } },
+        client: { select: { id: true, tipo: true } },
+      },
     });
     if (!quotation) return res.status(404).json({ error: 'Cotización no encontrada' });
 
@@ -376,7 +380,7 @@ router.post('/:id/convert', requireAuth, async (req: Request, res: Response) => 
     if (quotation.estado === 'RECHAZADA') {
       return res.status(400).json({ error: 'No se puede convertir una cotización rechazada' });
     }
-    if (!quotation.clientId) {
+    if (!quotation.clientId || !quotation.client) {
       return res.status(400).json({
         error: 'La cotización no tiene un cliente registrado. Crea el contrato manualmente desde /contratos/nuevo.',
       });
@@ -395,6 +399,7 @@ router.post('/:id/convert', requireAuth, async (req: Request, res: Response) => 
         data: {
           folio,
           clientId: quotation.clientId!,
+          tipoTitular: quotation.client!.tipo,
           quotationId: quotation.id,
           userId,
           categoriaId: quotation.categoriaId || null,
@@ -435,6 +440,10 @@ router.post('/:id/convert', requireAuth, async (req: Request, res: Response) => 
         where: { id: quotation.id },
         data: { estado: 'CONVERTIDA' },
       });
+
+      // Sembrar actores iniciales del expediente (OPERACION, SOLICITANTE,
+      // BIEN_ARRENDADO, FORMALIZACION + REPRESENTANTE_LEGAL/PRINCIPAL_ACCIONISTA si PM).
+      await sembrarActoresIniciales(tx, created.id, quotation.client!.tipo);
 
       return created;
     });

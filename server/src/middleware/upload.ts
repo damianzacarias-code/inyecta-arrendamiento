@@ -6,12 +6,14 @@ import crypto from 'crypto';
 const ROOT = path.resolve(__dirname, '..', '..', 'uploads');
 
 // Asegura que existan los subdirectorios al iniciar el módulo.
-['clientes', 'contratos'].forEach(dir => {
+['clientes', 'contratos', 'expedientes'].forEach(dir => {
   const full = path.join(ROOT, dir);
   if (!fs.existsSync(full)) fs.mkdirSync(full, { recursive: true });
 });
 
-function makeStorage(subdir: 'clientes' | 'contratos') {
+export type UploadKind = 'clientes' | 'contratos' | 'expedientes';
+
+function makeStorage(subdir: UploadKind) {
   return multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, path.join(ROOT, subdir)),
     filename: (_req, file, cb) => {
@@ -45,7 +47,15 @@ export const uploadContrato = multer({
   limits,
 }).single('archivo');
 
-export function publicUrl(filename: string, kind: 'clientes' | 'contratos'): string {
+// Expediente documental por contrato (actores + documentos).
+// Se sirve bajo /uploads/expedientes/...
+export const uploadExpediente = multer({
+  storage: makeStorage('expedientes'),
+  fileFilter,
+  limits,
+}).single('archivo');
+
+export function publicUrl(filename: string, kind: UploadKind): string {
   return `/uploads/${kind}/${filename}`;
 }
 

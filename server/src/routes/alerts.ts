@@ -6,7 +6,9 @@
  * Agrega alertas de tres fuentes:
  *  1. Cobranza vencida   — entries de amortización con diasAtraso > 0
  *  2. Pólizas de seguro  — vencidas / por vencer / contratos sin póliza
- *  3. Documentos         — ClientDocument / ContractDocument vencidos o por vencer
+ *  3. Documentos         — ExpedienteDocumento con estatus RECHAZADO
+ *                         (el modelo nuevo no tiene fechaVencimiento;
+ *                         la "alerta" relevante es revisión rechazada)
  *
  * Cada alerta tiene la misma forma:
  *   { kind, level: CRITICA|ALTA|MEDIA|BAJA, mensaje, actionUrl, ... }
@@ -174,37 +176,45 @@ router.get('/', requireAuth, async (_req: Request, res: Response) => {
         });
       });
 
-    // ─── 3. Documentos vencidos ──────────────────────────────
-    const clientDocs = await prisma.clientDocument.findMany({
-      where: {
-        fechaVencimiento: { not: null, lt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000) },
-        estado: { in: ['PENDIENTE', 'RECIBIDO'] },
-      },
+    // ─── 3. Documentos rechazados ────────────────────────────
+    // El nuevo modelo (ExpedienteDocumento) no tiene fechaVencimiento.
+    // La alerta operativa relevante es: documentos que el revisor marcó
+    // como RECHAZADOS y que aún no se reemplazan. Cada uno bloquea la
+    // formalización del contrato correspondiente.
+    const docsRechazados = await prisma.expedienteDocumento.findMany({
+      where: { estatus: 'RECHAZADO' },
       include: {
-        client: { select: { id: true, tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true } },
+        actor: {
+          include: {
+            contract: {
+              select: {
+                id: true, folio: true,
+                client: { select: { id: true, tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true } },
+              },
+            },
+          },
+        },
       },
     });
 
-    for (const d of clientDocs) {
-      if (!d.fechaVencimiento) continue;
-      const days = Math.floor((new Date(d.fechaVencimiento).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-
-      let level: AlertLevel;
-      if (days < 0) level = 'ALTA';
-      else if (days <= 7) level = 'MEDIA';
-      else level = 'BAJA';
-
+    for (const d of docsRechazados) {
+      const contract = d.actor.contract;
+      const actorLabel = d.actor.nombre || d.actor.tipo;
       alerts.push({
         kind: 'DOCUMENTO_VENCIDO',
-        level,
-        clienteId: d.client.id,
-        cliente: clientName(d.client),
-        mensaje: days < 0
-          ? `${d.nombre} vencido hace ${Math.abs(days)} día(s)`
-          : `${d.nombre} vence en ${days} día(s)`,
-        actionUrl: `/clientes/${d.client.id}`,
-        diasRestantes: days,
-        meta: { tipo: d.tipo, documentoId: d.id },
+        level: 'ALTA',
+        contractId: contract.id,
+        contractFolio: contract.folio,
+        clienteId: contract.client.id,
+        cliente: clientName(contract.client),
+        mensaje: `Documento "${d.nombreArchivo}" RECHAZADO en expediente (${actorLabel})`,
+        actionUrl: `/contratos/${contract.id}?tab=expediente`,
+        meta: {
+          tipoDocumento: d.tipoDocumento,
+          documentoId: d.id,
+          actorId: d.actor.id,
+          actorTipo: d.actor.tipo,
+        },
       });
     }
 
