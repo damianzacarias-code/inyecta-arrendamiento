@@ -20,6 +20,7 @@ dotenv.config();
 // ─── Helpers ────────────────────────────────────────────────────────
 const nodeEnvEnum = z.enum(['development', 'test', 'staging', 'production']);
 const cfdiProviderEnum = z.enum(['MOCK', 'FACTURAMA', 'SW']);
+const extractProviderEnum = z.enum(['MOCK', 'CLAUDE']);
 
 /**
  * Coerciona "true"/"false"/"1"/"0" → boolean.
@@ -76,6 +77,14 @@ const EnvSchema = z
     // ── CORS / Seguridad (lo aplica A5) ───────────────────
     // Lista separada por comas. Si no se define, en dev default a localhost.
     CORS_ALLOWED_ORIGINS: z.string().optional(),
+
+    // ── Extracción de PDFs (Claude Vision) ────────────────
+    // EXTRACT_PROVIDER=CLAUDE requiere ANTHROPIC_API_KEY.
+    // EXTRACT_PROVIDER=MOCK devuelve datos hardcoded para tests/demos.
+    EXTRACT_PROVIDER: extractProviderEnum.default('MOCK'),
+    ANTHROPIC_API_KEY: z.string().optional(),
+    // Modelo a usar (override opcional). Default: claude-sonnet-4-5-20250929.
+    ANTHROPIC_MODEL: z.string().default('claude-sonnet-4-5-20250929'),
   })
   // Validaciones cruzadas (cosas que solo aplican en producción).
   .superRefine((env, ctx) => {
@@ -104,6 +113,13 @@ const EnvSchema = z
           message: 'CFDI_PROVIDER=FACTURAMA requiere FACTURAMA_USER y FACTURAMA_PASS',
         });
       }
+    }
+    if (env.EXTRACT_PROVIDER === 'CLAUDE' && !env.ANTHROPIC_API_KEY) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['EXTRACT_PROVIDER'],
+        message: 'EXTRACT_PROVIDER=CLAUDE requiere ANTHROPIC_API_KEY',
+      });
     }
   });
 
@@ -157,6 +173,11 @@ export const config = {
   },
   cors: {
     allowedOrigins: env.CORS_ALLOWED_ORIGINS,
+  },
+  extract: {
+    provider: env.EXTRACT_PROVIDER,
+    anthropicApiKey: env.ANTHROPIC_API_KEY,
+    anthropicModel: env.ANTHROPIC_MODEL,
   },
 } as const;
 

@@ -17,6 +17,7 @@
     "verify:health": "tsx src/__verify__/health.verify.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.90.0",
     "@prisma/client": "^6.9.0",
     "@types/archiver": "^7.0.0",
     "@types/multer": "^2.1.0",
