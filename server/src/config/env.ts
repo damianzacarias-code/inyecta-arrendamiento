@@ -15,7 +15,14 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
 
-dotenv.config();
+// override:true — el archivo .env es la fuente de verdad para el
+// backend local. Sin esto, una variable vacía exportada en el shell
+// del usuario (p.ej. ANTHROPIC_API_KEY="" en .zshrc) gana contra
+// el valor real del .env y dispara falsos "requerido" de Zod.
+// En producción las variables llegan por el orquestador (k8s,
+// ECS, etc.) y el .env no existe, así que override:true es
+// irrelevante en ese caso.
+dotenv.config({ override: true });
 
 // ─── Helpers ────────────────────────────────────────────────────────
 const nodeEnvEnum = z.enum(['development', 'test', 'staging', 'production']);
