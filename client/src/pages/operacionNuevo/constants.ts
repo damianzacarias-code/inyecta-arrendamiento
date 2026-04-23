@@ -48,7 +48,7 @@ export const bienEstadoOptions = [
 ] as const;
 
 export const plazoOptions = [12, 18, 24, 30, 36, 42, 48].map((p) => ({
-  value: String(p),
+  value: p,
   label: `${p} meses`,
 }));
 

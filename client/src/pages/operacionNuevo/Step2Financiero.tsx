@@ -94,6 +94,7 @@ export function Step2Financiero() {
             path="plazo"
             label="Plazo"
             options={plazoOptions}
+            valueAsNumber
           />
           <TextField
             path="tasaAnual"

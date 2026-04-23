@@ -112,14 +112,19 @@ export function SelectField({
   placeholder = 'Seleccionar...',
   help,
   className,
+  valueAsNumber,
 }: {
   path: string;
   label: string;
   required?: boolean;
-  options: ReadonlyArray<{ value: string; label: string }>;
+  options: ReadonlyArray<{ value: string | number; label: string }>;
   placeholder?: string;
   help?: string;
   className?: string;
+  /** Si true, convierte el value del <select> de string a number antes
+   *  de comprometerlo al form state. Necesario cuando el schema zod
+   *  declara el campo como `z.number()` (p.ej. plazo 12-48). */
+  valueAsNumber?: boolean;
 }) {
   const {
     register,
@@ -134,12 +139,19 @@ export function SelectField({
       <select
         className={clsx(baseInputClasses, borderClasses(!!err), 'bg-white')}
         {...register(path, {
-          setValueAs: (v) => (v === '' ? undefined : v),
+          setValueAs: (v) => {
+            if (v === '' || v == null) return undefined;
+            if (valueAsNumber) {
+              const n = Number(v);
+              return isNaN(n) ? v : n;
+            }
+            return v;
+          },
         })}
       >
         <option value="">{placeholder}</option>
         {options.map((o) => (
-          <option key={o.value} value={o.value}>
+          <option key={String(o.value)} value={o.value}>
             {o.label}
           </option>
         ))}
@@ -195,10 +207,18 @@ export function RadioBoolField({
   className?: string;
 }) {
   const {
-    register,
+    watch,
+    setValue,
     formState: { errors },
   } = useFormContext();
   const err = get(errors, path);
+  // Nota: no usamos register(setValueAs) porque RHF maneja mal los grupos
+  // de radios con el mismo path (guarda el literal "true"/"false" string).
+  // En su lugar gestionamos el checked/onChange a mano y guardamos el
+  // boolean con setValue.
+  const current = watch(path);
+  const set = (v: boolean) =>
+    setValue(path, v, { shouldDirty: true, shouldValidate: true });
   return (
     <div className={className}>
       <label className="block text-sm font-medium text-gray-600 mb-1">
@@ -208,22 +228,18 @@ export function RadioBoolField({
         <label className="flex items-center gap-2 cursor-pointer">
           <input
             type="radio"
-            value="true"
             className="h-4 w-4 text-inyecta-600 focus:ring-inyecta-500"
-            {...register(path, {
-              setValueAs: (v) => (v === 'true' ? true : v === 'false' ? false : undefined),
-            })}
+            checked={current === true}
+            onChange={() => set(true)}
           />
           <span className="text-sm text-gray-800">Sí</span>
         </label>
         <label className="flex items-center gap-2 cursor-pointer">
           <input
             type="radio"
-            value="false"
             className="h-4 w-4 text-inyecta-600 focus:ring-inyecta-500"
-            {...register(path, {
-              setValueAs: (v) => (v === 'true' ? true : v === 'false' ? false : undefined),
-            })}
+            checked={current === false}
+            onChange={() => set(false)}
           />
           <span className="text-sm text-gray-800">No</span>
         </label>
