@@ -29,6 +29,12 @@ export default defineConfig({
       // (lo importan algunos módulos bajo prueba indirectamente).
       DATABASE_URL: 'postgresql://test:test@localhost:5432/test',
       JWT_SECRET: 'test-secret-only-for-vitest-do-not-use-anywhere-else-32',
+      // Forzar MOCK en tests. Sin esto, si el .env local del dev tiene
+      // EXTRACT_PROVIDER=CLAUDE, Zod aborta porque vitest no expone una
+      // ANTHROPIC_API_KEY válida (y además no queremos que los tests
+      // le pidan a la red real de Anthropic).
+      EXTRACT_PROVIDER: 'MOCK',
+      ANTHROPIC_API_KEY: '',
     },
     coverage: {
       provider: 'v8',

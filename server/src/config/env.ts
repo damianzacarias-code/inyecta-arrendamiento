@@ -22,7 +22,13 @@ import { z } from 'zod';
 // En producción las variables llegan por el orquestador (k8s,
 // ECS, etc.) y el .env no existe, así que override:true es
 // irrelevante en ese caso.
-dotenv.config({ override: true });
+//
+// Excepción: en tests (vitest) el override PISA el NODE_ENV=test y
+// el JWT_SECRET que vitest.config.ts setea por process.env, y los
+// tests dejan de ver el entorno esperado. En modo test respetamos
+// lo que vitest ya puso en process.env.
+const __isVitest = process.env.NODE_ENV === 'test' || typeof process.env.VITEST !== 'undefined';
+dotenv.config({ override: !__isVitest });
 
 // ─── Helpers ────────────────────────────────────────────────────────
 const nodeEnvEnum = z.enum(['development', 'test', 'staging', 'production']);
