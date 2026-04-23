@@ -10,10 +10,68 @@ import { useFormContext } from 'react-hook-form';
 import { Building2, User } from 'lucide-react';
 import { clsx } from 'clsx';
 import { FormSection, TextField } from '@/components/wizard/fields';
+import { ExtractPDFButton } from '@/components/ExtractPDFButton';
+import type { ExtractResponse } from '@/hooks/useExtractPDF';
 
 export function Step1Identidad() {
   const { watch, setValue } = useFormContext();
   const tipo = watch('tipo') as 'PFAE' | 'PM';
+
+  /**
+   * Mapea la respuesta del extract CSF al form. NO sobreescribe campos
+   * con valor — el usuario manda. Esto permite extraer múltiples docs y
+   * que cada uno complemente al anterior.
+   */
+  const handleCSF = (res: ExtractResponse) => {
+    const d = res.data as Record<string, string | null | undefined>;
+    const setIfEmpty = (path: string, val: string | null | undefined) => {
+      if (!val) return;
+      const current = watch(path);
+      if (current && String(current).trim() !== '') return;
+      setValue(path, String(val).toUpperCase(), { shouldDirty: true });
+    };
+    setIfEmpty('rfc', d.rfc);
+    setIfEmpty('regimenFiscal', d.regimenFiscal);
+    if (tipo === 'PM') {
+      setIfEmpty('razonSocial', d.razonSocial);
+    } else {
+      setIfEmpty('curp', d.curp);
+      // CSF de PFAE: razonSocial suele venir como nombre completo,
+      // no parseamos a nombre/apellidoPaterno/Materno (no es confiable).
+    }
+  };
+
+  const handleINE = (res: ExtractResponse) => {
+    if (tipo !== 'PFAE') return;
+    const d = res.data as Record<string, string | null | undefined>;
+    const setIfEmpty = (path: string, val: string | null | undefined) => {
+      if (!val) return;
+      const current = watch(path);
+      if (current && String(current).trim() !== '') return;
+      setValue(path, String(val).toUpperCase(), { shouldDirty: true });
+    };
+    setIfEmpty('nombre', d.nombre);
+    setIfEmpty('apellidoPaterno', d.apellidoPaterno);
+    setIfEmpty('apellidoMaterno', d.apellidoMaterno);
+    setIfEmpty('curp', d.curp);
+  };
+
+  const handleActa = (res: ExtractResponse) => {
+    if (tipo !== 'PM') return;
+    const d = res.data as Record<string, string | number | null | undefined>;
+    const setIfEmpty = (path: string, val: string | number | null | undefined) => {
+      if (val === null || val === undefined || val === '') return;
+      const current = watch(path);
+      if (current && String(current).trim() !== '') return;
+      const v = typeof val === 'number' ? val : String(val);
+      setValue(path, typeof val === 'string' ? v.toString().toUpperCase() : v, {
+        shouldDirty: true,
+      });
+    };
+    setIfEmpty('razonSocial', d.razonSocial);
+    setIfEmpty('fechaConstitucion', d.fechaConstitucion);
+    setIfEmpty('capitalSocial', d.capitalSocial);
+  };
 
   return (
     <>
@@ -74,6 +132,13 @@ export function Step1Identidad() {
           title="Datos de la persona moral"
           description="Información extraída del acta constitutiva y del RPC."
         >
+          <div className="mb-4">
+            <ExtractPDFButton
+              tipo="ACTA_CONSTITUTIVA"
+              label="Autollenar desde acta constitutiva"
+              onExtracted={handleActa}
+            />
+          </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <TextField
               path="razonSocial"
@@ -127,6 +192,13 @@ export function Step1Identidad() {
           title="Datos de la persona física"
           description="El CURP es obligatorio por requerimiento KYC (CNBV)."
         >
+          <div className="mb-4">
+            <ExtractPDFButton
+              tipo="INE"
+              label="Autollenar desde INE"
+              onExtracted={handleINE}
+            />
+          </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <TextField path="nombre" label="Nombre(s)" required uppercase />
             <TextField
@@ -157,6 +229,13 @@ export function Step1Identidad() {
         title="Identidad fiscal y contacto"
         description="RFC obligatorio para persona física y moral."
       >
+        <div className="mb-4">
+          <ExtractPDFButton
+            tipo="CSF"
+            label="Autollenar desde Constancia de Situación Fiscal (SAT)"
+            onExtracted={handleCSF}
+          />
+        </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <TextField
             path="rfc"

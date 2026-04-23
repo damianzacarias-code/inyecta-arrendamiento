@@ -16,6 +16,8 @@ import {
   ClienteSelector,
   type ClientOption,
 } from './ClienteSelector';
+import { ExtractPDFButton } from '@/components/ExtractPDFButton';
+import type { ExtractResponse } from '@/hooks/useExtractPDF';
 
 interface Props {
   /** Cliente actualmente seleccionado (gestionado por el wizard padre). */
@@ -114,6 +116,37 @@ export function Step1Operacion({ cliente, onClienteChange }: Props) {
         title="Datos del bien"
         description="Descripción del equipo, vehículo o maquinaria a arrendar."
       >
+        <div className="mb-4">
+          <ExtractPDFButton
+            tipo="FACTURA_BIEN"
+            label="Autollenar desde factura del proveedor"
+            onExtracted={(res: ExtractResponse) => {
+              const d = res.data as Record<string, string | number | null | undefined>;
+              const setIfEmpty = (
+                path: string,
+                val: string | number | null | undefined,
+              ) => {
+                if (val === null || val === undefined || val === '') return;
+                const current = watch(path);
+                if (current && String(current).trim() !== '') return;
+                if (typeof val === 'number') {
+                  setValue(path, val, { shouldDirty: true });
+                } else {
+                  setValue(path, String(val).toUpperCase(), { shouldDirty: true });
+                }
+              };
+              setIfEmpty('bienDescripcion', d.bienDescripcion);
+              setIfEmpty('bienMarca', d.bienMarca);
+              setIfEmpty('bienModelo', d.bienModelo);
+              setIfEmpty('bienAnio', d.bienAnio);
+              setIfEmpty('bienNumSerie', d.bienNumSerie);
+              setIfEmpty('proveedorLegacy', d.proveedor);
+              // valorBienSinIVA → valorBien (Step2 lo usa). El form
+              // padre lo recibe igual; si no existe el path no rompe.
+              setIfEmpty('valorBien', d.valorBienSinIVA);
+            }}
+          />
+        </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <TextField
             path="bienDescripcion"
