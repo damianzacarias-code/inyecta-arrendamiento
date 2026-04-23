@@ -23,6 +23,7 @@ import bitacoraRoutes from './routes/bitacora';
 import notificacionesRoutes from './routes/notificaciones';
 import expedienteRoutes from './routes/expediente';
 import { templateRouter as solicitudCnbvTemplateRoutes, contractRouter as solicitudCnbvContractRoutes } from './routes/solicitudCnbv';
+import extractRoutes from './routes/extract';
 import { bitacora } from './middleware/bitacora';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { requestId } from './middleware/requestId';
@@ -193,6 +194,9 @@ app.use('/api/contracts', solicitudCnbvContractRoutes);
 //   PATCH/DEL /api/expediente/documentos/:docId
 // Por eso se monta en /api.
 app.use('/api', expedienteRoutes);
+// Extracción automática de PDFs con Claude Vision (o MOCK si no hay API key).
+// POST /api/extract { kind, fileUrl } → { fields: {...}, provider: 'claude'|'mock' }
+app.use('/api/extract', extractRoutes);
 
 // 404 para /api/* sin match — devuelve el mismo formato { error: {...} }
 app.use('/api', notFoundHandler);
