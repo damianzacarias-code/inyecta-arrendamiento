@@ -647,24 +647,12 @@ router.get('/:id/expediente.zip', requireAuth, async (req: Request, res: Respons
       select: {
         id: true,
         folio: true,
-        clientId: true,
-        client: {
-          select: {
-            id: true,
-            documentos: { where: { archivoUrl: { not: null } } },
-          },
-        },
-        obligadosSolidarios: {
-          orderBy: { orden: 'asc' },
+        actores: {
+          orderBy: [{ tipo: 'asc' }, { orden: 'asc' }],
           include: {
-            guarantor: {
-              select: {
-                id: true,
-                nombre: true,
-                apellidoPaterno: true,
-                razonSocial: true,
-                documentos: { where: { archivoUrl: { not: null } } },
-              },
+            documentos: {
+              where: { archivoUrl: { not: '' } },
+              orderBy: [{ tipoDocumento: 'asc' }, { createdAt: 'asc' }],
             },
           },
         },
@@ -674,11 +662,6 @@ router.get('/:id/expediente.zip', requireAuth, async (req: Request, res: Respons
     if (!contract) {
       return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Contrato no encontrado' } });
     }
-
-    const contractDocs = await prisma.contractDocument.findMany({
-      where: { contractId: contract.id, archivoUrl: { not: null } },
-      orderBy: [{ etapa: 'asc' }, { tipo: 'asc' }],
-    });
 
     const folio = safePathFragment(contract.folio || `contrato_${contract.id}`);
 
@@ -705,43 +688,24 @@ router.get('/:id/expediente.zip', requireAuth, async (req: Request, res: Respons
 
     archive.pipe(res);
 
-    // ── Carpeta cliente ──────────────────────────────────────────
-    for (const doc of contract.client?.documentos || []) {
-      if (!doc.archivoUrl) continue;
-      const abs = resolveSafeUpload(doc.archivoUrl);
-      const original = path.basename(doc.archivoUrl);
-      const entryName = `${folio}/cliente/${safePathFragment(doc.tipo)}__${safePathFragment(original)}`;
-      if (abs && fs.existsSync(abs)) {
-        archive.file(abs, { name: entryName });
-      } else {
-        faltantes.push(`${entryName} (archivo no encontrado en disco: ${doc.archivoUrl})`);
-      }
-    }
+    // ── Carpetas por actor del expediente ────────────────────────
+    // Estructura: <folio>/<TIPO>[_N][__SUBTIPO]/<tipoDocumento>__<original>
+    for (const actor of contract.actores) {
+      if (!actor.documentos || actor.documentos.length === 0) continue;
+      const parts = [safePathFragment(actor.tipo)];
+      // Si hay múltiples (AVAL 1, 2, ...) incluir el orden.
+      if (actor.orden && actor.orden > 1) parts.push(String(actor.orden));
+      const baseCarpeta = parts.join('_');
+      const carpeta = actor.subtipo
+        ? `${baseCarpeta}__${safePathFragment(actor.subtipo)}`
+        : baseCarpeta;
 
-    // ── Carpetas por etapa del contrato ──────────────────────────
-    for (const doc of contractDocs) {
-      if (!doc.archivoUrl) continue;
-      const abs = resolveSafeUpload(doc.archivoUrl);
-      const original = doc.archivoNombre || path.basename(doc.archivoUrl);
-      const carpeta = `contrato_${safePathFragment(doc.etapa)}`;
-      const entryName = `${folio}/${carpeta}/${safePathFragment(doc.tipo)}__${safePathFragment(original)}`;
-      if (abs && fs.existsSync(abs)) {
-        archive.file(abs, { name: entryName });
-      } else {
-        faltantes.push(`${entryName} (archivo no encontrado en disco: ${doc.archivoUrl})`);
-      }
-    }
-
-    // ── Carpetas por aval ────────────────────────────────────────
-    for (const link of contract.obligadosSolidarios) {
-      const docs = link.guarantor?.documentos || [];
-      if (docs.length === 0) continue; // omitir aval sin docs
-      const carpeta = `aval_${link.orden}`;
-      for (const doc of docs) {
+      for (const doc of actor.documentos) {
         if (!doc.archivoUrl) continue;
         const abs = resolveSafeUpload(doc.archivoUrl);
-        const original = path.basename(doc.archivoUrl);
-        const entryName = `${folio}/${carpeta}/${safePathFragment(doc.tipo)}__${safePathFragment(original)}`;
+        const original = doc.nombreArchivo || path.basename(doc.archivoUrl);
+        const tipoDoc = safePathFragment(doc.tipoDocumento || 'libre');
+        const entryName = `${folio}/${carpeta}/${tipoDoc}__${safePathFragment(original)}`;
         if (abs && fs.existsSync(abs)) {
           archive.file(abs, { name: entryName });
         } else {
