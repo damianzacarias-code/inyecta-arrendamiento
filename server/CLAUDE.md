@@ -1358,6 +1358,82 @@ Bloque D — resumen rápido:
   • -22 paquetes (jspdf+autotable) +1 (pako) = -21 neto.
   • 4 issues de tipos reales reparados (no eran simple ruido).
   • 0 cambios a reglas de negocio ni a código de cálculo.
+
+──────────────────────────────────────────────────────────────────
+Migración cotizador al Excel oficial (24-04-2026, autónoma)
+──────────────────────────────────────────────────────────────────
+Reverificación de §4 contra `Cotización Inyecta Arrendamiento.xlsx`
+(5 hojas). Se detectaron seis discrepancias entre código y Excel y
+se corrigieron secuencialmente. Sin push; todo committed local.
+
+  - [x] Commit 1 · docs(claude): §4 actualizado con fórmulas del
+        Excel — referencia explícita a celdas (B17/B18/B19/E18/E21/H4
+        /H8/H10), patrón dual %/monto absoluto (§4.15), separación
+        depósito vs residual (§4.12), checkbox residual=comisión
+        (§4.13), seguro pendiente (§4.14), tasa moratoria DINÁMICA
+        = 2× ordinaria (§4.9). Reglas 11-16 nuevas.
+
+  - [x] Commit 2 · fix(moratorios): base = renta pendiente sin IVA
+        del periodo en mora (NO saldo insoluto general); tasa
+        moratoria = 2× tasa ordinaria del contrato (NO 72% fijo).
+        Tocado leaseCalculator.ts y cobranza.ts. Tests verifican
+        escalado lineal (36% ord → 72% mor; 24% ord → 48% mor).
+
+  - [x] Commit 3 · feat(schema): Quotation y Contract reciben dos
+        columnas nuevas (valorResidualEsComision, seguroPendiente)
+        + cotizaciones viejas borradas para consistencia. Migración
+        Prisma aplicada.
+
+  - [x] Commit 4 · fix(cotizador): B17 ahora resta enganche antes
+        de calcular comisión y depósito (espejo Excel celda B17).
+        Antes B17 = valorSinIVA + gpsFin sin restar enganche, lo
+        que inflaba comisión y depósito en operaciones con enganche
+        > 0. Ambos motores (cliente y servidor) consistentes.
+
+  - [x] Commit 5 · feat(cotizador): tres comportamientos UI nuevos:
+        (a) checkbox "Valor residual = comisión apertura" en PURO
+            (§4.13) — ignora el campo capturado y usa la comisión.
+        (b) Patrón dual %/monto absoluto (§4.15) en enganche (H4),
+            depósito (H8) y residual (H10): input <2 ⇒ porcentaje,
+            input ≥2 ⇒ monto absoluto. Helper `resolverDual()`
+            replica del Excel `IF(H<2, base*H, H)`.
+        (c) Checkbox "Seguro pendiente de cotizar" (§4.14) — anula
+            seguroAnual de B17 y de la renta; PDF muestra
+            "Pendiente de cotizar".
+        Wired en client/src/lib/cotizacion/calculos.ts,
+        Cotizador.tsx, CotizacionDetalle.tsx, mappers de solicitud,
+        leaseCalculator del server, zod schema y prisma persist
+        de quotations.
+
+  - [x] Commit 6 · test(cotizador): 24 tests nuevos en cliente +
+        18 tests nuevos en servidor verificando al centavo cada
+        bandera contra valores derivados del Excel:
+          • PURO con enganche $200k → comisión $81,317.24,
+            depósito $260,215.17, montoFin $1,707,662.07.
+          • valorResidual ABSOLUTO ($100k) — depósito y comisión
+            inafectados.
+          • valorResidualEsComision (PURO) — residual ≡ comisión.
+          • seguroPendiente — cifras = baseline aunque seguroAnual
+            se capture; seguroEstado = "Pendiente de cotizar".
+          • Seguro financiado $50k anual ×48m — B17 += $200k →
+            depósito $324,215.17.
+          • FIN con enganche 10% — comisión $80,817.24, montoFin
+            $1,697,162.07, saldo final $0.
+        101/101 cliente + 162/162 servidor. tsc --noEmit limpio
+        (errores pre-existentes de top-level await en routes/__
+        tests__/{clients,contracts,invoices}.test.ts no
+        relacionados con esta migración).
+
+Migración cotizador — resumen rápido:
+  • 6 commits secuenciales. Conventional commits en español.
+  • 1 migración Prisma (2 columnas en Quotation y Contract).
+  • Reglas 11-16 nuevas en CLAUDE.md (§4.9, §4.12, §4.13, §4.14,
+    §4.15 + tasa moratoria dinámica).
+  • 0 push (mantenido en local per instrucción del Damián).
+  • 0 regresiones detectadas en tests existentes.
+  • Valor residual ya NO está fusionado con depósito en garantía
+    (eran conceptos distintos en el Excel pero la implementación
+    los confundía).
 ```
 
 ---
