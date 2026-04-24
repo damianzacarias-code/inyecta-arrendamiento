@@ -339,8 +339,10 @@ model Quotation {
   gpsFinanciado          Boolean   @default(true)
   seguroAnual            Decimal   @default(0)
   seguroFinanciado       Boolean   @default(true)
+  seguroPendiente        Boolean   @default(false)  // CLAUDE.md §4.14: si true, no entra en cálculos
   valorResidual          Decimal   @default(0)
   valorResidualPct       Decimal   @default(0)
+  valorResidualEsComision Boolean  @default(false)  // CLAUDE.md §4.13: PURO checkbox "residual = comisión apertura"
 
   // Resultados
   montoFinanciar    Decimal?
@@ -462,7 +464,9 @@ model Contract {
   rentaInicial          Decimal  @default(0)
   gpsInstalacion        Decimal  @default(0)
   seguroAnual           Decimal  @default(0)
+  seguroPendiente       Boolean  @default(false)  // CLAUDE.md §4.14
   valorResidual         Decimal  @default(0)
+  valorResidualEsComision Boolean @default(false) // CLAUDE.md §4.13: PURO
   montoFinanciar        Decimal
   rentaMensual          Decimal
   rentaMensualIVA       Decimal
