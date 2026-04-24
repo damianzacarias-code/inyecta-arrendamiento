@@ -3,11 +3,53 @@ import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
+/**
+ * Resuelve la contraseña inicial del admin.
+ *
+ * Comportamiento por entorno:
+ *   • development / test / staging → permite el default 'admin123'
+ *     para no fricciones del primer login local. Si SEED_ADMIN_PASSWORD
+ *     está set, se respeta.
+ *   • production → exige SEED_ADMIN_PASSWORD (≥12 chars). Si falta o
+ *     es trivial, abortamos: NO crear nunca un admin con password
+ *     adivinable en producción.
+ *
+ * Idempotencia: el upsert del admin tiene `update: {}`, así que correr
+ * el seed dos veces NO sobrescribe la password. Esta función solo
+ * importa para la primera corrida en una BD limpia.
+ */
+function resolveAdminPassword(): string {
+  const env = process.env.NODE_ENV ?? 'development';
+  const fromEnv = process.env.SEED_ADMIN_PASSWORD;
+
+  if (env === 'production') {
+    if (!fromEnv || fromEnv.length < 12) {
+      console.error(
+        '❌ En production se requiere SEED_ADMIN_PASSWORD (≥12 caracteres) ' +
+          'para crear el usuario admin inicial. Define la variable y vuelve ' +
+          'a correr el seed.',
+      );
+      process.exit(1);
+    }
+    if (['admin123', 'password', 'changeme', '123456789012'].includes(fromEnv)) {
+      console.error(
+        '❌ SEED_ADMIN_PASSWORD es una contraseña trivial. ' +
+          'Usa una contraseña fuerte y única para el admin inicial.',
+      );
+      process.exit(1);
+    }
+    return fromEnv;
+  }
+
+  return fromEnv ?? 'admin123';
+}
+
 async function seed() {
   console.log('🌱 Seeding database...');
 
-  // Crear usuario admin
-  const adminPassword = await bcrypt.hash('admin123', 12);
+  // Crear usuario admin (idempotente — no sobrescribe password si ya existe)
+  const plainPassword = resolveAdminPassword();
+  const adminPassword = await bcrypt.hash(plainPassword, 12);
   await prisma.user.upsert({
     where: { email: 'damian@inyecta.com' },
     update: {},
@@ -19,7 +61,11 @@ async function seed() {
       rol: 'ADMIN',
     },
   });
-  console.log('  ✓ Usuario admin creado: damian@inyecta.com / admin123');
+  // No imprimimos la contraseña (puede ser real en production).
+  console.log('  ✓ Usuario admin asegurado: damian@inyecta.com');
+  if ((process.env.NODE_ENV ?? 'development') !== 'production' && plainPassword === 'admin123') {
+    console.log('    (password de desarrollo: admin123 — cámbialo desde la UI)');
+  }
 
   // Crear categorías de activos
   const categories = [
