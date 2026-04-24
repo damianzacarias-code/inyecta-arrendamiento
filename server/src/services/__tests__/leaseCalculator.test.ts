@@ -133,6 +133,138 @@ describe('calcularArrendamiento — FINANCIERO', () => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════
+// Casos extendidos del Excel — banderas nuevas (§4.13, §4.14)
+// Verifican al centavo que el motor del servidor procesa correctamente
+// los nuevos inputs (residual=comisión, seguro pendiente, B17 con
+// enganche descontado en FIN). El motor del cliente ya tiene su gemela
+// en client/src/lib/cotizacion/__tests__/calculos.test.ts — si los
+// números aquí divergen de allá, hay drift entre los dos motores.
+// ═══════════════════════════════════════════════════════════════════
+
+describe('calcularArrendamiento FINANCIERO — enganche 10% (§4.2 B17)', () => {
+  // FINANCIERO con enganche 10% sobre valorConIVA:
+  //   enganche = 1,810,344.83 × 1.16 × 0.10 ≈ $210,000.00
+  //   baseBien = valorSinIVA − enganche + gpsFin
+  //            = 1,810,344.83 − 210,000.00 + 16,000 = $1,616,344.83
+  //   comisión = baseBien × 5% = $80,817.24
+  //   montoFin = baseBien + comisión = $1,697,162.07
+  // Antes de Commit 4 baseBien NO restaba enganche → comisión y monto
+  // financiar inflados.
+  const r = calcularArrendamiento({
+    ...baseParams,
+    producto: 'FINANCIERO',
+    enganchePct: 0.10,
+    depositoGarantiaPct: 0,
+    valorResidualPct: 0,
+  });
+
+  it('enganche = valorConIVA × 10% = $210,000.00', () => {
+    expect(r.enganche).toBeCloseTo(210_000.00, 2);
+  });
+
+  it('comisión = baseBien × 5% = $80,817.24 (B17 ya con enganche restado)', () => {
+    expect(r.comisionApertura).toBeCloseTo(80_817.24, 2);
+  });
+
+  it('montoFinanciar = baseBien + comisión = $1,697,162.07', () => {
+    expect(r.montoFinanciar).toBeCloseTo(1_697_162.07, 2);
+  });
+
+  it('renta neta < baseline FIN $75,896.80 (PV reducido por enganche)', () => {
+    // Sanity: con enganche, el PV es menor, la renta debe bajar.
+    expect(r.rentaMensual).toBeLessThan(75_896.80);
+    expect(r.rentaMensual).toBeGreaterThan(60_000);
+  });
+
+  it('amortización fila 48: saldoFinal = $0.00 EXACTO (FIN amortiza todo)', () => {
+    expect(r.amortizacion[47].saldoFinal).toBeCloseTo(0.00, 2);
+  });
+});
+
+describe('calcularArrendamiento PURO — valorResidualEsComision (§4.13)', () => {
+  // Flag activa: valorResidual = comisionApertura, ignorando el pct
+  // capturado. Caso baseline sin enganche, sin seguro, gps financiado.
+  const r = calcularArrendamiento({
+    ...baseParams,
+    valorResidualPct: 0.16,             // ignorado por la flag
+    valorResidualEsComision: true,
+  });
+
+  it('valorResidual = comisionApertura (no usa el pct capturado)', () => {
+    expect(r.valorResidual).toBeCloseTo(91_317.24, 2);
+    expect(r.valorResidual).toBe(r.comisionApertura);
+  });
+
+  it('depósito sigue siendo $292,215.17 (la flag no lo toca)', () => {
+    expect(r.depositoGarantia).toBeCloseTo(292_215.17, 2);
+  });
+
+  it('renta neta = baseline $73,098.02 (FV del PMT = depósito, no residual)', () => {
+    // §4.12: el residual es display, NO entra al PMT. Por eso la renta
+    // no cambia aunque el residual sí.
+    expect(r.rentaMensual).toBeCloseTo(73_098.02, 2);
+  });
+});
+
+describe('calcularArrendamiento — seguroPendiente (§4.14)', () => {
+  // Si seguroPendiente=true, el seguro NO entra en B17 ni en la renta,
+  // independientemente de seguroAnual y seguroFinanciado.
+  const r = calcularArrendamiento({
+    ...baseParams,
+    seguroAnual: 50_000,
+    seguroPendiente: true,
+    seguroFinanciado: true,             // aún financiado, pero pendiente lo anula
+  });
+
+  it('depósito = $292,215.17 (B17 NO incluye seguro pendiente)', () => {
+    expect(r.depositoGarantia).toBeCloseTo(292_215.17, 2);
+  });
+
+  it('comisión = $91,317.24 (igual que baseline sin seguro)', () => {
+    expect(r.comisionApertura).toBeCloseTo(91_317.24, 2);
+  });
+
+  it('montoFinanciar = $1,917,662.07 (igual que baseline)', () => {
+    expect(r.montoFinanciar).toBeCloseTo(1_917_662.07, 2);
+  });
+
+  it('renta neta = $73,098.02 (baseline — pendiente no afecta PMT)', () => {
+    expect(r.rentaMensual).toBeCloseTo(73_098.02, 2);
+  });
+});
+
+describe('calcularArrendamiento PURO — seguro financiado con monto > 0 (§4.14)', () => {
+  // seguroAnual = $50,000, plazo 48m, financiado:
+  //   seguroFinanciadoTotal = 50,000 × 48/12 = $200,000
+  //   baseBien = 1,810,344.83 + 16,000 + 200,000 = $2,026,344.83
+  //   comisión = baseBien × 5% = $101,317.24
+  //   depósito = baseBien × 16% = $324,215.17
+  //   montoFinanciar = baseBien + comisión = $2,127,662.07
+  const r = calcularArrendamiento({
+    ...baseParams,
+    seguroAnual: 50_000,
+    seguroPendiente: false,
+    seguroFinanciado: true,
+  });
+
+  it('depósito = $324,215.17 (B17 incluye seguroAnual × plazo/12)', () => {
+    expect(r.depositoGarantia).toBeCloseTo(324_215.17, 2);
+  });
+
+  it('comisión = baseBien × 5% = $101,317.24', () => {
+    expect(r.comisionApertura).toBeCloseTo(101_317.24, 2);
+  });
+
+  it('montoFinanciar = $2,127,662.07', () => {
+    expect(r.montoFinanciar).toBeCloseTo(2_127_662.07, 2);
+  });
+
+  it('renta neta > $73,098.02 baseline (PV mayor por seguro)', () => {
+    expect(r.rentaMensual).toBeGreaterThan(73_098.02);
+  });
+});
+
 describe('calcularMoratorios', () => {
   // Contrato @ 36% ordinaria → moratoria 72%/360 = 0.2%/día
   it('contrato 36%: 1000 × 30d × 0.2%/día = 60 + IVA 9.60 = 69.60', () => {

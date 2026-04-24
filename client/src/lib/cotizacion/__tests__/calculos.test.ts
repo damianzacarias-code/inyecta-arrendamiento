@@ -289,6 +289,194 @@ describe('aplicarPagoAdicionalPuro (Rentas Prorrateadas)', () => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════
+// Casos extendidos del Excel — banderas nuevas (§4.13, §4.14, §4.15)
+// Verifican al centavo que el motor procesa correctamente los nuevos
+// inputs introducidos en commits 2-5 (residual=comisión, seguro
+// pendiente, dual %/monto, B17 con enganche descontado).
+// ═══════════════════════════════════════════════════════════════════
+
+describe('calcularCotizacion PURO — enganche > 0 (§4.2 B17)', () => {
+  // engancheMonto absoluto = $200,000 sobre valorSinIVA = $1,810,344.83.
+  // baseBien (B17) = 1,810,344.83 − 200,000 + 16,000 = 1,626,344.83.
+  // El enganche se resta de B17 SIEMPRE (independiente de contado/financiado),
+  // espejo del Excel. La comisión y el depósito heredan el descuento.
+  const cot = calcularCotizacion({
+    ...baseInputs,
+    producto: 'PURO',
+    engancheMonto: 200_000,
+    engancheEsContado: true,
+  });
+
+  it('comisión apertura = baseBien × 5% = $81,317.24', () => {
+    expect(cot.monto.comisionAperturaFinanciada).toBeCloseTo(81_317.24, 2);
+  });
+
+  it('depósito = baseBien × 16% = $260,215.17 (refleja enganche restado de B17)', () => {
+    expect(cot.pagoInicial.depositoGarantia).toBeCloseTo(260_215.17, 2);
+  });
+
+  it('monto financiado real = baseBien + comisión = $1,707,662.07', () => {
+    expect(cot.montoFinanciadoReal).toBeCloseTo(1_707_662.07, 2);
+  });
+
+  it('renta = PMT(36%, 48, 1,707,662.07, 260,215.17) — coherente con calcPMT', () => {
+    // No hardcodeo el número: derivo el esperado del calcPMT que ya está
+    // verificado contra el Excel. Si la renta del cotizador difiere, hay
+    // un drift entre el motor y la fórmula PMT canónica.
+    const esperada = calcPMT(0.36, 48, 1_707_662.07, 260_215.17);
+    expect(cot.rentaMensual.montoNeto).toBeCloseTo(esperada, 2);
+  });
+
+  it('enganche al contado va al pago inicial, NO a "descuentoEnganche"', () => {
+    expect(cot.pagoInicial.engancheContado).toBe(200_000);
+    expect(cot.monto.descuentoEnganche).toBe(0);
+  });
+});
+
+describe('calcularCotizacion PURO — valorResidual como MONTO ABSOLUTO (§4.15)', () => {
+  // CLAUDE.md §4.15: input < 2 ⇒ porcentaje, input ≥ 2 ⇒ monto absoluto.
+  // $100,000 está muy por encima de 2 → se interpreta como pesos.
+  const cot = calcularCotizacion({
+    ...baseInputs,
+    producto: 'PURO',
+    valorResidual: 100_000,
+  });
+
+  it('residual.monto = $100,000.00 EXACTO (no se multiplica por baseBien)', () => {
+    expect(cot.residual.monto).toBe(100_000);
+  });
+
+  it('depósito sigue siendo $292,215.17 (16% × baseBien, independiente del residual)', () => {
+    // §4.12: depósito y residual son conceptos separados — modificar uno
+    // no debe arrastrar al otro.
+    expect(cot.pagoInicial.depositoGarantia).toBeCloseTo(292_215.17, 2);
+  });
+
+  it('comisión apertura sigue siendo $91,317.24 (no la afecta el residual)', () => {
+    expect(cot.monto.comisionAperturaFinanciada).toBeCloseTo(91_317.24, 2);
+  });
+});
+
+describe('calcularCotizacion PURO — valorResidualEsComision (§4.13)', () => {
+  // Checkbox UI: residual = comisión de apertura. El campo `valorResidual`
+  // capturado se ignora completamente cuando la flag está activa.
+  const cot = calcularCotizacion({
+    ...baseInputs,
+    producto: 'PURO',
+    valorResidual: 0.16,                  // ignorado por la flag
+    valorResidualEsComision: true,
+  });
+
+  it('residual.monto = comisión apertura, no 16% del baseBien', () => {
+    expect(cot.residual.monto).toBeCloseTo(91_317.24, 2);
+    expect(cot.monto.comisionAperturaFinanciada).toBeCloseTo(91_317.24, 2);
+    expect(cot.residual.monto).toBe(cot.monto.comisionAperturaFinanciada);
+  });
+
+  it('residual.porcentaje = tasaComisionApertura (5%) cuando aplica la flag', () => {
+    // Display: el porcentaje del residual es la tasa de comisión.
+    expect(cot.residual.porcentaje).toBe(0.05);
+  });
+
+  it('depósito sigue 16% × baseBien = $292,215.17 (la flag no lo toca)', () => {
+    expect(cot.pagoInicial.depositoGarantia).toBeCloseTo(292_215.17, 2);
+  });
+});
+
+describe('calcularCotizacion — seguroPendiente (§4.14)', () => {
+  // Si el seguro está pendiente de cotizar, NO debe entrar en B17 ni en
+  // la renta (espejo de las celdas E12/B13 del Excel cuando el cliente
+  // aún no especifica monto). El display debe decir "Pendiente de cotizar".
+  const cot = calcularCotizacion({
+    ...baseInputs,
+    producto: 'PURO',
+    seguroAnual: 50_000,            // se captura
+    seguroPendiente: true,           // pero está pendiente → se ignora
+    seguroEsContado: false,          // aun "financiado", el flag pendiente lo anula
+  });
+
+  it('depósito = $292,215.17 (mismo que baseline sin seguro)', () => {
+    expect(cot.pagoInicial.depositoGarantia).toBeCloseTo(292_215.17, 2);
+  });
+
+  it('renta neta = $73,098.02 (baseline — seguro pendiente no afecta PMT)', () => {
+    expect(cot.rentaMensual.montoNeto).toBeCloseTo(73_098.02, 2);
+  });
+
+  it('seguroEstado se sobrescribe a "Pendiente de cotizar"', () => {
+    expect(cot.seguroEstado).toBe('Pendiente de cotizar');
+  });
+
+  it('monto.seguroFinanciado = 0 (no aparece en sección "Monto a financiar")', () => {
+    expect(cot.monto.seguroFinanciado).toBe(0);
+  });
+
+  it('aperturaSeguros del pago inicial = 0 (tampoco se cobra al inicio)', () => {
+    expect(cot.pagoInicial.aperturaSeguros).toBe(0);
+  });
+});
+
+describe('calcularCotizacion PURO — seguro financiado con monto > 0 (§4.14)', () => {
+  // seguroAnual = $50,000, plazo 48m ⇒ total prorrateado al plazo:
+  //   seguroFinanciadoTotal = 50,000 × 48/12 = $200,000
+  // baseBien (B17) = 1,810,344.83 + 16,000 + 200,000 = 2,026,344.83
+  const cot = calcularCotizacion({
+    ...baseInputs,
+    producto: 'PURO',
+    seguroAnual: 50_000,
+    seguroPendiente: false,
+    seguroEsContado: false,           // financiado → entra en B17
+  });
+
+  it('seguroFinanciado del display = anual × plazo/12 = $200,000', () => {
+    expect(cot.monto.seguroFinanciado).toBe(200_000);
+  });
+
+  it('depósito = baseBien × 16% = $324,215.17 (B17 con seguro)', () => {
+    expect(cot.pagoInicial.depositoGarantia).toBeCloseTo(324_215.17, 2);
+  });
+
+  it('comisión apertura = baseBien × 5% = $101,317.24', () => {
+    expect(cot.monto.comisionAperturaFinanciada).toBeCloseTo(101_317.24, 2);
+  });
+
+  it('monto financiado real = baseBien + comisión = $2,127,662.07', () => {
+    expect(cot.montoFinanciadoReal).toBeCloseTo(2_127_662.07, 2);
+  });
+
+  it('renta = PMT(36%, 48, 2,127,662.07, 324,215.17) — la mensualidad sube respecto al baseline', () => {
+    const esperada = calcPMT(0.36, 48, 2_127_662.07, 324_215.17);
+    expect(cot.rentaMensual.montoNeto).toBeCloseTo(esperada, 2);
+    // Sanity: con seguro financiado la renta es mayor que la baseline.
+    expect(cot.rentaMensual.montoNeto).toBeGreaterThan(73_098.02);
+  });
+});
+
+describe('calcularCotizacion FINANCIERO — residual fijo 2% (§4.5)', () => {
+  // En FINANCIERO el residual es opción de compra simbólica = 2% × baseBien
+  // independientemente de lo que se capture en `valorResidual`.
+  const cot = calcularCotizacion({
+    ...baseInputs,
+    producto: 'FINANCIERO',
+    porcentajeDeposito: 0,
+    valorResidual: 0.50,                   // ignorado en FIN
+    valorResidualEsComision: true,         // ignorado en FIN
+  });
+
+  it('residual.monto = baseBien × 2% = $36,526.90 (ignora capturas y flags)', () => {
+    expect(cot.residual.monto).toBeCloseTo(36_526.90, 2);
+  });
+
+  it('residual.porcentaje = 0.02 fijo', () => {
+    expect(cot.residual.porcentaje).toBe(0.02);
+  });
+
+  it('etiqueta = "Opcion de compra"', () => {
+    expect(cot.residual.etiqueta).toBe('Opcion de compra');
+  });
+});
+
 describe('aplicarPagoAdicionalFinanciero (Rentas Anticipadas)', () => {
   // Caso de referencia: monto $1,917,662.07, 36% anual, 48 meses, FV=0
   const original = calcAmortFinanciero(
