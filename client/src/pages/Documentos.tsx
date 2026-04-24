@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import api from '@/lib/api';
+import LoadErrorState, { describeApiError } from '@/components/LoadErrorState';
 import { formatDate } from '@/lib/utils';
 import {
   FolderOpen, Search, CheckCircle2, Clock, AlertTriangle, XCircle,
@@ -71,6 +72,7 @@ export default function Documentos() {
   const [clients, setClients] = useState<ClientRow[]>([]);
   const [summary, setSummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'todos' | 'incompletos' | 'completos' | 'alertas'>('todos');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -81,18 +83,28 @@ export default function Documentos() {
   const [form, setForm] = useState<Partial<ClientDoc>>({});
   const [saving, setSaving] = useState(false);
 
-  const fetchDashboard = () => {
+  const fetchDashboard = useCallback(() => {
     setLoading(true);
-    api.get('/documents').then(r => {
-      setClients(r.data.data);
-      setSummary(r.data.summary);
-    }).finally(() => setLoading(false));
-  };
+    setLoadError(null);
+    api.get('/documents')
+      .then(r => {
+        setClients(r.data.data);
+        setSummary(r.data.summary);
+      })
+      .catch(err => setLoadError(describeApiError(err)))
+      .finally(() => setLoading(false));
+  }, []);
 
   useEffect(() => {
     fetchDashboard();
-    api.get('/documents/catalogo').then(r => setCatalogo(r.data));
-  }, []);
+    // El catálogo alimenta los modales de "agregar documento" — si falla,
+    // el dashboard sigue mostrando los porcentajes y el usuario simplemente
+    // no podrá abrir el modal con los tipos pre-cargados. Loggeamos para
+    // devtools en lugar de silenciar.
+    api.get('/documents/catalogo')
+      .then(r => setCatalogo(r.data))
+      .catch(err => console.warn('[Documentos] No se pudo cargar el catálogo de tipos', err));
+  }, [fetchDashboard]);
 
   const loadClientDocs = async (clientId: string) => {
     if (expandedId === clientId) { setExpandedId(null); setExpandedDocs(null); return; }
@@ -252,6 +264,12 @@ export default function Documentos() {
         <div className="flex items-center justify-center py-12">
           <div className="animate-spin rounded-full h-6 w-6 border-2 border-inyecta-600 border-t-transparent" />
         </div>
+      ) : loadError ? (
+        <LoadErrorState
+          title="No se pudo cargar el dashboard de documentos"
+          error={loadError}
+          onRetry={fetchDashboard}
+        />
       ) : filtered.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
           <FolderOpen className="mx-auto text-gray-300 mb-3" size={48} />
