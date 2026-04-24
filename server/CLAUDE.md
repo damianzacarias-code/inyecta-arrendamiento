@@ -67,83 +67,113 @@ Tamaño base PDF:        9pt
 
 ## 4. FÓRMULAS FINANCIERAS — VERIFICADAS CONTRA EL EXCEL ORIGINAL
 
-> Todas verificadas el 18-04-2026 contra `Cotización Inyecta Arrendamiento.xlsx`
-> Producen exactamente los valores del PDF de referencia. NO modificar.
+> Reverificadas el 24-04-2026 contra `Cotización Inyecta Arrendamiento.xlsx`
+> (5 hojas: Perfil, Pagos, Cotización, Amortización Puro, Amortización
+> Financiero). Esta sección es la **fuente de verdad**: si el código
+> contradice algo aquí, el código está mal.
 
 ### 4.1 Variables de entrada
 
-| Variable | Ejemplo | Notas |
-|---|---|---|
-| valorBienConIVA | $2,100,000.00 | Precio al cliente con IVA |
-| tasaIVA | 0.16 | 16% |
-| tasaAnual | 0.36 | **36% anual = 3% mensual** — tasa estándar Inyecta |
-| plazo | 48 | meses |
-| tasaComisionApertura | 0.05 | 5% sobre baseBien |
-| porcentajeResidual | 0.16 (PURO) / 0.02 (FIN) | ver uso abajo |
-| gpsMonto | $16,000 | si es financiado |
-| tasaMoratoriaAnual | 0.72 | 72% anual = 0.2% diario base 360 |
+| Variable                | Excel ref | Ejemplo                | Notas                                                                                         |
+|---|---|---|---|
+| valorBienConIVA         | E2        | $1,000,000.00          | Precio al cliente con IVA                                                                     |
+| tasaIVA                 |           | 0.16                   | 16%                                                                                           |
+| tasaAnual               | E8        | 0.36                   | 36% anual = 3% mensual — tasa estándar Inyecta                                                |
+| plazo                   | E4        | 48                     | meses                                                                                         |
+| enganche                | H4 / E17  | 0.10  ó  $86,206.90    | **Dual %/monto**: si <2 ⇒ %, si ≥2 ⇒ monto absoluto                                           |
+| tasaComisionApertura    | H12       | 0.05                   | 5% sobre baseBien (B17), después de descontar enganche                                        |
+| comisionFinanciada      | B12       | "FINANCIADO"/"CONTADO" | Si financiada se suma al PV del PMT                                                           |
+| porcentajeDeposito      | H8 / E18  | 0.10  ó  $77,586.21    | **Dual**. PURO: queda como FV del PMT. FIN: monto que el cliente entrega y se reembolsa al final del contrato |
+| valorResidual           | H10 / E21 | 0.16  ó  $100,000      | **Dual**. SOLO PURO: precio simbólico al cierre (display PDF). En FIN se ignora.              |
+| valorResidualEsComision | —         | true / false (PURO)    | Checkbox UI: si true, valorResidual = comisionApertura. Solo PURO.                            |
+| seguroAnual             | E12       | $0  ó  "Pendiente"     | Captura **anual**. "Pendiente" ⇒ no entra en cálculos hasta que se especifique.               |
+| seguroFinanciado        | B13       | FINANCIADO / CONTADO   | Si financiado, suma `seguroAnual × plazo/12` a B17                                            |
+| gpsMonto                | E10       | $16,000                | si es financiado                                                                              |
+| gpsFinanciado           | B11       | FINANCIADO / CONTADO   | Si financiado, suma a B17                                                                     |
+| tasaMoratoriaAnual      | —         | tasaAnual × 2          | **Dinámica**: SIEMPRE 2× la tasa ordinaria del contrato (ej. 36% ord. ⇒ 72% mor.)             |
 
-### 4.2 Cálculos en orden estricto
-
-```
-valorSinIVA     = valorConIVA / 1.16
-                = $2,100,000 / 1.16 = $1,810,344.83 ✓
-
-baseBien        = valorSinIVA + gpsFinanciado
-                = $1,810,344.83 + $16,000 = $1,826,344.83 ✓
-
-comisionApertura = baseBien × tasaComisionApertura
-                 = $1,826,344.83 × 0.05 = $91,317.24 ✓
-
-montoFinanciadoReal = baseBien + comisionAperturaFinanciada
-                    = $1,826,344.83 + $91,317.24 = $1,917,662.07 ✓
-                    ← ESTE es el PV que entra al PMT (sin IVA del bien)
-
-depositoGarantia = baseBien × porcentajeResidual
-                 = $1,826,344.83 × 0.16 = $292,215.17 ✓
-```
-
-### 4.3 PMT — Fórmula verificada
+### 4.2 Cálculos en orden estricto (Excel hoja "Perfil")
 
 ```
-PURO:       FV_pmt = depositoGarantia = $292,215.17
-            renta  = PMT(3%, 48, -1,917,662.07, 292,215.17) = $73,098.02 ✓
+valorSinIVA  (E6) = valorBienConIVA / 1.16
+
+enganche_resuelto = (H4 < 2) ? valorSinIVA × H4 : H4   ← patrón dual
+                    (E17 = enganche)
+
+baseBien     (B17) = valorSinIVA - enganche_resuelto
+                   + (gpsFinanciado    ? gpsMonto                 : 0)
+                   + (seguroFinanciado ? seguroAnual × plazo/12   : 0)
+
+comisionApertura (B18) = baseBien × tasaComisionApertura
+
+PV_pmt       (B19) = baseBien + (comisionFinanciada ? comisionApertura : 0)
+                     ← ESTE es el PV que entra al PMT (sin IVA del bien)
+
+depositoGarantia (E18) = (H8 < 2) ? baseBien × H8 : H8   ← patrón dual
+
+valorResidualResuelto (E21) =
+    PURO  : valorResidualEsComision
+              ? comisionApertura
+              : ((H10 < 2) ? baseBien × H10 : H10)   ← patrón dual
+    FIN   : ignorado (no se captura)
+```
+
+> Cambio respecto a la versión anterior: B17 ahora **resta enganche**
+> antes de calcular comisión y depósito, espejo de la celda Excel B17.
+> La versión anterior usaba `baseBien = valorSinIVA + gpsFinanciado`
+> sin restar enganche, lo que inflaba comisión y depósito en operaciones
+> con enganche > 0.
+
+### 4.3 PMT — Fórmula verificada (Excel celda H17)
+
+```
+PURO:       FV_pmt = depositoGarantia
+            renta  = PMT(tasaAnual/12, plazo, -PV_pmt, depositoGarantia)
+                     - seguroAnual / plazo / 1.16
 
 FINANCIERO: FV_pmt = 0  (amortiza TODO el capital)
-            renta  = PMT(3%, 48, -1,917,662.07, 0) = $75,896.80 ✓
+            renta  = PMT(tasaAnual/12, plazo, -PV_pmt, 0)
+                     - seguroAnual / plazo / 1.16
 
-PMT = (PV × r × (1+r)^n - FV × r) / ((1+r)^n - 1)
-donde r = tasaAnual / 12
+PMT(r, n, PV, FV) = (PV × r × (1+r)^n - FV × r) / ((1+r)^n - 1)
+con r = tasaAnual / 12
 ```
 
-### 4.4 Monto a financiar (DISPLAY en cotización — diferente al PMT)
+> El descuento `seguroAnual / plazo / 1.16` proviene del Excel: el
+> seguro se cobra como concepto separado (con su propio IVA) en cada
+> renta. Si `seguroAnual = 0` (default sin seguro), el término no
+> afecta. Si `seguroPendiente = true`, también se ignora hasta que se
+> especifique el monto.
+
+### 4.4 Renta total con IVA (Excel hoja "Pagos" col I)
 
 ```
-montoTotalDisplay = valorConIVA + comisionFinanciada + gpsFinanciado + seguro - enganche
-                  = $2,100,000 + $91,317.24 + $16,000 = $2,207,317.24 ✓
-                  ← Solo para mostrar al cliente, NO entra al PMT
+rentaConIVA_n = TRUNC(renta + renta × 0.16, 2)
+              = TRUNC(renta × 1.16, 2)
+                ↑ Excel usa TRUNC en esta celda específica para que la
+                  suma anual no le sume al cliente $0.005/mes acumulado.
+                  El motor interno SÍ usa ROUND_HALF_UP en cada celda
+                  intermedia — la diferencia neta es <$0.01/mes y se
+                  absorbe al truncar el total con IVA.
 ```
 
-### 4.5 Residual DISPLAY (sección 4 de la cotización)
+### 4.5 Residual DISPLAY (sección 4 del PDF de cotización)
 
 ```
-PURO:       valorRescate_display = montoTotalDisplay × 0.16
-                                 = $2,207,317.24 × 0.16 = $353,170.76 ✓
-            IVA rescate          = $353,170.76 × 0.16   = $56,507.32 ✓
-            Total rescate        = $353,170.76 × 1.16   = $409,678.08 ✓
+PURO:       valorRescate_display = valorResidualResuelto (E21)
+            IVA rescate          = E21 × 0.16
+            Total rescate        = E21 × 1.16
 
-FINANCIERO: opcionCompra_display = montoTotalDisplay × 0.02
-                                 = $2,207,317.24 × 0.02 = $44,146.34 ✓
-            IVA opcion           = $44,146.34 × 0.16    = $7,063.42 ✓
-            Total opcion         = $44,146.34 × 1.16    = $51,209.76 ✓
+FINANCIERO: opcionCompra_display = baseBien × 0.02   (precio simbólico)
+            IVA opcion           = display × 0.16
+            Total opcion         = display × 1.16
 ```
 
 ### 4.6 IVA de la renta
 
 ```
-IVA_renta = renta × 0.16
-PURO:       $73,098.02 × 0.16 = $11,695.68 ✓
-FINANCIERO: $75,896.80 × 0.16 = $12,143.49 ✓
+IVA_renta_n = renta × 0.16   (mismo cálculo en PURO y FIN)
+Total_n     = renta × 1.16
 ```
 
 ### 4.7 Amortización PURO (tabla al cliente — sin desglose capital/interés)
@@ -161,27 +191,38 @@ NO hay columnas de Capital, Interés ni Saldo (arrendamiento operativo)
 ```
 Columnas: N° | Fecha | Capital | Interés | IVA | Total | Saldo
 
-Interés_n = Saldo_n × (tasaAnual/12)
-Capital_n = PMT - Interés_n   (última fila: capital = saldo exacto)
-Saldo_n   = Saldo_{n-1} - Capital_n   (última fila = 0.00 exacto)
-IVA_n     = Renta × 0.16   (= PMT × 0.16, no solo sobre interés)
+Saldo_0   = PV_pmt
+Interés_n = Saldo_{n-1} × (tasaAnual/12)
+Capital_n = PMT - Interés_n            (última fila: Capital_n = Saldo_{n-1} - FV exacto)
+Saldo_n   = Saldo_{n-1} - Capital_n    (última fila = FV exacto, normalmente 0.00)
+IVA_n     = Renta × 0.16               (= PMT × 0.16, no solo sobre interés)
 Total_n   = Capital_n + Interés_n + IVA_n
-
-Verificación período 1:
-  Saldo inicial:  $1,917,662.07
-  Interés p1:     $1,917,662.07 × 0.03 = $57,529.86 ✓
-  Capital p1:     $73,098.02 - $57,529.86 = $15,568.16 ✓
-  Saldo p1:       $1,917,662.07 - $15,568.16 = $1,902,093.91 ✓
-  Saldo p48:      $292,215.17 ✓
 ```
 
-### 4.9 Moratorios
+### 4.9 Moratorios — base RENTA PENDIENTE del periodo
+
+> Corrección importante (per Excel hoja "Pagos" col M): la base del
+> moratorio NO es el saldo insoluto general del contrato; es la **renta
+> pendiente del periodo en mora**. La tasa moratoria es **dinámica =
+> 2× la tasa ordinaria del contrato**, NO un valor fijo de 72%.
 
 ```
-interesMoratorio = saldoInsoluto × (tasaMoratoriaAnual / 360) × diasAtraso
-ivaMoratorio     = interesMoratorio × 0.16
-tasaMoratoriaAnual estándar = 0.72 (72%)
+rentaPendienteSinIVA = rentaSinIVA - pagoRecibidoSinIVA
+                     = G - K/1.16            (Excel)
 
+tasaMoratoriaAnual   = tasaAnual × 2          ← dinámica, NO fija
+tasaMoratoriaDiaria  = tasaMoratoriaAnual / 360
+
+interesMoratorio_n   = rentaPendienteSinIVA × tasaMoratoriaDiaria × diasAtraso
+                     - moratorioYaPagado_n   ← descuenta lo ya cobrado del periodo
+ivaMoratorio_n       = interesMoratorio × 0.16
+```
+
+Ejemplo: contrato @ 36% ordinaria → moratoria 72%/360 = 0.2%/día sobre
+la renta pendiente sin IVA del periodo en mora. Contrato @ 24% ordinaria
+→ moratoria 48%/360 = 0.1333%/día. La fórmula reescala automáticamente.
+
+```
 Prelación de pagos (orden legal México):
   1. Intereses moratorios
   2. IVA sobre moratorios
@@ -218,6 +259,75 @@ function addMeses(base: Date, meses: number): Date {
   return new Date(yr, mo, Math.min(dia, maxDia), 12, 0, 0);
 }
 ```
+
+### 4.12 Depósito en garantía ≠ Valor residual (PURO)
+
+Conceptos **separados** aunque tradicionalmente algunos sistemas los
+confundan:
+
+```
+Depósito en garantía (E18, % o monto en H8)
+  • Monto que el cliente ENTREGA al inicio.
+  • PURO: queda como FV del PMT (saldo final = depósito).
+  • FIN : monto que el cliente entrega y se le reembolsa al final
+          (no entra al PMT — FV = 0).
+
+Valor residual (E21, % o monto en H10) — SOLO PURO
+  • Precio simbólico opcional para que el cliente compre el bien al
+    final del contrato (display en sección 4 del PDF).
+  • NO entra al PMT.
+  • Puede igualar al depósito (cliente "pierde" el depósito a cambio
+    del bien) o ser distinto.
+
+En FINANCIERO el residual es FIJO 2% del baseBien (opción de compra
+simbólica per ley) y no se captura por separado.
+```
+
+### 4.13 Checkbox "valor residual = comisión de apertura" (solo PURO)
+
+UI: checkbox al lado del campo Valor Residual. Cuando se marca:
+
+```
+if (producto === 'PURO' && valorResidualEsComision) {
+  valorResidualResuelto = comisionApertura
+} else if (producto === 'PURO') {
+  valorResidualResuelto = (H10 < 2) ? baseBien × H10 : H10
+}
+```
+
+Útil cuando el cliente "compensa" su residual contra la comisión que
+ya pagó.
+
+### 4.14 Seguro anual con opción "Pendiente"
+
+UI: input numérico ANUAL + checkbox "Pendiente".
+
+```
+if (seguroPendiente) {
+  // No entra en B17 (PV_pmt), no entra en la renta.
+  // PDF de cotización muestra "Seguro: Pendiente de cotizar".
+  // Cuando se especifique, se recalcula PMT y amortización.
+} else {
+  // Captura: monto ANUAL (E12).
+  // Display en cotización: monto anual.
+  // En B17:   + seguroAnual × plazo/12 (si financiado)
+  // En PMT:   - seguroAnual / plazo / 1.16  (cuota neta mensual)
+}
+```
+
+### 4.15 Patrón dual %/monto absoluto
+
+Usado en TRES campos (enganche H4, depósito H8, residual H10). El
+usuario captura un solo valor: si es <2 se interpreta como porcentaje;
+si es ≥2 como monto absoluto.
+
+```typescript
+function resolverDual(input: Decimal, base: Decimal): Decimal {
+  return input.lt(2) ? base.mul(input) : input;
+}
+```
+
+Replica del Excel: `IF(H4<2, E6*H4, H4)`.
 
 ---
 
@@ -336,15 +446,15 @@ export const NAV_SECTIONS = [
 
 1. **Decimal.js es obligatorio** para TODOS los cálculos financieros. Ningún `number` nativo para dinero.
 
-2. **El monto que entra al PMT** es `valorSinIVA + gpsFinanciado + comisionAperturaFinanciada` (sin IVA del bien). El IVA del bien no se financia en arrendamiento puro ni financiero.
+2. **El PV del PMT (B19)** es `baseBien + comisionAperturaFinanciada` (sin IVA del bien), donde `baseBien (B17) = valorSinIVA - enganche + gpsFinanciado + seguroAnual×plazo/12`. El IVA del bien NO se financia en arrendamiento puro ni financiero.
 
 3. **PURO no tiene desglose Capital/Interés** en su tabla de amortización al cliente. Solo muestra Período, Fecha, Renta, IVA, Total.
 
-4. **PURO: FV del PMT = depósito en garantía** (baseBien × 16%). Ese saldo queda al final de los 48 pagos.
+4. **PURO: FV del PMT = depósito en garantía** (porcentajeDeposito × baseBien, dual %/monto). Ese saldo queda al final de los pagos. El **valor residual** es un concepto SEPARADO (display PDF), no entra al PMT (ver §4.12).
 
-5. **FINANCIERO: FV del PMT = 0**. La opción de compra (2%) es solo un precio simbólico que se muestra en la cotización, no entra al PMT.
+5. **FINANCIERO: FV del PMT = 0**. La opción de compra (2%) es solo un precio simbólico que se muestra en la cotización, no entra al PMT. El depósito en FIN se entrega al inicio y se reembolsa al final, tampoco entra al PMT.
 
-6. **La última fila de amortización** debe usar `capital = saldoRestante` exacto (no `PMT - interés`), para garantizar que el saldo final sea exactamente $0.00 sin residuo de redondeo.
+6. **La última fila de amortización** debe usar `capital = saldoRestante - FV` exacto (no `PMT - interés`), para garantizar que el saldo final sea exactamente FV (= depósito en PURO, = 0 en FIN) sin residuo de redondeo.
 
 7. **addMeses()** es obligatorio para calcular fechas. Nunca usar `setMonth()` directamente.
 
@@ -354,11 +464,17 @@ export const NAV_SECTIONS = [
 
 10. **Prelación legal México**: moratorios → IVA moratorios → intereses → IVA intereses → capital.
 
-11. **Tasa moratoria estándar**: 72% anual. Campo obligatorio por operación, sin default en UI.
+11. **Tasa moratoria dinámica = 2× tasa ordinaria del contrato** (ej. 36% ord. ⇒ 72% mor., 24% ord. ⇒ 48% mor.). Base del cálculo: **renta pendiente del periodo en mora**, NO saldo insoluto general (ver §4.9).
 
-12. **Comisión de apertura**: 5% sobre (valorSinIVA + gpsFinanciado). Se puede financiar o cobrar de contado.
+12. **Comisión de apertura**: 5% sobre baseBien (B17, ya con enganche descontado). Se puede financiar o cobrar de contado.
 
-13. **Depósito en garantía**: baseBien × porcentajeResidual. No es meses de renta — es porcentaje del bien.
+13. **Depósito en garantía y valor residual son conceptos separados**. El depósito (H8) es lo que el cliente entrega al inicio (FV del PMT en PURO). El residual (H10) es el precio simbólico de compra al final, solo PURO, solo display. Ambos soportan el patrón dual %/monto (§4.15).
+
+14. **Checkbox "residual = comisión apertura" (solo PURO)**: cuando se marca, valorResidualResuelto = comisionApertura, ignorando H10 (§4.13).
+
+15. **Seguro: captura ANUAL con opción "Pendiente"**. Si "Pendiente", no entra en B17 ni en la renta hasta que se especifique el monto (§4.14).
+
+16. **Patrón dual %/monto** en enganche, depósito y valor residual: input <2 ⇒ porcentaje, input ≥2 ⇒ monto absoluto (§4.15).
 
 ---
 
