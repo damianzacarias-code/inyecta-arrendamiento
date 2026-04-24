@@ -35,6 +35,7 @@ const DEFAULT_LABELS: Record<TipoExtract, string> = {
   COMPROBANTE_DOMICILIO: 'Extraer comprobante de domicilio',
   FACTURA_BIEN: 'Extraer datos de factura',
   ACTA_CONSTITUTIVA: 'Extraer datos del acta constitutiva',
+  SOLICITUD: 'Extraer datos de la solicitud',
 };
 
 const ACCEPT = '.pdf,.jpg,.jpeg,.png,.webp';

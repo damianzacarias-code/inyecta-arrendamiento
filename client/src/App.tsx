@@ -14,6 +14,7 @@ import ClienteDetalle from '@/pages/ClienteDetalle';
 import Contratos from '@/pages/Contratos';
 import ContratoNuevo from '@/pages/ContratoNuevo';
 import ContratoDetalle from '@/pages/ContratoDetalle';
+import CargarSolicitud from '@/pages/CargarSolicitud';
 import Cobranza from '@/pages/Cobranza';
 import CobranzaContrato from '@/pages/CobranzaContrato';
 import Seguros from '@/pages/Seguros';
@@ -91,7 +92,8 @@ export default function App() {
               <Route path="crm" element={<EnConstruccion titulo="CRM · Prospectos" />} />
               <Route path="crm/calendario" element={<EnConstruccion titulo="CRM · Calendario de Actividades" />} />
 
-              {/* ─── Solicitudes (stubs, fuera del menú) ─── */}
+              {/* ─── Solicitudes ─── */}
+              <Route path="solicitudes/cargar" element={<CargarSolicitud />} />
               <Route path="solicitudes/nueva" element={<EnConstruccion titulo="Solicitudes · Nueva" />} />
               <Route path="solicitudes/excel" element={<EnConstruccion titulo="Solicitudes · Carga Masiva" />} />
 

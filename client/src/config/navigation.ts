@@ -31,6 +31,7 @@ import {
   Activity,
   ScrollText,
   FileCheck2,
+  FileUp,
 } from 'lucide-react';
 
 export interface NavSubItem {
@@ -81,6 +82,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: 'Operaciones',
     icon:  Briefcase,
     items: [
+      { label: 'Cargar solicitud PDF', icon: FileUp,   path: '/solicitudes/cargar' },
       { label: 'Nueva operación',    icon: FilePlus,  path: '/contratos/nuevo' },
       { label: 'Mesa de registros',  icon: Briefcase, path: '/contratos'       },
       { label: 'Seguros',            icon: Shield,    path: '/seguros'         },

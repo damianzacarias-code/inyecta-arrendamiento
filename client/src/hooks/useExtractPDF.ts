@@ -28,7 +28,8 @@ export type TipoExtract =
   | 'INE'
   | 'COMPROBANTE_DOMICILIO'
   | 'FACTURA_BIEN'
-  | 'ACTA_CONSTITUTIVA';
+  | 'ACTA_CONSTITUTIVA'
+  | 'SOLICITUD';
 
 export interface ExtractResponse {
   ok: true;
