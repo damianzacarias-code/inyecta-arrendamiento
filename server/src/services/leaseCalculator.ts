@@ -146,25 +146,39 @@ export function calcularArrendamiento(params: LeaseParams): LeaseResult {
   const gps         = new Decimal(gpsInstalacion || 0);
   const tasaMensual = new Decimal(tasaAnual).dividedBy(12);
 
-  const baseBien = valorSinIVA.plus(gpsFinanciado ? gps : 0);
+  // ── Enganche (siempre reduce baseBien per Excel B17) ─────────────
+  // CLAUDE.md §4.2: B17 = valorSinIVA - enganche + gpsFinanciado.
+  // En el server, el enganche actualmente solo se aplica en FIN; en
+  // PURO va 0. (TODO commit 5: aceptar enganche en PURO también.)
+  // El monto del enganche en FIN sigue como `valorConIVA × pct` por
+  // compatibilidad histórica — el switch a `valorSinIVA × pct` per
+  // Excel se hará al refactorizar inputs en commit 5.
+  const enganche = producto === 'FINANCIERO'
+    ? valorConIVA.times(enganchePct)
+    : new Decimal(0);
 
-  // ── Comisión, enganche, depósito ─────────────────────────────────
+  // ── Base del bien (B17) — para comisión y depósito ───────────────
+  // CLAUDE.md §4.2: ahora SIEMPRE resta enganche (antes no lo hacía,
+  // lo que inflaba comisión y depósito en operaciones FIN con
+  // enganche > 0).
+  const baseBien = valorSinIVA.minus(enganche).plus(gpsFinanciado ? gps : 0);
+
+  // ── Comisión, depósito ───────────────────────────────────────────
   const comisionApertura   = baseBien.times(comisionAperturaPct);
   const comisionFinanciada = comisionAperturaFinanciada ? comisionApertura : new Decimal(0);
   const comisionContado    = comisionAperturaFinanciada ? new Decimal(0) : comisionApertura;
 
-  const enganche         = producto === 'FINANCIERO'
-    ? valorConIVA.times(enganchePct)
-    : new Decimal(0);
   const depositoGarantia = baseBien.times(depositoGarantiaPct);
 
   // Seguro: si financiado, NO se suma al montoFinanciado del PMT; se cobra
   // como parte del flujo (renta fija o prorrateado). El legacy lo sumaba al
   // monto financiado; nosotros lo mantenemos en el desembolso/total.
+  // (commit 5 lo migrará a anual con × plazo/12 al baseBien per Excel B17.)
   const seguro = new Decimal(seguroAnual || 0);
 
-  // ── Monto financiado (SIN IVA del bien) ──────────────────────────
-  const montoFinanciado = baseBien.plus(comisionFinanciada).minus(enganche);
+  // ── PV del PMT / monto financiado (B19) — SIN IVA del bien ───────
+  // B19 = B17 + comisiónFinanciada. El enganche YA está restado en B17.
+  const montoFinanciado = baseBien.plus(comisionFinanciada);
 
   // ── PMT: FV = depósito (PURO) o 0 (FINANCIERO) ───────────────────
   const fvPMT = producto === 'PURO' ? depositoGarantia : new Decimal(0);

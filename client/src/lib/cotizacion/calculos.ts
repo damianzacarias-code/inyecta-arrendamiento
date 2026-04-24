@@ -1,11 +1,17 @@
 /**
  * Cálculo financiero de cotizaciones — Inyecta Arrendamiento
  * ---------------------------------------------------------------
- * Fórmulas verificadas al centavo contra el Excel original de Inyecta
- * (tasa = 36%, plazo = 48, valor con IVA = $2,100,000, GPS = $16,000):
+ * Fuente de verdad: CLAUDE.md §4 (verificado contra el Excel de
+ * Inyecta el 24-04-2026). Los nombres de variables citan las celdas
+ * Excel donde aplica.
  *
- *   PURO:       renta = $73,098.02  |  depósito = $292,215.17
- *   FINANCIERO: renta = $75,896.80
+ * Cambio importante (2026-04): baseBien (B17) ahora resta el enganche
+ * antes de calcular comisión y depósito, espejo del Excel:
+ *
+ *   B17 = valorSinIVA - enganche + (gpsFinanciado ? gps : 0)
+ *
+ * La versión anterior NO restaba enganche, lo que inflaba comisión y
+ * depósito en operaciones con enganche > 0.
  *
  * Todo pasa por Decimal.js — ningún operador `number` nativo en la ruta
  * de cálculo. El redondeo final a 2 decimales usa ROUND_HALF_UP.
@@ -180,15 +186,15 @@ export interface ResultadoCotizacion {
  * valores del Excel de Inyecta al centavo (CLAUDE.md §4 — verificado
  * contra `Cotización Inyecta Arrendamiento.xlsx` el 18-04-2026).
  *
- * Orden estricto de cálculo (no alterar):
+ * Orden estricto de cálculo (CLAUDE.md §4.2, no alterar):
  *
- *   1. valorSinIVA       = valorConIVA / (1 + IVA)
- *   2. baseBien          = valorSinIVA + gpsFinanciado
- *   3. comisiónApertura  = baseBien × tasaComisión
- *   4. depósitoGarantía  = baseBien × porcentajeResidual
- *   5. montoFinanciadoReal = baseBien + comisiónFinanciada
- *      (esto es el PV que entra al PMT; el IVA del bien NUNCA se
- *      financia, ni en PURO ni en FINANCIERO).
+ *   1. valorSinIVA  (E6)  = valorConIVA / (1 + IVA)
+ *   2. baseBien     (B17) = valorSinIVA - enganche + gpsFinanciado
+ *      ← B17 RESTA el enganche (corrección 2026-04)
+ *   3. comisiónApertura (B18) = baseBien × tasaComisión
+ *   4. depósitoGarantía       = baseBien × porcentajeResidual
+ *   5. montoFinanciadoReal (B19) = baseBien + comisiónFinanciada
+ *      ← PV que entra al PMT; el IVA del bien NUNCA se financia.
  *   6. PMT con FV = depósito (PURO) o 0 (FINANCIERO).
  *   7. Sección "Monto a financiar" = display con IVA del bien
  *      (NO entra al PMT — solo se muestra al cliente).
@@ -215,24 +221,28 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
   const gpsFinanciado = inp.gpsEsContado ? new Decimal(0) : new Decimal(inp.gpsMonto);
   const gpsContado    = inp.gpsEsContado ? new Decimal(inp.gpsMonto) : new Decimal(0);
 
-  // ── Base del bien (para comisión y depósito) ─────────────────────
-  // VERIFICADO: la base es valorSinIVA + gpsFinanciado
-  //   ($1,810,344.83 + $16,000) × 5%  = $91,317.24  ✓
-  //   ($1,810,344.83 + $16,000) × 16% = $292,215.17 ✓
-  const baseBien = valorSinIVA.plus(gpsFinanciado);
+  // ── Enganche (siempre reduce baseBien per Excel B17) ─────────────
+  // En el Excel B17 SIEMPRE resta el enganche (E17), independientemente
+  // de si el cliente lo paga al contado o lo difiere. La distinción
+  // contado/financiado es solo para presentación en la cotización.
+  const engancheTotal      = new Decimal(inp.engancheMonto);
+  const engancheFinanciado = !inp.engancheEsContado ? engancheTotal : new Decimal(0);
+  const engancheContado    =  inp.engancheEsContado ? engancheTotal : new Decimal(0);
 
-  // ── Comisión apertura ────────────────────────────────────────────
+  // ── Base del bien (B17 — para comisión y depósito) ───────────────
+  // CLAUDE.md §4.2: B17 = valorSinIVA - enganche + gpsFinanciado
+  //                       (+ seguroAnual×plazo/12 si financiado, en commit 5)
+  const baseBien = valorSinIVA.minus(engancheTotal).plus(gpsFinanciado);
+
+  // ── Comisión apertura (B18) ──────────────────────────────────────
   const comisionMonto      = baseBien.times(inp.tasaComisionApertura);
   const comisionFinanciada = inp.comisionAperturaEsContado ? new Decimal(0) : comisionMonto;
   const comisionContado    = inp.comisionAperturaEsContado ? comisionMonto  : new Decimal(0);
 
   // ── Seguro ───────────────────────────────────────────────────────
+  // (commit 5 lo migrará a anual con × plazo/12 al baseBien)
   const seguroFinanciado = inp.seguroEsContado ? new Decimal(0) : new Decimal(inp.seguroMonto);
   const seguroContado    = inp.seguroEsContado ? new Decimal(inp.seguroMonto) : new Decimal(0);
-
-  // ── Enganche ─────────────────────────────────────────────────────
-  const engancheFinanciado = !inp.engancheEsContado ? new Decimal(inp.engancheMonto) : new Decimal(0);
-  const engancheContado    =  inp.engancheEsContado ? new Decimal(inp.engancheMonto) : new Decimal(0);
 
   // ── Monto total DISPLAY (con IVA del bien) ───────────────────────
   // Lo que ve el cliente en la sección "Monto a financiar"
@@ -242,9 +252,8 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
     .plus(gpsFinanciado)
     .minus(engancheFinanciado);
 
-  // ── Monto REAL financiado (SIN IVA del bien) → PMT ───────────────
-  // VERIFICADO: PMT(3%, 48, 1,917,662.07, 292,215.17) = $73,098.02 ✓
-  // VERIFICADO: PMT(3%, 48, 1,917,662.07, 0)          = $75,896.80 ✓
+  // ── Monto REAL financiado / PV del PMT (B19) ─────────────────────
+  // B19 = B17 + comisiónFinanciada (sin IVA del bien)
   const montoFinanciadoReal = baseBien.plus(comisionFinanciada);
 
   // ── Depósito en garantía ─────────────────────────────────────────
