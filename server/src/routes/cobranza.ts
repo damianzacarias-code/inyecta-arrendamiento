@@ -26,12 +26,21 @@ function fmt$(n: number | string | { toString(): string }): string {
 
 // ─── Helpers ────────────────────────────────────────────────
 
-/** Calcula moratorio con fórmula: saldoVencido × (tasaAnual×2 / 360) × díasAtraso */
-function calcMoratorio(saldoVencido: number, tasaAnual: number, diasAtraso: number) {
+/**
+ * Calcula moratorio del periodo en mora (CLAUDE.md §4.9).
+ *
+ * Base: **renta pendiente SIN IVA** del periodo en mora (NO saldo
+ * insoluto general). Tasa: 2× la tasa ordinaria del contrato.
+ *
+ *   tasaMoratoriaAnual  = tasaAnual × 2
+ *   tasaMoratoriaDiaria = tasaMoratoriaAnual / 360
+ *   moratorio           = rentaPendienteSinIVA × tasaMoratoriaDiaria × diasAtraso
+ */
+function calcMoratorio(rentaPendienteSinIVA: number, tasaAnual: number, diasAtraso: number) {
   if (diasAtraso <= 0) return 0;
   const tasaMoratoria = Number(tasaAnual) * 2;
   const tasaDiaria = tasaMoratoria / 360;
-  return Math.round(saldoVencido * tasaDiaria * diasAtraso * 100) / 100;
+  return Math.round(rentaPendienteSinIVA * tasaDiaria * diasAtraso * 100) / 100;
 }
 
 /** Calcula el desglose de conceptos para un periodo considerando pagos parciales */
@@ -87,9 +96,10 @@ function calcConceptos(
     ? Math.floor((fechaCorte.getTime() - vencimiento.getTime()) / (1000 * 60 * 60 * 24))
     : 0;
 
-  // Moratorio sobre saldo vencido (renta pendiente + IVA pendiente)
+  // Moratorio sobre la renta pendiente SIN IVA del periodo en mora
+  // (CLAUDE.md §4.9). Base = `rentaPendiente`, NO `rentaTotalPendiente`.
   const moratorioGenerado = isOverdue
-    ? calcMoratorio(rentaTotalPendiente, tasaAnual, diasAtraso)
+    ? calcMoratorio(rentaPendiente, tasaAnual, diasAtraso)
     : 0;
   const ivaMoratorioGenerado = Math.round(moratorioGenerado * IVA * 100) / 100;
 

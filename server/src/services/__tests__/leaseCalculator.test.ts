@@ -134,28 +134,42 @@ describe('calcularArrendamiento — FINANCIERO', () => {
 });
 
 describe('calcularMoratorios', () => {
-  it('1,000 vencidos × 30 días × 0.002 = 60 + IVA 9.60 = 69.60', () => {
-    const r = calcularMoratorios(1000, 30, 0); // tasa ord ignorada
+  // Contrato @ 36% ordinaria → moratoria 72%/360 = 0.2%/día
+  it('contrato 36%: 1000 × 30d × 0.2%/día = 60 + IVA 9.60 = 69.60', () => {
+    const r = calcularMoratorios(1000, 30, 0.36);
     expect(r.moratorio).toBeCloseTo(60.00, 2);
     expect(r.ivaMoratorio).toBeCloseTo(9.60, 2);
     expect(r.total).toBeCloseTo(69.60, 2);
   });
 
+  // Contrato @ 24% ordinaria → moratoria 48%/360 = 0.1333%/día
+  it('contrato 24%: tasa moratoria escala linealmente con la ordinaria', () => {
+    const r = calcularMoratorios(1000, 30, 0.24);
+    expect(r.moratorio).toBeCloseTo(40.00, 2); // 1000 × 0.48/360 × 30
+    expect(r.ivaMoratorio).toBeCloseTo(6.40, 2);
+    expect(r.total).toBeCloseTo(46.40, 2);
+  });
+
   it('0 días de atraso → 0', () => {
-    const r = calcularMoratorios(1000, 0, 0);
+    const r = calcularMoratorios(1000, 0, 0.36);
     expect(r.moratorio).toBe(0);
     expect(r.ivaMoratorio).toBe(0);
     expect(r.total).toBe(0);
   });
 
   it('renta cero → 0', () => {
-    const r = calcularMoratorios(0, 100, 0);
+    const r = calcularMoratorios(0, 100, 0.36);
     expect(r.total).toBe(0);
   });
 
-  it('lineal en días: 60 días = 2× 30 días', () => {
-    const a = calcularMoratorios(5000, 30, 0);
-    const b = calcularMoratorios(5000, 60, 0);
+  it('tasa ordinaria cero → moratoria cero (caso defensivo)', () => {
+    const r = calcularMoratorios(5000, 30, 0);
+    expect(r.total).toBe(0);
+  });
+
+  it('lineal en días: 60 días = 2× 30 días (tasa fija)', () => {
+    const a = calcularMoratorios(5000, 30, 0.36);
+    const b = calcularMoratorios(5000, 60, 0.36);
     expect(b.moratorio).toBeCloseTo(a.moratorio * 2, 2);
   });
 });

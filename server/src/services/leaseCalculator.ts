@@ -278,41 +278,47 @@ function generarAmortizacion(a: AmortArgs): AmortizationRow[] {
 
 // ═══════════════════════════════════════════════════════════════════
 // Intereses moratorios
-//   Regla legacy: 0.2% diario sobre el importe vencido.
-//   Para mantener compatibilidad API aceptamos tasaAnualOrdinaria
-//   pero la ignoramos: la tasa moratoria es fija por regulación interna.
+//   Tasa moratoria DINÁMICA = 2 × tasa ordinaria del contrato
+//   (CLAUDE.md §4.9). Base del cálculo: renta pendiente sin IVA del
+//   periodo en mora, NO saldo insoluto general.
 // ═══════════════════════════════════════════════════════════════════
-
-const TASA_MORATORIA_DIARIA = 0.002;
 
 /**
  * Cálculo de intereses moratorios para una renta vencida.
  *
  * Fórmula (CLAUDE.md §4.9):
- *   moratorio    = rentaVencida × 0.2% × diasAtraso   (lineal en días)
- *   ivaMoratorio = moratorio × 16%
- *   total        = moratorio + ivaMoratorio
+ *   tasaMoratoriaAnual  = tasaAnualOrdinaria × 2          (dinámica)
+ *   tasaMoratoriaDiaria = tasaMoratoriaAnual / 360
+ *   moratorio           = rentaVencidaSinIVA × tasaMoratoriaDiaria × diasAtraso
+ *   ivaMoratorio        = moratorio × 16%
+ *   total               = moratorio + ivaMoratorio
  *
- * La tasa moratoria es FIJA (72% anual = 0.2% diario base 360) por
- * regulación interna de Inyecta — el parámetro `_tasaAnualOrdinaria`
- * existe por compatibilidad histórica con la API original pero se
- * ignora; la fuente de verdad es `TASA_MORATORIA_DIARIA`.
+ * Ejemplos:
+ *   - Contrato @ 36% ord → moratoria 72%/360 = 0.2%/día.
+ *   - Contrato @ 24% ord → moratoria 48%/360 = 0.1333%/día.
+ *
+ * La base es la renta pendiente **SIN IVA** del periodo en mora
+ * (G − K/1.16 en el Excel hoja "Pagos" col M), no el saldo insoluto
+ * general del contrato.
  *
  * Para cobranza real (saldo insoluto + prelación legal moratorio →
- * IVA mor → interés → IVA → capital), ver `routes/cobranza.ts`.
+ * IVA mor → interés → IVA → capital), ver `routes/cobranza.ts`, que
+ * deriva su tasa moratoria del contrato y resta moratorio ya cobrado.
  *
- * @param rentaVencida          monto neto sin IVA de la renta atrasada.
- * @param diasAtraso            días desde el vencimiento (entero ≥ 0).
- * @param _tasaAnualOrdinaria   IGNORADO. Mantener por API estable.
- * @returns                     {moratorio, ivaMoratorio, total} en MXN.
+ * @param rentaVencidaSinIVA   monto neto SIN IVA de la renta atrasada.
+ * @param diasAtraso           días desde el vencimiento (entero ≥ 0).
+ * @param tasaAnualOrdinaria   tasa ordinaria del contrato (ej. 0.36).
+ * @returns                    {moratorio, ivaMoratorio, total} en MXN.
  */
 export function calcularMoratorios(
-  rentaVencida: number,
+  rentaVencidaSinIVA: number,
   diasAtraso: number,
-  _tasaAnualOrdinaria: number,
+  tasaAnualOrdinaria: number,
 ): { moratorio: number; ivaMoratorio: number; total: number } {
-  const base = new Decimal(rentaVencida);
-  const moratorio    = base.times(TASA_MORATORIA_DIARIA).times(diasAtraso);
+  const base = new Decimal(rentaVencidaSinIVA);
+  const tasaMoratoriaAnual = new Decimal(tasaAnualOrdinaria).times(2);
+  const tasaDiaria = tasaMoratoriaAnual.div(360);
+  const moratorio    = base.times(tasaDiaria).times(diasAtraso);
   const ivaMoratorio = moratorio.times(IVA_RATE);
   return {
     moratorio:    r2(moratorio),
