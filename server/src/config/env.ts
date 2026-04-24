@@ -98,6 +98,21 @@ const EnvSchema = z
     ANTHROPIC_API_KEY: z.string().optional(),
     // Modelo a usar (override opcional). Default: claude-sonnet-4-5-20250929.
     ANTHROPIC_MODEL: z.string().default('claude-sonnet-4-5-20250929'),
+
+    // ── Círculo de Crédito ────────────────────────────────
+    // Clave de Otorgante asignada por Buró de Crédito / Círculo
+    // de Crédito. Es un identificador de 10 dígitos. Mientras se
+    // tramita la real, se permite la clave de pruebas '0000000000'
+    // SOLO en development/test/staging. En production rechazamos
+    // explícitamente esa clave para no enviar reportes anónimos.
+    CIRCULO_CREDITO_CLAVE_OTORGANTE: z
+      .string()
+      .regex(/^\d{10}$/, 'CIRCULO_CREDITO_CLAVE_OTORGANTE: 10 dígitos')
+      .default('0000000000'),
+    CIRCULO_CREDITO_NOMBRE_OTORGANTE: z
+      .string()
+      .min(1)
+      .default('FSMP SOLUCIONES DE CAPITAL SA DE CV SOFOM ENR'),
   })
   // Validaciones cruzadas (cosas que solo aplican en producción).
   .superRefine((env, ctx) => {
@@ -132,6 +147,15 @@ const EnvSchema = z
         code: z.ZodIssueCode.custom,
         path: ['EXTRACT_PROVIDER'],
         message: 'EXTRACT_PROVIDER=CLAUDE requiere ANTHROPIC_API_KEY',
+      });
+    }
+    if (env.NODE_ENV === 'production' && env.CIRCULO_CREDITO_CLAVE_OTORGANTE === '0000000000') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['CIRCULO_CREDITO_CLAVE_OTORGANTE'],
+        message:
+          'En production no se permite la clave de pruebas "0000000000". ' +
+          'Solicita la clave real a Círculo de Crédito antes de desplegar.',
       });
     }
   });
@@ -191,6 +215,10 @@ export const config = {
     provider: env.EXTRACT_PROVIDER,
     anthropicApiKey: env.ANTHROPIC_API_KEY,
     anthropicModel: env.ANTHROPIC_MODEL,
+  },
+  circuloCredito: {
+    claveOtorgante: env.CIRCULO_CREDITO_CLAVE_OTORGANTE,
+    nombreOtorgante: env.CIRCULO_CREDITO_NOMBRE_OTORGANTE,
   },
 } as const;
 

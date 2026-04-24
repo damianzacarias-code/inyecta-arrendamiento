@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../config/db';
+import { config } from '../config/env';
 import { requireAuth } from '../middleware/auth';
 import { childLogger } from '../lib/logger';
 
@@ -7,8 +8,12 @@ const log = childLogger('circuloCredito');
 
 const router = Router();
 
-const CLAVE_OTORGANTE = '0000000000'; // TODO: Asignar clave real de Círculo de Crédito
-const NOMBRE_OTORGANTE = 'FSMP SOLUCIONES DE CAPITAL SA DE CV SOFOM ENR';
+// Identidad del otorgante. Vienen de env (validados con Zod en
+// startup): CIRCULO_CREDITO_CLAVE_OTORGANTE / NOMBRE_OTORGANTE.
+// La clave de pruebas '0000000000' se rechaza explícitamente en
+// production — ver superRefine en config/env.ts.
+const CLAVE_OTORGANTE = config.circuloCredito.claveOtorgante;
+const NOMBRE_OTORGANTE = config.circuloCredito.nombreOtorgante;
 
 // ─── Helpers ────────────────────────────────────────────────
 
