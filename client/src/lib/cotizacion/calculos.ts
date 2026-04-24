@@ -61,6 +61,26 @@ export function calcPMT(
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// Helpers internos
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Patrón dual %/monto absoluto (CLAUDE.md §4.15).
+ *
+ * Replica del Excel: `IF(H4<2, base*H4, H4)`. Usado en enganche (H4),
+ * depósito (H8) y valor residual (H10).
+ *
+ * @param input  el valor capturado por el usuario (ej. 0.16  ó  77586.21)
+ * @param base   la base sobre la que se aplica si input se interpreta como %
+ *               (típicamente baseBien o valorSinIVA)
+ * @returns      monto absoluto en MXN
+ */
+function resolverDual(input: number, base: Decimal): Decimal {
+  const v = new Decimal(input);
+  return v.lt(2) ? base.times(v) : v;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // Inputs / Outputs
 // ═══════════════════════════════════════════════════════════════════
 
@@ -84,22 +104,39 @@ export interface InputsCotizacion {
   /** true = pago inicial / false = financiada */
   comisionAperturaEsContado: boolean;
 
-  // ── Valor residual / Opción de compra ────────────────────────────
+  // ── Depósito en garantía (CLAUDE.md §4.12) ───────────────────────
   /**
-   * PURO:       porcentaje que se usa como FV en el PMT
-   *   → FV  = (valorSinIVA + gpsFinanciado) × porcentajeResidual
-   * FINANCIERO: el FV del PMT es 0 (amortiza todo el capital)
-   *   → el porcentaje solo se usa para el monto DISPLAY en la sección
-   *     "Opción de compra" (cálculo: porcentaje × montoDisplay)
+   * Patrón dual %/monto absoluto (§4.15):
+   *   - <2  ⇒ porcentaje sobre baseBien (ej. 0.10 = 10%)
+   *   - ≥2  ⇒ monto absoluto en MXN (ej. 77586.21)
+   * PURO: queda como FV del PMT.
+   * FIN : monto que el cliente entrega y se le reembolsa al final.
    */
-  porcentajeResidual: number;
+  porcentajeDeposito: number;
+
+  // ── Valor residual (CLAUDE.md §4.12) — solo PURO ─────────────────
+  /**
+   * Patrón dual %/monto absoluto (§4.15). Solo PURO. En FIN se ignora.
+   * Si `valorResidualEsComision = true`, ESTE valor se ignora y se
+   * usa la comisión de apertura como residual (§4.13).
+   */
+  valorResidual: number;
+
+  /**
+   * CLAUDE.md §4.13: solo PURO. Si true, valorResidual = comisión
+   * apertura (ignorando el campo `valorResidual`). En FIN se ignora.
+   */
+  valorResidualEsComision?: boolean;
 
   // ── GPS ──────────────────────────────────────────────────────────
   gpsMonto: number;
   gpsEsContado: boolean;
 
-  // ── Seguro ───────────────────────────────────────────────────────
-  seguroMonto: number;
+  // ── Seguro (CLAUDE.md §4.14) ─────────────────────────────────────
+  /** Monto ANUAL del seguro (no mensual ni total). */
+  seguroAnual: number;
+  /** Si true, no entra en cálculos hasta que se especifique (§4.14). */
+  seguroPendiente?: boolean;
   seguroEsContado: boolean;
 
   // ── Enganche / Pago anticipado ───────────────────────────────────
@@ -145,7 +182,7 @@ export interface ResultadoCotizacion {
     engancheContado: number;
     comisionAperturaContado: number;
     aperturaSeguros: number;
-    depositoGarantia: number;  // = baseBien × porcentajeResidual
+    depositoGarantia: number;  // resolverDual(porcentajeDeposito, baseBien) — §4.12
     gpsContado: number;
     total: number;
   };
@@ -189,16 +226,23 @@ export interface ResultadoCotizacion {
  * Orden estricto de cálculo (CLAUDE.md §4.2, no alterar):
  *
  *   1. valorSinIVA  (E6)  = valorConIVA / (1 + IVA)
- *   2. baseBien     (B17) = valorSinIVA - enganche + gpsFinanciado
- *      ← B17 RESTA el enganche (corrección 2026-04)
+ *   2. baseBien     (B17) = valorSinIVA - enganche
+ *                         + (gpsFinanciado    ? gps : 0)
+ *                         + (seguroFinanciado ? seguroAnual × plazo/12 : 0)
+ *      ← B17 resta enganche y suma seguro financiado prorrateado al
+ *        plazo (§4.2 / §4.14).
  *   3. comisiónApertura (B18) = baseBien × tasaComisión
- *   4. depósitoGarantía       = baseBien × porcentajeResidual
+ *   4. depósitoGarantía (E18) = resolverDual(porcentajeDeposito, baseBien)
  *   5. montoFinanciadoReal (B19) = baseBien + comisiónFinanciada
  *      ← PV que entra al PMT; el IVA del bien NUNCA se financia.
  *   6. PMT con FV = depósito (PURO) o 0 (FINANCIERO).
  *   7. Sección "Monto a financiar" = display con IVA del bien
  *      (NO entra al PMT — solo se muestra al cliente).
- *   8. Residual display = montoTotalDisplay × {16% PURO | 2% FIN}.
+ *   8. Residual display (§4.5):
+ *      PURO:       valorResidualResuelto (E21) = comisiónApertura
+ *                  si valorResidualEsComision, si no
+ *                  resolverDual(valorResidual, baseBien).
+ *      FINANCIERO: baseBien × 0.02 (precio simbólico, §4.5).
  *
  * Diferencias clave por producto (regla 5/8):
  *   - PURO       → FV PMT = depósito; sección 4 = "Valor de rescate" 16%.
@@ -229,26 +273,43 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
   const engancheFinanciado = !inp.engancheEsContado ? engancheTotal : new Decimal(0);
   const engancheContado    =  inp.engancheEsContado ? engancheTotal : new Decimal(0);
 
+  // ── Seguro (CLAUDE.md §4.14) ─────────────────────────────────────
+  // - seguroPendiente: 0 en B17 y 0 en pago inicial (no entra hasta
+  //   que se especifique el monto).
+  // - financiado:     suma seguroAnual × plazo/12 a B17 (total del
+  //   seguro durante toda la vigencia del contrato).
+  // - contado:        cliente paga seguroAnual al inicio (anualidad).
+  const seguroAnualDec = inp.seguroPendiente
+    ? new Decimal(0)
+    : new Decimal(inp.seguroAnual);
+  const plazoMeses = new Decimal(inp.plazo);
+  const seguroFinanciadoTotal = !inp.seguroEsContado
+    ? seguroAnualDec.times(plazoMeses).dividedBy(12)
+    : new Decimal(0);
+  const seguroContado = inp.seguroEsContado ? seguroAnualDec : new Decimal(0);
+
   // ── Base del bien (B17 — para comisión y depósito) ───────────────
-  // CLAUDE.md §4.2: B17 = valorSinIVA - enganche + gpsFinanciado
-  //                       (+ seguroAnual×plazo/12 si financiado, en commit 5)
-  const baseBien = valorSinIVA.minus(engancheTotal).plus(gpsFinanciado);
+  // CLAUDE.md §4.2:
+  //   B17 = valorSinIVA - enganche
+  //       + (gpsFinanciado    ? gps : 0)
+  //       + (seguroFinanciado ? seguroAnual × plazo/12 : 0)
+  const baseBien = valorSinIVA
+    .minus(engancheTotal)
+    .plus(gpsFinanciado)
+    .plus(seguroFinanciadoTotal);
 
   // ── Comisión apertura (B18) ──────────────────────────────────────
   const comisionMonto      = baseBien.times(inp.tasaComisionApertura);
   const comisionFinanciada = inp.comisionAperturaEsContado ? new Decimal(0) : comisionMonto;
   const comisionContado    = inp.comisionAperturaEsContado ? comisionMonto  : new Decimal(0);
 
-  // ── Seguro ───────────────────────────────────────────────────────
-  // (commit 5 lo migrará a anual con × plazo/12 al baseBien)
-  const seguroFinanciado = inp.seguroEsContado ? new Decimal(0) : new Decimal(inp.seguroMonto);
-  const seguroContado    = inp.seguroEsContado ? new Decimal(inp.seguroMonto) : new Decimal(0);
-
   // ── Monto total DISPLAY (con IVA del bien) ───────────────────────
-  // Lo que ve el cliente en la sección "Monto a financiar"
+  // Lo que ve el cliente en la sección "Monto a financiar". El seguro
+  // financiado se muestra como total prorrateado al plazo (consistente
+  // con lo que entra a B17).
   const montoTotalDisplay = valorConIVA
     .plus(comisionFinanciada)
-    .plus(seguroFinanciado)
+    .plus(seguroFinanciadoTotal)
     .plus(gpsFinanciado)
     .minus(engancheFinanciado);
 
@@ -256,11 +317,22 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
   // B19 = B17 + comisiónFinanciada (sin IVA del bien)
   const montoFinanciadoReal = baseBien.plus(comisionFinanciada);
 
-  // ── Depósito en garantía ─────────────────────────────────────────
-  const depositoGarantia = baseBien.times(inp.porcentajeResidual);
+  // ── Depósito en garantía (E18, dual %/monto §4.15) ──────────────
+  const depositoGarantia = resolverDual(inp.porcentajeDeposito, baseBien);
+
+  // ── Valor residual resuelto (E21, §4.12 + §4.13) ────────────────
+  //   PURO  : si valorResidualEsComision ⇒ = comisión apertura,
+  //           si no ⇒ resolverDual(valorResidual, baseBien).
+  //   FIN   : baseBien × 0.02 (opción de compra simbólica, §4.5).
+  const valorResidualResuelto =
+    inp.producto === 'PURO'
+      ? (inp.valorResidualEsComision
+          ? comisionMonto
+          : resolverDual(inp.valorResidual, baseBien))
+      : baseBien.times(0.02);
 
   // ── FV del PMT ───────────────────────────────────────────────────
-  // PURO: residual real al final del plazo
+  // PURO: depósito real al final del plazo (queda como saldo final)
   // FINANCIERO: 0 — amortiza todo el capital
   const fvPMT = inp.producto === 'PURO' ? depositoGarantia : new Decimal(0);
 
@@ -274,13 +346,35 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
   const rentaDecimal = new Decimal(rentaNeta);
   const rentaIVA     = rentaDecimal.times(IVA);
 
-  // ── Residual DISPLAY para la sección 4 ───────────────────────────
-  // % × monto total cotización (con IVA), solo display
-  // PURO:       16% × $2,207,317.24 = $353,170.76 ✓
-  // FINANCIERO:  2% × $2,207,317.24 = $44,146.34  ✓
-  const residualDisplay = montoTotalDisplay.times(inp.porcentajeResidual);
+  // ── Residual DISPLAY para la sección 4 (CLAUDE.md §4.5) ──────────
+  // PURO:       valorResidualResuelto (E21)
+  // FINANCIERO: baseBien × 2% (precio simbólico de opción de compra)
+  const residualDisplay = valorResidualResuelto;
   const residualIVA     = residualDisplay.times(IVA);
   const residualTotal   = residualDisplay.times(IVA.plus(1));
+
+  // ── Porcentaje del residual (solo display) ───────────────────────
+  // PURO con flag "= comisión": el % efectivo es la tasa de comisión.
+  // PURO con valor dual: si <2 es %, si ≥2 calculamos el % implícito
+  // sobre baseBien para mostrarlo coherente.
+  // FINANCIERO: siempre 2%.
+  let residualPorcentaje: number;
+  if (inp.producto === 'PURO') {
+    if (inp.valorResidualEsComision) {
+      residualPorcentaje = inp.tasaComisionApertura;
+    } else if (inp.valorResidual < 2) {
+      residualPorcentaje = inp.valorResidual;
+    } else if (baseBien.isZero()) {
+      residualPorcentaje = 0;
+    } else {
+      residualPorcentaje = new Decimal(inp.valorResidual)
+        .dividedBy(baseBien)
+        .toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
+        .toNumber();
+    }
+  } else {
+    residualPorcentaje = 0.02;
+  }
 
   // ── Pago inicial total ──────────────────────────────────────────
   const pagoInicialTotal = engancheContado
@@ -302,7 +396,10 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
     valorBienSinIVA: r2(valorSinIVA),
     nombreBien:      inp.nombreBien,
     estadoBien:      inp.estadoBien,
-    seguroEstado:    inp.seguroEstado,
+    // CLAUDE.md §4.14: si el monto del seguro está pendiente, el PDF
+    // debe mostrar "Pendiente de cotizar" sin importar lo que llegue
+    // como seguroEstado.
+    seguroEstado:    inp.seguroPendiente ? 'Pendiente de cotizar' : inp.seguroEstado,
     producto:        inp.producto,
     plazo:           inp.plazo,
 
@@ -310,7 +407,7 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
       valorBienSinIVA:            r2(valorSinIVA),
       valorBienConIVA:            r2(valorConIVA),
       comisionAperturaFinanciada: r2(comisionFinanciada),
-      seguroFinanciado:           r2(seguroFinanciado),
+      seguroFinanciado:           r2(seguroFinanciadoTotal),
       gpsFinanciado:              r2(gpsFinanciado),
       descuentoEnganche:          r2(engancheFinanciado),
       total:                      r2(montoTotalDisplay),
@@ -333,7 +430,7 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
 
     residual: {
       etiqueta:   inp.producto === 'PURO' ? 'Valor de rescate' : 'Opcion de compra',
-      porcentaje: inp.porcentajeResidual,
+      porcentaje: residualPorcentaje,
       monto:      r2(residualDisplay),
       iva:        r2(residualIVA),
       total:      r2(residualTotal),

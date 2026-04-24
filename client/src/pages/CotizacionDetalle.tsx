@@ -42,8 +42,12 @@ interface QuotationDetail {
   gpsFinanciado: boolean;
   seguroAnual: number;
   seguroFinanciado: boolean;
+  /** §4.14: si true, el seguro está pendiente de cotizar */
+  seguroPendiente?: boolean;
   valorResidual: number;
   valorResidualPct: number;
+  /** §4.13: solo PURO — si true, residual = comisión apertura */
+  valorResidualEsComision?: boolean;
   montoFinanciar: number;
   rentaMensual: number;
   rentaMensualIVA: number;
@@ -231,14 +235,22 @@ export default function CotizacionDetalle() {
       tasaAnual,
       tasaComisionApertura: Number(q.comisionAperturaPct),
       comisionAperturaEsContado: !q.comisionAperturaFinanciada,
-      porcentajeResidual: Number(q.valorResidualPct),
+      // §4.12: depósito y residual son conceptos separados.
+      // El schema persiste ambos por separado desde el commit que
+      // separó depositoGarantia de valorResidual; aquí los usamos
+      // tal cual de la BD.
+      porcentajeDeposito: Number(q.depositoGarantiaPct ?? q.valorResidualPct),
+      valorResidual: Number(q.valorResidualPct),
+      valorResidualEsComision: Boolean(q.valorResidualEsComision),
       gpsMonto: Number(q.gpsInstalacion),
       gpsEsContado: !q.gpsFinanciado,
-      seguroMonto: Number(q.seguroAnual),
+      seguroAnual: Number(q.seguroAnual),
+      seguroPendiente: Boolean(q.seguroPendiente),
       seguroEsContado: !q.seguroFinanciado,
       // El esquema actual no persiste si el enganche fue de contado;
-      // asumimos contado (default histórico) y sólo lo aplicamos si > 0
-      engancheMonto: valorBien * enganchePct * 1.16,
+      // asumimos contado (default histórico) y sólo lo aplicamos si > 0.
+      // §4.2: enganche se resta de B17 sobre valorSinIVA (no conIVA).
+      engancheMonto: valorBien * enganchePct,
       engancheEsContado: true,
       nombreBien,
       estadoBien: q.bienNuevo === false ? 'Seminuevo' : 'Nuevo',

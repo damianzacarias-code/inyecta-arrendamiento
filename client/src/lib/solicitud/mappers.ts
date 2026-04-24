@@ -239,7 +239,11 @@ export function solicitudToContractPayload(
   // todos los parámetros. Usamos los defaults estándar de Inyecta
   // (CLAUDE.md §4). El usuario luego puede ajustar en el detalle del
   // contrato.
-  const porcentajeResidual = producto === 'PURO' ? 0.16 : 0.02;
+  // §4.12: depósito y residual son conceptos separados; en PURO se
+  // usan típicamente al mismo nivel para que el saldo final del PMT
+  // coincida con el residual; en FIN el residual lo fija el motor a 2%.
+  const porcentajeDeposito = producto === 'PURO' ? 0.16 : 0;
+  const valorResidual      = producto === 'PURO' ? 0.16 : 0;
   const calc = calcularCotizacion({
     valorBienConIVA: bien.valorConIVA,
     tasaIVA: 0.16,
@@ -248,10 +252,13 @@ export function solicitudToContractPayload(
     tasaAnual: 0.36,
     tasaComisionApertura: 0.05,
     comisionAperturaEsContado: false,
-    porcentajeResidual,
+    porcentajeDeposito,
+    valorResidual,
+    valorResidualEsComision: false,
     gpsMonto: 0,                     // no se conoce desde la solicitud
     gpsEsContado: false,
-    seguroMonto: 0,
+    seguroAnual: 0,
+    seguroPendiente: true,           // §4.14: la solicitud no trae seguro
     seguroEsContado: false,
     engancheMonto: 0,
     engancheEsContado: false,

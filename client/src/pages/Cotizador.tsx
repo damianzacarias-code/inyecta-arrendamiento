@@ -105,10 +105,15 @@ const defaultForm = {
   comisionAperturaPct: 0.05,
   comisionAperturaFinanciada: true,
   valorResidualPct: 0.16,
+  /** §4.13: PURO — si true, el residual se iguala a la comisión apertura */
+  valorResidualEsComision: false,
   rentaInicial: 0,
   gpsInstalacion: 4200,
   gpsFinanciado: true,
   seguroAnual: 0,
+  /** §4.14: si true, el seguro NO entra en B17 ni en la renta hasta
+   *  que se especifique un monto (PDF muestra "Pendiente de cotizar"). */
+  seguroPendiente: true,
   seguroFinanciado: true,
   seguroEstado: 'Pendiente',         // "Pendiente" | "Contratado"
   fechaPrimerPago: todayISO(),       // YYYY-MM-DD
@@ -243,12 +248,17 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
       tasaAnual: form.tasaAnual,
       tasaComisionApertura: form.comisionAperturaPct,
       comisionAperturaEsContado: !form.comisionAperturaFinanciada,
-      porcentajeResidual: form.valorResidualPct,
+      // §4.12: depósito y residual separados (antes fusionados)
+      porcentajeDeposito: form.depositoGarantiaPct,
+      valorResidual: form.valorResidualPct,
+      valorResidualEsComision: form.valorResidualEsComision,
       gpsMonto: form.gpsInstalacion,
       gpsEsContado: !form.gpsFinanciado,
-      seguroMonto: form.seguroAnual,
+      seguroAnual: form.seguroAnual,
+      seguroPendiente: form.seguroPendiente,
       seguroEsContado: !form.seguroFinanciado,
-      engancheMonto: form.valorBien * form.enganchePct * 1.16,  // sobre valorConIVA
+      // §4.2: enganche se resta de B17 sobre valorSinIVA (no conIVA)
+      engancheMonto: form.valorBien * form.enganchePct,
       engancheEsContado: form.engancheEsContado,
       nombreBien,
       estadoBien: form.bienNuevo ? 'Nuevo' : 'Seminuevo',
@@ -282,10 +292,13 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
     form.tasaAnual,
     form.comisionAperturaPct,
     form.comisionAperturaFinanciada,
+    form.depositoGarantiaPct,
     form.valorResidualPct,
+    form.valorResidualEsComision,
     form.gpsInstalacion,
     form.gpsFinanciado,
     form.seguroAnual,
+    form.seguroPendiente,
     form.seguroFinanciado,
     form.enganchePct,
     form.engancheEsContado,
@@ -688,6 +701,11 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                 <div>
                   <label className="block text-sm font-medium text-gray-600 mb-1">
                     Valor Residual: {(form.valorResidualPct * 100).toFixed(0)}%
+                    {form.producto === 'PURO' && form.valorResidualEsComision && (
+                      <span className="ml-2 text-xs text-inyecta-700 font-normal">
+                        (igualado a la comisión)
+                      </span>
+                    )}
                   </label>
                   <input
                     type="range"
@@ -696,9 +714,24 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                     step={0.01}
                     value={form.valorResidualPct}
                     onChange={(e) => updateField('valorResidualPct', Number(e.target.value))}
-                    className="w-full accent-inyecta-600"
+                    disabled={form.producto === 'PURO' && form.valorResidualEsComision}
+                    className="w-full accent-inyecta-600 disabled:opacity-40"
                   />
                 </div>
+                {form.producto === 'PURO' && (
+                  <div className="flex items-center gap-3">
+                    <input
+                      id="cot-residual-es-comision"
+                      type="checkbox"
+                      checked={form.valorResidualEsComision}
+                      onChange={(e) => updateField('valorResidualEsComision', e.target.checked)}
+                      className="rounded accent-inyecta-600"
+                    />
+                    <label htmlFor="cot-residual-es-comision" className="text-sm text-gray-600 cursor-pointer">
+                      Valor residual = comisión de apertura (§4.13)
+                    </label>
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-gray-600 mb-1">Renta Inicial</label>
                   <input
@@ -727,22 +760,45 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                   <span className="text-sm text-gray-600">GPS financiado</span>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1">Seguro Anual</label>
+                  <label className="block text-sm font-medium text-gray-600 mb-1">
+                    Seguro Anual
+                    {form.seguroPendiente && (
+                      <span className="ml-2 text-xs text-amber-700 font-normal">
+                        (pendiente de cotizar)
+                      </span>
+                    )}
+                  </label>
                   <input
                     type="number"
                     value={form.seguroAnual}
                     onChange={(e) => updateField('seguroAnual', Number(e.target.value))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none"
+                    disabled={form.seguroPendiente}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none disabled:bg-gray-50 disabled:text-gray-400"
                   />
+                </div>
+                <div className="flex items-center gap-3">
+                  <input
+                    id="cot-seguro-pendiente"
+                    type="checkbox"
+                    checked={form.seguroPendiente}
+                    onChange={(e) => updateField('seguroPendiente', e.target.checked)}
+                    className="rounded accent-inyecta-600"
+                  />
+                  <label htmlFor="cot-seguro-pendiente" className="text-sm text-gray-600 cursor-pointer">
+                    Seguro pendiente de cotizar (§4.14)
+                  </label>
                 </div>
                 <div className="flex items-center gap-3">
                   <input
                     type="checkbox"
                     checked={form.seguroFinanciado}
                     onChange={(e) => updateField('seguroFinanciado', e.target.checked)}
-                    className="rounded accent-inyecta-600"
+                    disabled={form.seguroPendiente}
+                    className="rounded accent-inyecta-600 disabled:opacity-40"
                   />
-                  <span className="text-sm text-gray-600">Seguro financiado</span>
+                  <span className={`text-sm ${form.seguroPendiente ? 'text-gray-400' : 'text-gray-600'}`}>
+                    Seguro financiado
+                  </span>
                 </div>
                 <div className="flex items-center gap-3">
                   <input

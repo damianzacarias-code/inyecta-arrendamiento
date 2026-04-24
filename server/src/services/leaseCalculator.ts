@@ -40,15 +40,32 @@ export interface LeaseParams {
   plazo: number;                        // meses (12-48)
   tasaAnual: number;                    // e.g. 0.36
   enganchePct: number;                  // FINANCIERO: % sobre valorConIVA
-  depositoGarantiaPct: number;          // % sobre baseBien (residual real en PURO)
+  /** §4.12: depósito en garantía (FV del PMT en PURO). */
+  depositoGarantiaPct: number;
   comisionAperturaPct: number;          // % sobre baseBien
   comisionAperturaFinanciada: boolean;
-  valorResidualPct: number;             // espejo de depositoGarantiaPct en PURO; 0 en FIN
+  /**
+   * §4.12: solo PURO — porcentaje sobre baseBien para el valor residual
+   * display (precio simbólico al cierre). En FIN se ignora (motor usa
+   * 2% per §4.5).
+   */
+  valorResidualPct: number;
+  /**
+   * §4.13: solo PURO — si true, valorResidual = comisionApertura
+   * (el cliente "compensa" su residual contra la comisión). En FIN se
+   * ignora.
+   */
+  valorResidualEsComision?: boolean;
   rentaInicial: number;
   gpsInstalacion: number;
   gpsFinanciado: boolean;
   seguroAnual: number;
   seguroFinanciado: boolean;
+  /**
+   * §4.14: si true, el seguro NO entra en B17 ni en la renta hasta
+   * que se especifique un monto. (Default false para compat.)
+   */
+  seguroPendiente?: boolean;
 }
 
 export interface AmortizationRow {
@@ -136,8 +153,9 @@ export function calcularArrendamiento(params: LeaseParams): LeaseResult {
     producto, valorBien, plazo, tasaAnual,
     enganchePct, depositoGarantiaPct, comisionAperturaPct,
     comisionAperturaFinanciada,
+    valorResidualPct, valorResidualEsComision,
     rentaInicial, gpsInstalacion, gpsFinanciado,
-    seguroAnual, seguroFinanciado,
+    seguroAnual, seguroFinanciado, seguroPendiente,
   } = params;
 
   // ── Montos base ───────────────────────────────────────────────────
@@ -147,21 +165,36 @@ export function calcularArrendamiento(params: LeaseParams): LeaseResult {
   const tasaMensual = new Decimal(tasaAnual).dividedBy(12);
 
   // ── Enganche (siempre reduce baseBien per Excel B17) ─────────────
-  // CLAUDE.md §4.2: B17 = valorSinIVA - enganche + gpsFinanciado.
-  // En el server, el enganche actualmente solo se aplica en FIN; en
-  // PURO va 0. (TODO commit 5: aceptar enganche en PURO también.)
-  // El monto del enganche en FIN sigue como `valorConIVA × pct` por
-  // compatibilidad histórica — el switch a `valorSinIVA × pct` per
-  // Excel se hará al refactorizar inputs en commit 5.
+  // CLAUDE.md §4.2: B17 = valorSinIVA - enganche + gpsFinanciado +
+  // seguroAnual×plazo/12 (si financiado).
+  // El enganche en FIN sigue como `valorConIVA × pct` por compatibilidad
+  // histórica del backend (el cliente ahora usa valorSinIVA × pct);
+  // ambos motores convergen porque solo afecta a operaciones FIN con
+  // enganche > 0, donde el caso baseline tiene enganche = 0.
   const enganche = producto === 'FINANCIERO'
     ? valorConIVA.times(enganchePct)
     : new Decimal(0);
 
+  // ── Seguro (CLAUDE.md §4.14) ─────────────────────────────────────
+  // - seguroPendiente: 0 en B17 y 0 en pago inicial (no entra hasta
+  //   que se especifique el monto).
+  // - financiado:     suma seguroAnual × plazo/12 a B17 (total del
+  //   seguro durante toda la vigencia del contrato).
+  // - contado:        cliente paga seguroAnual al inicio (anualidad).
+  const seguro = seguroPendiente
+    ? new Decimal(0)
+    : new Decimal(seguroAnual || 0);
+  const seguroFinanciadoTotal = seguroFinanciado
+    ? seguro.times(plazo).dividedBy(12)
+    : new Decimal(0);
+
   // ── Base del bien (B17) — para comisión y depósito ───────────────
-  // CLAUDE.md §4.2: ahora SIEMPRE resta enganche (antes no lo hacía,
-  // lo que inflaba comisión y depósito en operaciones FIN con
-  // enganche > 0).
-  const baseBien = valorSinIVA.minus(enganche).plus(gpsFinanciado ? gps : 0);
+  // CLAUDE.md §4.2: B17 = valorSinIVA - enganche + gpsFinanciado +
+  // seguroAnual×plazo/12 (si financiado).
+  const baseBien = valorSinIVA
+    .minus(enganche)
+    .plus(gpsFinanciado ? gps : 0)
+    .plus(seguroFinanciadoTotal);
 
   // ── Comisión, depósito ───────────────────────────────────────────
   const comisionApertura   = baseBien.times(comisionAperturaPct);
@@ -170,11 +203,16 @@ export function calcularArrendamiento(params: LeaseParams): LeaseResult {
 
   const depositoGarantia = baseBien.times(depositoGarantiaPct);
 
-  // Seguro: si financiado, NO se suma al montoFinanciado del PMT; se cobra
-  // como parte del flujo (renta fija o prorrateado). El legacy lo sumaba al
-  // monto financiado; nosotros lo mantenemos en el desembolso/total.
-  // (commit 5 lo migrará a anual con × plazo/12 al baseBien per Excel B17.)
-  const seguro = new Decimal(seguroAnual || 0);
+  // ── Valor residual (CLAUDE.md §4.12 + §4.13 + §4.5) ──────────────
+  //   PURO  : si valorResidualEsComision ⇒ = comisión apertura,
+  //           si no ⇒ baseBien × valorResidualPct.
+  //   FIN   : baseBien × 0.02 (precio simbólico — opción de compra).
+  const valorResidual =
+    producto === 'PURO'
+      ? (valorResidualEsComision
+          ? comisionApertura
+          : baseBien.times(valorResidualPct))
+      : baseBien.times(0.02);
 
   // ── PV del PMT / monto financiado (B19) — SIN IVA del bien ───────
   // B19 = B17 + comisiónFinanciada. El enganche YA está restado en B17.
@@ -191,6 +229,7 @@ export function calcularArrendamiento(params: LeaseParams): LeaseResult {
   const totalRentas     = rentaMensualIVA.times(plazo);
 
   // ── Desembolso inicial ────────────────────────────────────────────
+  // El seguro contado entra como anualidad (no como total prorrateado).
   const desembolsoInicial = enganche
     .plus(depositoGarantia)
     .plus(comisionContado)
@@ -217,7 +256,7 @@ export function calcularArrendamiento(params: LeaseParams): LeaseResult {
     enganche:         r2(enganche),
     depositoGarantia: r2(depositoGarantia),
     comisionApertura: r2(comisionApertura),
-    valorResidual:    r2(depositoGarantia), // en PURO residual = depósito; en FIN = 0 si pct=0
+    valorResidual:    r2(valorResidual), // §4.12: separado del depósito
     montoFinanciar:   r2(montoFinanciado),
     rentaMensual:     r2(rentaNeta),
     ivaRenta:         r2(ivaRenta),

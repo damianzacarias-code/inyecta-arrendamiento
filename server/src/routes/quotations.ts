@@ -35,11 +35,15 @@ const quotationSchema = z.object({
   comisionAperturaPct: z.number().min(0).max(1).default(0.05),
   comisionAperturaFinanciada: z.boolean().default(true),
   valorResidualPct: z.number().min(0).max(1).default(0.16),
+  /** §4.13: solo PURO — si true, residual = comisión apertura */
+  valorResidualEsComision: z.boolean().default(false),
   rentaInicial: z.number().default(0),
   gpsInstalacion: z.number().default(4200),
   gpsFinanciado: z.boolean().default(true),
   seguroAnual: z.number().default(0),
   seguroFinanciado: z.boolean().default(true),
+  /** §4.14: si true, el seguro está pendiente de cotizar */
+  seguroPendiente: z.boolean().default(false),
   generarOpciones: z.boolean().default(false),
   observaciones: z.string().optional(),
 });
@@ -65,11 +69,13 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       comisionAperturaPct: data.comisionAperturaPct,
       comisionAperturaFinanciada: data.comisionAperturaFinanciada,
       valorResidualPct: data.valorResidualPct,
+      valorResidualEsComision: data.valorResidualEsComision,
       rentaInicial: data.rentaInicial,
       gpsInstalacion: data.gpsInstalacion,
       gpsFinanciado: data.gpsFinanciado,
       seguroAnual: data.seguroAnual,
       seguroFinanciado: data.seguroFinanciado,
+      seguroPendiente: data.seguroPendiente,
     });
 
     // Generar opciones de riesgo si se solicitan
@@ -127,8 +133,10 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         gpsFinanciado: data.gpsFinanciado,
         seguroAnual: data.seguroAnual,
         seguroFinanciado: data.seguroFinanciado,
+        seguroPendiente: data.seguroPendiente,
         valorResidual: resultado.valorResidual,
         valorResidualPct: data.valorResidualPct,
+        valorResidualEsComision: data.valorResidualEsComision,
         montoFinanciar: resultado.montoFinanciar,
         rentaMensual: resultado.rentaMensual,
         rentaMensualIVA: resultado.rentaMensualIVA,
@@ -253,11 +261,13 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
       comisionAperturaPct: Number(quotation.comisionAperturaPct),
       comisionAperturaFinanciada: quotation.comisionAperturaFinanciada,
       valorResidualPct: Number(quotation.valorResidualPct),
+      valorResidualEsComision: quotation.valorResidualEsComision,
       rentaInicial: Number(quotation.rentaInicial),
       gpsInstalacion: Number(quotation.gpsInstalacion),
       gpsFinanciado: quotation.gpsFinanciado,
       seguroAnual: Number(quotation.seguroAnual),
       seguroFinanciado: quotation.seguroFinanciado,
+      seguroPendiente: quotation.seguroPendiente,
     }).amortizacion;
 
     return res.json({ ...quotation, amortizacion });
@@ -282,11 +292,13 @@ router.post('/simulate', requireAuth, async (req: Request, res: Response) => {
       comisionAperturaPct: data.comisionAperturaPct || 0.05,
       comisionAperturaFinanciada: data.comisionAperturaFinanciada ?? true,
       valorResidualPct: data.valorResidualPct || 0.16,
+      valorResidualEsComision: data.valorResidualEsComision ?? false,
       rentaInicial: data.rentaInicial || 0,
       gpsInstalacion: data.gpsInstalacion || 4200,
       gpsFinanciado: data.gpsFinanciado ?? true,
       seguroAnual: data.seguroAnual || 0,
       seguroFinanciado: data.seguroFinanciado ?? true,
+      seguroPendiente: data.seguroPendiente ?? false,
     });
 
     let opciones;

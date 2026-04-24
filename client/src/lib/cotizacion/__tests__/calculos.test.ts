@@ -30,10 +30,16 @@ const baseInputs = {
   tasaAnual: 0.36,
   tasaComisionApertura: 0.05,
   comisionAperturaEsContado: false,
-  porcentajeResidual: 0.16,
+  // CLAUDE.md §4.12: depósito y residual son conceptos separados.
+  // En el caso baseline se usan los mismos 16% para que el saldo final
+  // del PMT coincida con el residual (cliente "compensa" el depósito).
+  porcentajeDeposito: 0.16,
+  valorResidual: 0.16,
+  valorResidualEsComision: false,
   gpsMonto: 16_000,
   gpsEsContado: false,
-  seguroMonto: 0,
+  seguroAnual: 0,
+  seguroPendiente: false,
   seguroEsContado: true,
   engancheMonto: 0,
   engancheEsContado: true,
@@ -90,8 +96,12 @@ describe('calcularCotizacion PURO (caso §4)', () => {
     expect(cot.rentaMensual.iva).toBeCloseTo(11_695.68, 2);
   });
 
-  it('valor de rescate display = $353,170.76 (16% sobre montoTotalDisplay)', () => {
-    expect(cot.residual.monto).toBeCloseTo(353_170.76, 2);
+  it('valor de rescate display = $292,215.17 (E21 = baseBien × 16%, §4.5)', () => {
+    // CLAUDE.md §4.5 PURO: el rescate display es valorResidualResuelto
+    // (E21), NO un porcentaje sobre montoTotalDisplay (que era el bug
+    // de la versión anterior). Con valorResidual=16% y baseBien =
+    // $1,826,344.83, rescate = $292,215.17.
+    expect(cot.residual.monto).toBeCloseTo(292_215.17, 2);
   });
 
   it('etiqueta de residual = "Valor de rescate"', () => {
@@ -107,7 +117,12 @@ describe('calcularCotizacion FINANCIERO (caso §4)', () => {
   const cot = calcularCotizacion({
     ...baseInputs,
     producto: 'FINANCIERO',
-    porcentajeResidual: 0.02,
+    // FIN: depósito separado del residual; el residual lo fija el motor
+    // en 2% del baseBien (precio simbólico §4.5). El depósito puede
+    // ser cualquier monto que el cliente entregue al inicio (queda como
+    // saldo y se le reembolsa al final, NO entra al PMT).
+    porcentajeDeposito: 0,
+    valorResidual: 0,
   });
 
   it('monto financiado real = $1,917,662.07 (mismo que PURO)', () => {
@@ -127,8 +142,10 @@ describe('calcularCotizacion FINANCIERO (caso §4)', () => {
     expect(cot.rentaMensual.iva).toBeCloseTo(12_143.49, 2);
   });
 
-  it('opción de compra display = $44,146.34 (2% sobre montoTotalDisplay)', () => {
-    expect(cot.residual.monto).toBeCloseTo(44_146.34, 2);
+  it('opción de compra display = $36,526.90 (2% sobre baseBien, §4.5)', () => {
+    // CLAUDE.md §4.5 FIN: opción de compra = baseBien × 0.02 (precio
+    // simbólico). baseBien = $1,826,344.83 → opción = $36,526.90.
+    expect(cot.residual.monto).toBeCloseTo(36_526.90, 2);
   });
 
   it('etiqueta de residual = "Opcion de compra"', () => {
