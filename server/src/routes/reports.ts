@@ -505,7 +505,6 @@ router.get('/metricas', requireAuth, async (_req: Request, res: Response) => {
       const recaudado = c.pagos.reduce((s, p) => s + Number(p.montoTotal), 0);
       totalRecaudadoVigentes += recaudado;
 
-      const programado = c.amortizacion.reduce((s, a) => s + Number(a.pagoTotal), 0);
       const moratorios = c.pagos.reduce((s, p) => s + Number(p.montoMoratorio) + Number(p.montoIVAMoratorio), 0);
       totalMoratoriosCobrados += moratorios;
 

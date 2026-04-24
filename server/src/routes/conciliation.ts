@@ -22,7 +22,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
-import { parseCSV, ParsedTransaction } from '../services/csvParser';
+import { parseCSV } from '../services/csvParser';
 import { childLogger } from '../lib/logger';
 
 const log = childLogger('conciliation');

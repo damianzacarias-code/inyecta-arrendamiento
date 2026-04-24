@@ -417,7 +417,6 @@ router.post('/pay', requireAuth, async (req: Request, res: Response) => {
       if (principalPendiente <= 0.005) return { aPrincipal: 0, aIva: round2(aplica), used: round2(aplica) };
       // Split proporcional
       const aPrincipalRaw = aplica * (principalPendiente / totalBucket);
-      const aIvaRaw       = aplica - aPrincipalRaw; // garantiza suma exacta antes de redondeo
       const aPrincipal = round2(aPrincipalRaw);
       const aIva       = round2(aplica - aPrincipal); // residuo de redondeo cae en IVA
       return { aPrincipal, aIva, used: round2(aPrincipal + aIva) };
@@ -1012,7 +1011,7 @@ router.post('/pay-anticipado', requireAuth, async (_req: Request, res: Response)
 });
 
 // ─── POST /api/cobranza/seed-amortization ───────────────────
-router.post('/seed-amortization', requireAuth, async (req: Request, res: Response) => {
+router.post('/seed-amortization', requireAuth, async (_req: Request, res: Response) => {
   try {
     const contracts = await prisma.contract.findMany({
       where: { estatus: 'VIGENTE' },

@@ -39,7 +39,6 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     const limit = Math.min(parseInt(String(req.query.limit || '10')), 25);
 
     const results: SearchResult[] = [];
-    const qLower = q.toLowerCase();
 
     // ─── Clientes ───
     if (types.includes('clients')) {

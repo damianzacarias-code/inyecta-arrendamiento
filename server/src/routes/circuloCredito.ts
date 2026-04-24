@@ -17,12 +17,6 @@ const NOMBRE_OTORGANTE = config.circuloCredito.nombreOtorgante;
 
 // ─── Helpers ────────────────────────────────────────────────
 
-function fmtDate(d: Date | null | undefined): string {
-  if (!d) return '';
-  const dt = new Date(d);
-  return `${dt.getDate().toString().padStart(2, '0')}${(dt.getMonth() + 1).toString().padStart(2, '0')}${dt.getFullYear()}`;
-}
-
 function fmtDateYMD(d: Date | null | undefined): string {
   if (!d) return '';
   const dt = new Date(d);
@@ -86,7 +80,6 @@ router.get('/preview', requireAuth, async (req: Request, res: Response) => {
 
     for (const contract of contracts) {
       const client = contract.client;
-      const tasaAnual = Number(contract.tasaAnual);
 
       // Calcular estado de cada periodo
       const paymentsByPeriodo = new Map<number, typeof contract.pagos>();
@@ -128,7 +121,6 @@ router.get('/preview', requireAuth, async (req: Request, res: Response) => {
 
       // Calcular saldos
       const diasVencidos = calcDiasVencidos(schedule);
-      const ultimoPagado = schedule.filter(s => s.estatus === 'PAGADO').pop();
       const saldoInsoluto = schedule.length > 0
         ? Number(contract.amortizacion[contract.amortizacion.length - 1]?.saldoFinal || 0) > 0
           ? schedule.find(s => s.estatus !== 'PAGADO')?.saldoFinal || Number(contract.montoFinanciar)
@@ -162,7 +154,7 @@ router.get('/preview', requireAuth, async (req: Request, res: Response) => {
         diasVencidos,
         saldoInsoluto: Math.round(saldoInsoluto * 100) / 100,
         saldoVencido: Math.round(saldoVencido * 100) / 100,
-        saldoActual: Math.round((Number(contract.montoFinanciar) - schedule.filter(s => s.estatus === 'PAGADO').reduce((sum, s) => sum + (Number(contract.montoFinanciar) / contract.plazo), 0)) * 100) / 100,
+        saldoActual: Math.round((Number(contract.montoFinanciar) - schedule.filter(s => s.estatus === 'PAGADO').reduce((sum) => sum + (Number(contract.montoFinanciar) / contract.plazo), 0)) * 100) / 100,
         pagosVencidos,
         historicoPagos: calcHistoricoPagos(schedule),
         interesesPeriodo: Math.round(interesesPeriodo * 100) / 100,
