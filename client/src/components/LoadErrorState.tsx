@@ -56,6 +56,13 @@ export default function LoadErrorState({ error, onRetry, title }: Props) {
  * mostrar "[object Object]" o stacks crudos al usuario.
  */
 export function describeApiError(err: unknown): string {
+  // Guarda defensiva: si el caller nos pasa null/undefined o algo que no es
+  // objeto (string, number), devolvemos directo el mensaje genérico para no
+  // estallar al leer .response. La firma es `unknown` precisamente para
+  // tolerar cualquier cosa que llegue de un catch.
+  if (err === null || err === undefined || typeof err !== 'object') {
+    return 'Error desconocido al contactar el servidor.';
+  }
   const anyErr = err as {
     response?: { status?: number; data?: { error?: string | { message?: string } } };
     message?: string;
