@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
+import LoadErrorState, { describeApiError } from '@/components/LoadErrorState';
 import {
   FolderOpen, Plus, Search, Eye, ChevronLeft, ChevronRight,
   Building2, User, FileText, ClipboardCheck, Users,
@@ -71,12 +72,14 @@ export default function Contratos() {
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [etapaFilter, setEtapaFilter] = useState('');
   const [viewMode, setViewMode] = useState<'pipeline' | 'list'>('pipeline');
 
-  useEffect(() => {
+  const fetchContracts = useCallback(() => {
     setLoading(true);
+    setLoadError(null);
     const params = new URLSearchParams({ page: String(page), limit: '50' });
     if (etapaFilter) params.set('etapa', etapaFilter);
 
@@ -87,9 +90,13 @@ export default function Contratos() {
         setPages(res.data.pages);
         setPipeline(res.data.pipeline || []);
       })
-      .catch(() => {})
+      .catch((err) => setLoadError(describeApiError(err)))
       .finally(() => setLoading(false));
   }, [page, etapaFilter]);
+
+  useEffect(() => {
+    fetchContracts();
+  }, [fetchContracts]);
 
   const pipelineTotal = pipeline.reduce((s, p) => s + p.count, 0);
 
@@ -218,6 +225,12 @@ export default function Contratos() {
         <div className="flex items-center justify-center py-12">
           <div className="animate-spin rounded-full h-6 w-6 border-2 border-inyecta-600 border-t-transparent" />
         </div>
+      ) : loadError ? (
+        <LoadErrorState
+          title="No se pudieron cargar los contratos"
+          error={loadError}
+          onRetry={fetchContracts}
+        />
       ) : contracts.length === 0 && !etapaFilter ? (
         <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
           <FolderOpen className="mx-auto text-gray-300 mb-3" size={48} />

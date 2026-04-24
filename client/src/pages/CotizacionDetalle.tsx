@@ -1,7 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { PDFDownloadLink } from '@react-pdf/renderer';
 import api from '@/lib/api';
+import LoadErrorState, { describeApiError } from '@/components/LoadErrorState';
 import { formatCurrency, formatPercent, formatDate } from '@/lib/utils';
 import {
   ArrowLeft,
@@ -109,21 +110,22 @@ export default function CotizacionDetalle() {
   const navigate = useNavigate();
   const [quotation, setQuotation] = useState<QuotationDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState('');
 
-  const reload = () => {
+  const reload = useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
     api.get(`/quotations/${id}`)
       .then((res) => setQuotation(res.data))
-      .catch(() => {})
+      .catch((err) => setLoadError(describeApiError(err)))
       .finally(() => setLoading(false));
-  };
+  }, [id]);
 
   useEffect(() => {
-    setLoading(true);
     reload();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [reload]);
 
   const handleEstado = async (estado: 'APROBADA' | 'RECHAZADA') => {
     if (!quotation) return;
@@ -176,6 +178,16 @@ export default function CotizacionDetalle() {
       <div className="flex items-center justify-center py-20">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-inyecta-600 border-t-transparent" />
       </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <LoadErrorState
+        title="No se pudo cargar la cotización"
+        error={loadError}
+        onRetry={reload}
+      />
     );
   }
 

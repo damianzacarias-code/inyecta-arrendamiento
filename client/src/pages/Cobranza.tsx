@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import api from '@/lib/api';
+import LoadErrorState, { describeApiError } from '@/components/LoadErrorState';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import {
   CalendarDays, ChevronLeft, ChevronRight, CheckCircle2, Clock,
@@ -144,6 +145,7 @@ export default function Cobranza() {
   const [entries, setEntries] = useState<CalendarEntry[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -158,8 +160,9 @@ export default function Cobranza() {
   const [advanceModal, setAdvanceModal] = useState<CalendarEntry | null>(null);
   const [advancePeriodos, setAdvancePeriodos] = useState<number[]>([]);
 
-  const fetchCalendar = () => {
+  const fetchCalendar = useCallback(() => {
     setLoading(true);
+    setLoadError(null);
     const params = new URLSearchParams({ month: String(month), year: String(year) });
     if (statusFilter) params.set('status', statusFilter);
 
@@ -168,11 +171,11 @@ export default function Cobranza() {
         setEntries(res.data.data);
         setSummary(res.data.summary);
       })
-      .catch(() => {})
+      .catch((err) => setLoadError(describeApiError(err)))
       .finally(() => setLoading(false));
-  };
+  }, [month, year, statusFilter]);
 
-  useEffect(() => { fetchCalendar(); }, [month, year, statusFilter]);
+  useEffect(() => { fetchCalendar(); }, [fetchCalendar]);
 
   const prevMonth = () => {
     if (month === 1) { setMonth(12); setYear(year - 1); }
@@ -371,6 +374,12 @@ export default function Cobranza() {
         <div className="flex items-center justify-center py-12">
           <div className="animate-spin rounded-full h-6 w-6 border-2 border-inyecta-600 border-t-transparent" />
         </div>
+      ) : loadError ? (
+        <LoadErrorState
+          title="No se pudo cargar el calendario de cobranza"
+          error={loadError}
+          onRetry={fetchCalendar}
+        />
       ) : entries.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
           <CalendarDays className="mx-auto text-gray-300 mb-3" size={48} />

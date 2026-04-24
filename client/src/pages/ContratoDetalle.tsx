@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '@/lib/api';
+import LoadErrorState, { describeApiError } from '@/components/LoadErrorState';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
 import {
@@ -247,6 +248,7 @@ export default function ContratoDetalle() {
   const { user } = useAuth();
   const [contract, setContract] = useState<ContractDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState('pipeline');
   const [advancing, setAdvancing] = useState(false);
   const [advanceObs, setAdvanceObs] = useState('');
@@ -288,22 +290,32 @@ export default function ContratoDetalle() {
   } | null>(null);
   const [cnbvError, setCnbvError] = useState<string | null>(null);
 
-  const fetchContract = () => {
+  const fetchContract = useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
     api.get(`/contracts/${id}`)
       .then((res) => setContract(res.data))
-      .catch(() => {})
+      .catch((err) => setLoadError(describeApiError(err)))
       .finally(() => setLoading(false));
-  };
+  }, [id]);
 
   const fetchSchedule = () => {
     setLoadingSchedule(true);
     api.get(`/cobranza/contract/${id}`)
       .then((res) => setSchedule(res.data.schedule))
-      .catch(() => {})
+      .catch((err) => {
+        // No bloquea la página: el contrato ya cargó. Si falla la
+        // amortización, el usuario verá el spinner indefinido del tab —
+        // mientras tanto loggeamos para que aparezca en el devtools en
+        // lugar de silenciarlo por completo. El visor del tab queda
+        // listo para una mejora futura con su propio LoadErrorState
+        // local cuando se priorice.
+        console.warn('[ContratoDetalle] No se pudo cargar la amortización', err);
+      })
       .finally(() => setLoadingSchedule(false));
   };
 
-  useEffect(() => { fetchContract(); }, [id]);
+  useEffect(() => { fetchContract(); }, [fetchContract]);
   useEffect(() => {
     if (tab === 'amortizacion' && !schedule && !loadingSchedule) {
       fetchSchedule();
@@ -462,6 +474,14 @@ export default function ContratoDetalle() {
     <div className="flex items-center justify-center py-20">
       <div className="animate-spin rounded-full h-8 w-8 border-2 border-inyecta-600 border-t-transparent" />
     </div>
+  );
+
+  if (loadError) return (
+    <LoadErrorState
+      title="No se pudo cargar el contrato"
+      error={loadError}
+      onRetry={fetchContract}
+    />
   );
 
   if (!contract) return (

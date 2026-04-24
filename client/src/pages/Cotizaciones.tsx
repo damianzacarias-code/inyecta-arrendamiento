@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import api from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
+import LoadErrorState, { describeApiError } from '@/components/LoadErrorState';
 import { FileText, Eye, ChevronLeft, ChevronRight, FolderOpen } from 'lucide-react';
 
 interface Quotation {
@@ -45,10 +46,12 @@ export default function Cotizaciones() {
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [filterEstado, setFilterEstado] = useState<Estado>('');
 
-  useEffect(() => {
+  const fetchQuotations = useCallback(() => {
     setLoading(true);
+    setLoadError(null);
     const params = new URLSearchParams({ page: String(page), limit: '20' });
     if (filterEstado) params.set('estado', filterEstado);
     api.get(`/quotations?${params.toString()}`)
@@ -57,9 +60,13 @@ export default function Cotizaciones() {
         setTotal(res.data.total);
         setPages(res.data.pages);
       })
-      .catch(() => {})
+      .catch((err) => setLoadError(describeApiError(err)))
       .finally(() => setLoading(false));
   }, [page, filterEstado]);
+
+  useEffect(() => {
+    fetchQuotations();
+  }, [fetchQuotations]);
 
   return (
     <div>
@@ -108,6 +115,12 @@ export default function Cotizaciones() {
           <div className="flex items-center justify-center py-12">
             <div className="animate-spin rounded-full h-6 w-6 border-2 border-inyecta-600 border-t-transparent" />
           </div>
+        ) : loadError ? (
+          <LoadErrorState
+            title="No se pudo cargar la lista de cotizaciones"
+            error={loadError}
+            onRetry={fetchQuotations}
+          />
         ) : quotations.length === 0 ? (
           <div className="text-center py-12">
             <FileText className="mx-auto text-gray-300 mb-3" size={40} />
