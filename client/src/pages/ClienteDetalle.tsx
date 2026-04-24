@@ -47,10 +47,14 @@ interface ClientDetail {
   actividadEconomica?: string;
   representanteLegal?: string;
   createdAt: string;
-  documentos: Doc[];
-  cotizaciones: Array<{ id: string; folio: string; producto: string; valorBien: number; rentaMensualIVA: number; plazo: number; estado: string; createdAt: string }>;
-  contratos: Array<{ id: string; folio: string; producto: string; montoFinanciar: number; etapa: string; createdAt: string }>;
-  notas: Note[];
+  // NOTA: el server ya no regresa `documentos` en GET /clients/:id — el
+  // expediente vive ahora bajo ExpedienteActor/ExpedienteDocumento por
+  // contrato. Lo dejamos opcional para que el cliente no truene si un
+  // server viejo los regresa, pero el render nunca asume que existan.
+  documentos?: Doc[];
+  cotizaciones?: Array<{ id: string; folio: string; producto: string; valorBien: number; rentaMensualIVA: number; plazo: number; estado: string; createdAt: string }>;
+  contratos?: Array<{ id: string; folio: string; producto: string; montoFinanciar: number; etapa: string; createdAt: string }>;
+  notas?: Note[];
 }
 
 const tabs = [
@@ -77,15 +81,27 @@ export default function ClienteDetalle() {
   const { user } = useAuth();
   const [client, setClient] = useState<ClientDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState('docs');
   const [updatingDoc, setUpdatingDoc] = useState<string | null>(null);
   const [newNote, setNewNote] = useState('');
   const [sendingNote, setSendingNote] = useState(false);
 
   const fetchClient = () => {
+    setLoadError(null);
     api.get(`/clients/${id}`)
       .then((res) => setClient(res.data))
-      .catch(() => {})
+      .catch((err) => {
+        // Antes tragábamos el error en silencio y la UI quedaba en blanco.
+        // Mostramos mensaje legible para que el usuario sepa qué pasó.
+        const status = err?.response?.status;
+        const msg = err?.response?.data?.error || err?.message || 'Error desconocido';
+        setLoadError(
+          status === 404 ? 'Cliente no encontrado'
+          : status === 401 || status === 403 ? 'No tienes permisos para ver este cliente'
+          : `No se pudo cargar el cliente: ${msg}`
+        );
+      })
       .finally(() => setLoading(false));
   };
 
@@ -119,13 +135,20 @@ export default function ClienteDetalle() {
 
   if (!client) return (
     <div className="text-center py-20">
-      <p className="text-gray-500">Cliente no encontrado</p>
+      <p className="text-gray-500">{loadError ?? 'Cliente no encontrado'}</p>
       <Link to="/clientes" className="text-inyecta-600 hover:underline text-sm mt-2 inline-block">Volver</Link>
     </div>
   );
 
-  const totalReq = client.documentos.filter(d => d.requerido).length;
-  const recibidosReq = client.documentos.filter(d => d.requerido && d.estado === 'RECIBIDO').length;
+  // Defensivo: el server ya no regresa `documentos` en esta vista (ver nota
+  // en la interfaz). Antes, acceder a `client.documentos.filter` tiraba la
+  // pantalla en blanco al volver de `Guardar Cliente`.
+  const docs = client.documentos ?? [];
+  const cotizaciones = client.cotizaciones ?? [];
+  const contratos = client.contratos ?? [];
+  const notas = client.notas ?? [];
+  const totalReq = docs.filter(d => d.requerido).length;
+  const recibidosReq = docs.filter(d => d.requerido && d.estado === 'RECIBIDO').length;
   const pct = totalReq > 0 ? Math.round((recibidosReq / totalReq) * 100) : 0;
 
   return (
@@ -213,7 +236,18 @@ export default function ClienteDetalle() {
       {/* Tab content */}
       {tab === 'docs' && (
         <div className="space-y-2">
-          {client.documentos.map((doc) => {
+          {docs.length === 0 && (
+            <div className="text-center py-12 border border-dashed border-gray-200 rounded-xl">
+              <FileCheck size={28} className="mx-auto text-gray-300 mb-2" />
+              <p className="text-sm text-gray-500">
+                Este cliente todavía no tiene expediente de documentos.
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                El expediente se crea al asociar al cliente con un contrato.
+              </p>
+            </div>
+          )}
+          {docs.map((doc) => {
             const st = statusConfig[doc.estado];
             const Icon = st.icon;
             return (
@@ -310,12 +344,12 @@ export default function ClienteDetalle() {
       {tab === 'operaciones' && (
         <div className="space-y-6">
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h3 className="font-semibold text-gray-900 mb-4">Cotizaciones ({client.cotizaciones.length})</h3>
-            {client.cotizaciones.length === 0 ? (
+            <h3 className="font-semibold text-gray-900 mb-4">Cotizaciones ({cotizaciones.length})</h3>
+            {cotizaciones.length === 0 ? (
               <p className="text-sm text-gray-400">Sin cotizaciones</p>
             ) : (
               <div className="space-y-2">
-                {client.cotizaciones.map((q) => (
+                {cotizaciones.map((q) => (
                   <Link key={q.id} to={`/cotizaciones/${q.id}`}
                     className="flex items-center justify-between p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition-colors">
                     <div className="flex items-center gap-3">
@@ -333,12 +367,12 @@ export default function ClienteDetalle() {
             )}
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h3 className="font-semibold text-gray-900 mb-4">Contratos ({client.contratos.length})</h3>
-            {client.contratos.length === 0 ? (
+            <h3 className="font-semibold text-gray-900 mb-4">Contratos ({contratos.length})</h3>
+            {contratos.length === 0 ? (
               <p className="text-sm text-gray-400">Sin contratos</p>
             ) : (
               <div className="space-y-2">
-                {client.contratos.map((c) => (
+                {contratos.map((c) => (
                   <Link key={c.id} to={`/contratos/${c.id}`}
                     className="flex items-center justify-between p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition-colors">
                     <div className="flex items-center gap-3">
@@ -388,10 +422,10 @@ export default function ClienteDetalle() {
           </div>
 
           {/* Notes list */}
-          {client.notas.length === 0 ? (
+          {notas.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-8">Sin notas en la bitacora</p>
           ) : (
-            client.notas.map((note) => (
+            notas.map((note) => (
               <div key={note.id} className="bg-white rounded-xl border border-gray-200 p-4">
                 <div className="flex items-start gap-3">
                   <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 text-xs font-medium flex-shrink-0">
