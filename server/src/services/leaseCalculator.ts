@@ -109,6 +109,28 @@ function calcPMT(
 // Motor principal
 // ═══════════════════════════════════════════════════════════════════
 
+/**
+ * Calcula la cotización completa de arrendamiento (PURO o FINANCIERO)
+ * en el servidor — espejo de `client/src/lib/cotizacion/calculos.ts`.
+ *
+ * Verificado al centavo contra el Excel de Inyecta (CLAUDE.md §4).
+ * Este motor lo consume `routes/quotations.ts` para POST /simulate y
+ * para persistir la cotización al guardar; el cliente lo replica para
+ * preview en vivo en el Cotizador (sin round-trip).
+ *
+ * NOTA importante sobre `valorBien`: aquí entra SIN IVA (valorSinIVA).
+ * En el cliente entra CON IVA y la división `/1.16` la hace el motor.
+ * Mantener consistencia con `routes/quotations.ts` antes de cambiar.
+ *
+ * Diferencias clave PURO vs FINANCIERO (CLAUDE.md regla 4-5):
+ *   - PURO       → FV PMT = depósito (16%), no amortiza el bien.
+ *   - FINANCIERO → FV PMT = 0, amortiza todo el capital, opción de
+ *                  compra simbólica (2%) solo display.
+ *
+ * @param params  parámetros del bien, financiamiento, GPS y seguro.
+ * @returns       resumen de cifras + tabla de amortización completa
+ *                + 6 escenarios (3 riesgos × 2 productos) cuando aplique.
+ */
 export function calcularArrendamiento(params: LeaseParams): LeaseResult {
   const {
     producto, valorBien, plazo, tasaAnual,
@@ -263,6 +285,27 @@ function generarAmortizacion(a: AmortArgs): AmortizationRow[] {
 
 const TASA_MORATORIA_DIARIA = 0.002;
 
+/**
+ * Cálculo de intereses moratorios para una renta vencida.
+ *
+ * Fórmula (CLAUDE.md §4.9):
+ *   moratorio    = rentaVencida × 0.2% × diasAtraso   (lineal en días)
+ *   ivaMoratorio = moratorio × 16%
+ *   total        = moratorio + ivaMoratorio
+ *
+ * La tasa moratoria es FIJA (72% anual = 0.2% diario base 360) por
+ * regulación interna de Inyecta — el parámetro `_tasaAnualOrdinaria`
+ * existe por compatibilidad histórica con la API original pero se
+ * ignora; la fuente de verdad es `TASA_MORATORIA_DIARIA`.
+ *
+ * Para cobranza real (saldo insoluto + prelación legal moratorio →
+ * IVA mor → interés → IVA → capital), ver `routes/cobranza.ts`.
+ *
+ * @param rentaVencida          monto neto sin IVA de la renta atrasada.
+ * @param diasAtraso            días desde el vencimiento (entero ≥ 0).
+ * @param _tasaAnualOrdinaria   IGNORADO. Mantener por API estable.
+ * @returns                     {moratorio, ivaMoratorio, total} en MXN.
+ */
 export function calcularMoratorios(
   rentaVencida: number,
   diasAtraso: number,
@@ -282,6 +325,22 @@ export function calcularMoratorios(
 // Opciones de riesgo (3 niveles × 2 productos = 6 escenarios)
 // ═══════════════════════════════════════════════════════════════════
 
+/**
+ * Genera 6 escenarios (3 niveles de riesgo × 2 productos) para que el
+ * ejecutivo le presente al cliente alternativas comparables.
+ *
+ * Niveles:
+ *   - A (riesgo bajo)  → depósito 16% / enganche FIN 0%
+ *   - B (riesgo medio) → depósito 21% PURO / 16% FIN; enganche FIN 5%
+ *   - C (riesgo alto)  → depósito 26% PURO / 16% FIN; enganche FIN 10%
+ *
+ * @param valorBien    valor SIN IVA del bien.
+ * @param plazo        meses (12..48).
+ * @param tasaAnual    decimal (ej: 0.36 = 36%).
+ * @param gps          monto GPS — siempre financiado en estos escenarios.
+ * @param comisionPct  comisión apertura — siempre financiada.
+ * @returns            array de 6 cotizaciones con `{producto, nivel, ...resultado}`.
+ */
 export function generarOpcionesRiesgo(
   valorBien: number,
   plazo: number,

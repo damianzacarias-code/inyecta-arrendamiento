@@ -171,6 +171,39 @@ export interface ResultadoCotizacion {
 // Motor principal
 // ═══════════════════════════════════════════════════════════════════
 
+/**
+ * Calcula una cotización completa de arrendamiento (PURO o FINANCIERO).
+ *
+ * Es la fuente de verdad de los números que se muestran al cliente y
+ * se imprimen en el PDF (CotizacionPDF). Pasa cada operación por
+ * Decimal.js (precision 20, ROUND_HALF_UP) para reproducir los
+ * valores del Excel de Inyecta al centavo (CLAUDE.md §4 — verificado
+ * contra `Cotización Inyecta Arrendamiento.xlsx` el 18-04-2026).
+ *
+ * Orden estricto de cálculo (no alterar):
+ *
+ *   1. valorSinIVA       = valorConIVA / (1 + IVA)
+ *   2. baseBien          = valorSinIVA + gpsFinanciado
+ *   3. comisiónApertura  = baseBien × tasaComisión
+ *   4. depósitoGarantía  = baseBien × porcentajeResidual
+ *   5. montoFinanciadoReal = baseBien + comisiónFinanciada
+ *      (esto es el PV que entra al PMT; el IVA del bien NUNCA se
+ *      financia, ni en PURO ni en FINANCIERO).
+ *   6. PMT con FV = depósito (PURO) o 0 (FINANCIERO).
+ *   7. Sección "Monto a financiar" = display con IVA del bien
+ *      (NO entra al PMT — solo se muestra al cliente).
+ *   8. Residual display = montoTotalDisplay × {16% PURO | 2% FIN}.
+ *
+ * Diferencias clave por producto (regla 5/8):
+ *   - PURO       → FV PMT = depósito; sección 4 = "Valor de rescate" 16%.
+ *   - FINANCIERO → FV PMT = 0;        sección 4 = "Opcion de compra" 2%.
+ *
+ * @param inp  parámetros del bien, financiamiento, GPS, seguro y cliente.
+ * @returns    objeto con todas las secciones del PDF + campos técnicos
+ *             (`montoFinanciadoReal`, `fvAmortizacion`) que `calcAmort*`
+ *             requieren para reproducir la tabla de amortización
+ *             coherente con la renta mostrada.
+ */
 export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
   const IVA = new Decimal(inp.tasaIVA);
 

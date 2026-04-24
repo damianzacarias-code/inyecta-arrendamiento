@@ -45,6 +45,23 @@ export interface FilaAmortFinanciero {
 // Arrendamiento PURO — tabla simple (sin capital / sin saldo)
 // ═══════════════════════════════════════════════════════════════════
 
+/**
+ * Genera la tabla de amortización para Arrendamiento PURO.
+ *
+ * En PURO la renta es CONSTANTE durante todo el plazo (no hay
+ * desglose capital/interés ni saldo amortizable — el bien NO se
+ * transfiere al cliente, solo se renta). El IVA se calcula sobre la
+ * renta completa (CLAUDE.md regla 8).
+ *
+ * @param rentaNeta        renta mensual sin IVA (tomada del PMT con
+ *                          FV = depósito en garantía).
+ * @param plazo            número de períodos mensuales (12..48).
+ * @param fechaPrimerPago  fecha del 1° pago; los siguientes se
+ *                          generan con `addMeses` (evita el bug de
+ *                          fin-de-mes de Date.setMonth).
+ * @param tasaIVA          tasa de IVA decimal, default 0.16 (16%).
+ * @returns                array de filas con renta/IVA/total constantes.
+ */
 export function calcAmortPuro(
   rentaNeta: number,
   plazo: number,
@@ -74,14 +91,37 @@ export function calcAmortPuro(
 // ═══════════════════════════════════════════════════════════════════
 
 /**
- * Para FINANCIERO:
- *   montoFinanciadoReal = resultado.montoFinanciadoReal (SIN IVA del bien)
- *   fvAmortizacion      = 0   (amortiza todo el capital)
+ * Genera la tabla de amortización para Arrendamiento FINANCIERO
+ * (o cualquier producto con desglose capital/interés/saldo).
  *
- * La función también acepta parámetros de PURO desglosados, pero el
- * Cotizador actual usa `calcAmortPuro` para la tabla visual de Puro.
- * Esta función se mantiene genérica por si algún reporte interno
- * quisiera desglose capital/interés para Puro también.
+ * Reglas críticas verificadas contra el Excel de Inyecta:
+ *
+ *   - PMT constante = (P·r·(1+r)^n − FV·r) / ((1+r)^n − 1)
+ *   - Última fila: capital = (saldo − FV) EXACTO. No se usa
+ *     `PMT − interés` para que el saldo final cierre exacto en FV
+ *     sin residuo de redondeo (CLAUDE.md regla 6).
+ *   - IVA = renta × 16% en TODAS las filas, no `interés × 16%`
+ *     (CLAUDE.md regla 8 + §4.6/§4.8). Aunque el Art 18-A LIVA
+ *     permite gravar solo el interés, la práctica operativa de
+ *     Inyecta —fuente de verdad del Excel— grava la renta total.
+ *
+ * Uso típico:
+ *
+ *   FINANCIERO → fvAmortizacion = 0
+ *                montoFinanciadoReal = baseBien + comisiónFinanciada
+ *
+ *   PURO       → ver `calcAmortPuro` (no usa esta función). Aunque
+ *                acepta parámetros desglosados también para Puro, el
+ *                Cotizador no la usa así; queda genérica por si algún
+ *                reporte interno requiere desglose capital/interés.
+ *
+ * @param montoFinanciadoReal  PV (sin IVA del bien).
+ * @param tasaAnual            tasa anual decimal (ej: 0.36 = 36%).
+ * @param plazo                número de períodos mensuales (12..48).
+ * @param fvAmortizacion       FV objetivo al final del plazo.
+ * @param fechaPrimerPago      fecha del 1° pago (resto vía `addMeses`).
+ * @param tasaIVA              tasa de IVA decimal, default 0.16.
+ * @returns                    tabla con saldo final == fvAmortizacion exacto.
  */
 export function calcAmortFinanciero(
   montoFinanciadoReal: number,
