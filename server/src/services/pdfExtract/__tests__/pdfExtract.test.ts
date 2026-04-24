@@ -56,6 +56,34 @@ describe('MockProvider', () => {
     const res = await provider.extract(Buffer.from(''), 'application/pdf', 'INE');
     expect(res.confidence).toBeGreaterThanOrEqual(0.5);
   });
+
+  it('SOLICITUD mock trae al menos solicitantePFAE + bien + operacion', async () => {
+    const res = await provider.extract(Buffer.from(''), 'application/pdf', 'SOLICITUD');
+    expect(res.ok).toBe(true);
+    // Las 3 secciones mínimas para armar un contrato + cliente.
+    expect(res.data.tipoSolicitante).toBeTruthy();
+    expect(res.data.operacion).toBeTruthy();
+    expect(res.data.bien).toBeTruthy();
+    expect(res.data.solicitantePFAE).toBeTruthy();
+    // PM y representante legal deben ser null cuando es PFAE.
+    expect(res.data.solicitantePM).toBeNull();
+    expect(res.data.representanteLegal).toBeNull();
+    // Arrays vienen como arreglos (no null) cuando hay datos.
+    expect(Array.isArray(res.data.referenciasBancarias)).toBe(true);
+    expect(Array.isArray(res.data.obligadosSolidarios)).toBe(true);
+  });
+
+  it('SOLICITUD mock tiene montos numéricos y booleanos normalizados', async () => {
+    const res = await provider.extract(Buffer.from(''), 'application/pdf', 'SOLICITUD');
+    const pfae = res.data.solicitantePFAE as Record<string, unknown>;
+    expect(typeof pfae.ingresoMensual).toBe('number');
+    const bien = res.data.bien as Record<string, unknown>;
+    expect(typeof bien.valorConIVA).toBe('number');
+    expect(typeof bien.anio).toBe('number');
+    expect(typeof bien.nuevo).toBe('boolean');
+    const perfil = res.data.perfilTransaccional as Record<string, unknown>;
+    expect(typeof perfil.operaComercioExterior).toBe('boolean');
+  });
 });
 
 describe('computeConfidence', () => {

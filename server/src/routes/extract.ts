@@ -7,7 +7,7 @@
  * Request:
  *   multipart/form-data:
  *     archivo: File   (PDF, JPG, PNG, WEBP — max 10MB)
- *     tipo:    string ('CSF' | 'INE' | 'COMPROBANTE_DOMICILIO' | 'FACTURA_BIEN' | 'ACTA_CONSTITUTIVA')
+ *     tipo:    string ('CSF' | 'INE' | 'COMPROBANTE_DOMICILIO' | 'FACTURA_BIEN' | 'ACTA_CONSTITUTIVA' | 'SOLICITUD')
  *
  * Response 200:
  *   {

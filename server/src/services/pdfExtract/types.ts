@@ -13,6 +13,7 @@ export const TIPOS_EXTRACT = [
   'COMPROBANTE_DOMICILIO',   // CFE / Telmex / Agua / Predial
   'FACTURA_BIEN',            // Factura del proveedor del bien arrendado
   'ACTA_CONSTITUTIVA',       // Acta constitutiva (PM)
+  'SOLICITUD',               // Solicitud de arrendamiento (PFAE o PM) — formulario completo
 ] as const;
 
 export type TipoExtract = (typeof TIPOS_EXTRACT)[number];

@@ -106,6 +106,138 @@ Devuelve EXCLUSIVAMENTE un objeto JSON con esta forma exacta. Usa null cuando un
 }
 
 NO agregues comentarios ni markdown.`,
+  SOLICITUD: `Eres un extractor de datos de una SOLICITUD DE ARRENDAMIENTO mexicana (PFAE o Persona Moral) para Inyecta SOFOM.
+El documento contiene TODO el expediente de alta en un solo formulario, cruzando datos del cliente, representante legal, cónyuge, perfil transaccional, PEP, referencias y obligados solidarios.
+
+REGLAS DE EXTRACCIÓN:
+1. Devuelve EXCLUSIVAMENTE un objeto JSON con la forma documentada abajo. NO incluyas texto, comentarios, ni markdown.
+2. Usa null cuando un campo no aparezca o no sea legible. NO inventes datos.
+3. Para booleanos: si hay checkbox/casilla marcada → true; si está en blanco → false; si no aparece → null.
+4. Los montos son números (sin $ ni comas). Los porcentajes son números (0.05 para 5%).
+5. Fechas en formato YYYY-MM-DD siempre. Si solo aparece "marzo 2024" → "2024-03-01".
+6. RFC siempre en mayúsculas, sin espacios. CURP siempre 18 caracteres en mayúsculas.
+7. Si el solicitante es PM (Persona Moral): llena "solicitantePM", deja "solicitantePFAE" en null, llena también "representanteLegal".
+8. Si el solicitante es PFAE (Persona Física con Actividad Empresarial): llena "solicitantePFAE", deja "solicitantePM" y "representanteLegal" en null. Llena "conyuge" solo si está casado bajo sociedad conyugal y aparece la info; en todos los demás casos → null.
+9. Los arrays (referenciasBancarias, referenciasComerciales, obligadosSolidarios): incluye SOLO los elementos que aparecen en la solicitud. Si no hay ninguno, devuelve [] (array vacío) o null. No rellenes con null.
+10. En obligadosSolidarios[].tipo: PFAE si es PF con actividad empresarial, PF si es persona física sin actividad empresarial (asalariado), PM si es persona moral.
+
+FORMA EXACTA DEL JSON:
+{
+  "tipoSolicitante": "PFAE | PM | null",
+  "operacion": {
+    "tipoArrendamiento": "PURO | FINANCIERO | null",
+    "plazoMeses": "number|null",
+    "moneda": "string|null (MXN / USD)",
+    "destino": "string|null (uso del bien)"
+  } | null,
+  "bien": {
+    "descripcion": "string|null",
+    "marca": "string|null",
+    "modelo": "string|null",
+    "anio": "number|null",
+    "numSerie": "string|null",
+    "color": "string|null",
+    "valorConIVA": "number|null",
+    "nuevo": "boolean|null",
+    "proveedor": "string|null",
+    "rfcProveedor": "string|null"
+  } | null,
+  "solicitantePFAE": {
+    "nombre": "string|null",
+    "apellidoPaterno": "string|null",
+    "apellidoMaterno": "string|null",
+    "rfc": "string|null",
+    "curp": "string|null",
+    "fechaNacimiento": "string|null (YYYY-MM-DD)",
+    "lugarNacimiento": "string|null",
+    "nacionalidad": "string|null",
+    "sexo": "H | M | null",
+    "estadoCivil": "string|null",
+    "regimenMatrimonial": "string|null",
+    "email": "string|null",
+    "telefono": "string|null",
+    "celular": "string|null",
+    "actividad": "string|null",
+    "giro": "string|null",
+    "antiguedadNegocio": "string|null",
+    "ingresoMensual": "number|null",
+    "calle": "string|null", "numExterior": "string|null", "numInterior": "string|null",
+    "colonia": "string|null", "municipio": "string|null", "ciudad": "string|null",
+    "estado": "string|null", "codigoPostal": "string|null", "pais": "string|null",
+    "tipoInmueble": "string|null", "antiguedadDomicilio": "string|null"
+  } | null,
+  "solicitantePM": {
+    "razonSocial": "string|null",
+    "rfc": "string|null",
+    "fechaConstitucion": "string|null (YYYY-MM-DD)",
+    "giro": "string|null",
+    "actividad": "string|null",
+    "sector": "string|null",
+    "numeroEscritura": "string|null",
+    "numeroNotaria": "string|null",
+    "notario": "string|null",
+    "ciudadNotaria": "string|null",
+    "capitalSocial": "number|null",
+    "email": "string|null",
+    "telefono": "string|null",
+    "ingresosAnuales": "number|null",
+    "numEmpleados": "number|null",
+    "calle": "string|null", "numExterior": "string|null", "numInterior": "string|null",
+    "colonia": "string|null", "municipio": "string|null", "ciudad": "string|null",
+    "estado": "string|null", "codigoPostal": "string|null", "pais": "string|null",
+    "tipoInmueble": "string|null", "antiguedadDomicilio": "string|null"
+  } | null,
+  "representanteLegal": {
+    "nombre": "string|null", "apellidoPaterno": "string|null", "apellidoMaterno": "string|null",
+    "rfc": "string|null", "curp": "string|null", "cargo": "string|null",
+    "email": "string|null", "telefono": "string|null",
+    "numeroEscrituraPoder": "string|null", "fechaEscrituraPoder": "string|null",
+    "numeroNotariaPoder": "string|null", "notarioPoder": "string|null"
+  } | null,
+  "conyuge": {
+    "nombre": "string|null", "apellidoPaterno": "string|null", "apellidoMaterno": "string|null",
+    "rfc": "string|null", "curp": "string|null", "ocupacion": "string|null", "telefono": "string|null"
+  } | null,
+  "perfilTransaccional": {
+    "montoMensualOperaciones": "number|null",
+    "numeroOperacionesMensuales": "number|null",
+    "origenRecursos": "string|null",
+    "destinoRecursos": "string|null",
+    "operaComercioExterior": "boolean|null",
+    "paisesComercioExterior": "string|null",
+    "realizaDivisas": "boolean|null",
+    "realizaTransferenciasInternacionales": "boolean|null"
+  } | null,
+  "pep": {
+    "esPEP": "boolean|null",
+    "cargoPEP": "string|null",
+    "periodoPEP": "string|null",
+    "familiarPEP": "boolean|null",
+    "nombreFamiliarPEP": "string|null",
+    "parentescoPEP": "string|null",
+    "cargoFamiliarPEP": "string|null"
+  } | null,
+  "referenciasBancarias": [
+    { "banco": "string|null", "tipoCuenta": "string|null", "numeroCuenta": "string|null", "antiguedad": "string|null" }
+  ] | null,
+  "referenciasComerciales": [
+    { "nombre": "string|null", "giro": "string|null", "telefono": "string|null", "email": "string|null", "antiguedad": "string|null", "lineaCredito": "number|null" }
+  ] | null,
+  "obligadosSolidarios": [
+    {
+      "tipo": "PFAE | PM | PF | null",
+      "nombre": "string|null", "apellidoPaterno": "string|null", "apellidoMaterno": "string|null",
+      "razonSocial": "string|null",
+      "rfc": "string|null", "curp": "string|null",
+      "fechaNacimiento": "string|null",
+      "email": "string|null", "telefono": "string|null",
+      "relacion": "string|null",
+      "ingresoMensual": "number|null", "ocupacion": "string|null"
+    }
+  ] | null
+}
+
+NO agregues comentarios ni markdown. Empieza DIRECTAMENTE con { y termina con }.`,
 };
 
 /** Intenta extraer un objeto JSON del texto. Acepta JSON puro o JSON envuelto en markdown/texto. */
@@ -196,9 +328,14 @@ export class ClaudeProvider implements IExtractProvider {
         const reinforced = intentos === 1 ? prompt :
           prompt + '\n\nIMPORTANTE: tu respuesta anterior no fue JSON válido. Devuelve SOLO el objeto JSON, sin texto previo, sin markdown, sin comentarios.';
 
+        // SOLICITUD tiene ~13 secciones anidadas + 3 arrays de longitud
+        // variable — el JSON puede pasar de 1K tokens fácilmente. Los demás
+        // tipos son planos con ≤12 campos y con 1024 sobra.
+        const maxTokens = tipo === 'SOLICITUD' ? 4096 : 1024;
+
         const resp = await this.client.messages.create({
           model: this.model,
-          max_tokens: 1024,
+          max_tokens: maxTokens,
           messages: [
             {
               role: 'user',
