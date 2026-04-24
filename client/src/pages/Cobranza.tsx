@@ -13,6 +13,14 @@ import {
 import { pdf } from '@react-pdf/renderer';
 import { ReciboPDF, type ReciboData } from '@/lib/pdf/ReciboPDF';
 
+/** Forma mínima de un error de axios cuando el server responde con
+ *  `{error: string}`. Permite tipar `catch (err)` sin recurrir a `any`. */
+type ApiErrorShape = { response?: { data?: { error?: string } }; message?: string };
+function apiErrorMessage(err: unknown, fallback: string): string {
+  const e = err as ApiErrorShape;
+  return e?.response?.data?.error ?? e?.message ?? fallback;
+}
+
 // Genera el recibo de pago via @react-pdf/renderer y dispara la descarga.
 // El click hace fetch del payload del recibo (folio + montos + cliente)
 // y lo renderiza al vuelo a Blob para no requerir un PDFDownloadLink
@@ -213,8 +221,8 @@ export default function Cobranza() {
       });
       setPayModal(null);
       fetchCalendar();
-    } catch (err: any) {
-      alert(err.response?.data?.error || 'Error al registrar pago');
+    } catch (err) {
+      alert(apiErrorMessage(err, 'Error al registrar pago'));
     }
     setProcessing(false);
   };
@@ -244,8 +252,8 @@ export default function Cobranza() {
       setAdvancePeriodos([]);
       setPayRef('');
       fetchCalendar();
-    } catch (err: any) {
-      alert(err.response?.data?.error || 'Error al registrar pagos adelantados');
+    } catch (err) {
+      alert(apiErrorMessage(err, 'Error al registrar pagos adelantados'));
     }
     setProcessing(false);
   };
@@ -587,12 +595,23 @@ export default function Cobranza() {
                                     try {
                                       const res = await api.post('/invoices/facturar', { paymentId: p.id });
                                       alert(`Factura timbrada\n\nFolio: ${res.data.invoice.serie}-${res.data.invoice.folio}\nUUID: ${res.data.uuid}\nProvider: ${res.data.provider}`);
-                                    } catch (err: any) {
-                                      const data = err?.response?.data;
+                                    } catch (err) {
+                                      // Ramo especial: si el server devuelve `{factura: {...}}`
+                                      // significa que el pago ya estaba facturado y nos echó
+                                      // el detalle del CFDI existente. Lo mostramos en lugar
+                                      // de un genérico "ya facturado".
+                                      type FacturarErr = {
+                                        response?: { data?: {
+                                          factura?: { folio: string; uuid: string };
+                                          error?: string;
+                                        } };
+                                        message?: string;
+                                      };
+                                      const data = (err as FacturarErr)?.response?.data;
                                       if (data?.factura) {
                                         alert(`Este pago ya fue facturado\n\nFolio: ${data.factura.folio}\nUUID: ${data.factura.uuid}`);
                                       } else {
-                                        alert('Error al timbrar: ' + (data?.error || err.message));
+                                        alert('Error al timbrar: ' + (data?.error || (err as FacturarErr).message || 'desconocido'));
                                       }
                                     }
                                   }}

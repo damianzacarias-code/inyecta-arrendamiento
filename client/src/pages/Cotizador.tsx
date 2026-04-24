@@ -16,6 +16,21 @@ import {
 import { CotizacionPDF } from '@/lib/pdf/CotizacionPDF';
 import { AmortizacionPDF } from '@/lib/pdf/AmortizacionPDF';
 
+/** Forma del payload de error del backend cuando la validación Zod
+ *  falla: `{error: [{message: string, ...}, ...]}`. Cuando NO hay
+ *  detalles de Zod, usa el campo `error` plano o `message` del axios. */
+type ZodApiErr = {
+  response?: { data?: { error?: Array<{ message?: string }> | string } };
+  message?: string;
+};
+function zodOrApiErrorMessage(err: unknown, fallback: string): string {
+  const e = err as ZodApiErr;
+  const errArr = e?.response?.data?.error;
+  if (Array.isArray(errArr) && errArr[0]?.message) return errArr[0].message;
+  if (typeof errArr === 'string') return errArr;
+  return e?.message ?? fallback;
+}
+
 interface PagoExtra {
   id: string;
   periodo: number;
@@ -154,8 +169,8 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
         generarOpciones: form.generarOpciones,
       });
       setResult(res.data);
-    } catch (err: any) {
-      setError(err.response?.data?.error?.[0]?.message || 'Error al simular');
+    } catch (err) {
+      setError(zodOrApiErrorMessage(err, 'Error al simular'));
     } finally {
       setLoading(false);
     }
@@ -171,8 +186,8 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
     try {
       const res = await api.post('/quotations', form);
       navigate(`/cotizaciones/${res.data.id}`);
-    } catch (err: any) {
-      setError(err.response?.data?.error?.[0]?.message || 'Error al guardar');
+    } catch (err) {
+      setError(zodOrApiErrorMessage(err, 'Error al guardar'));
     } finally {
       setSaving(false);
     }
@@ -184,7 +199,11 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
     setError('');
   };
 
-  const updateField = (field: string, value: any) => {
+  // El form mezcla strings, numbers y booleans; tipamos como K/Value pares
+  // para que TS deje pasar updateField('plazo', 48) y updateField(
+  // 'nombreCliente', 'Juan') sin requerir overloads explícitos.
+  type FormState = typeof form;
+  const updateField = <K extends keyof FormState>(field: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -515,7 +534,7 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
               <div>
                 <label className="block text-sm font-medium text-gray-600 mb-1">Producto</label>
                 <div className="flex gap-2">
-                  {['PURO', 'FINANCIERO'].map((p) => (
+                  {(['PURO', 'FINANCIERO'] as const).map((p) => (
                     <button
                       key={p}
                       onClick={() => updateField('producto', p)}

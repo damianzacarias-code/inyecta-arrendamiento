@@ -6,7 +6,16 @@ import {
   Shield, ShieldCheck, ShieldAlert, ShieldX, AlertTriangle,
   Plus, Search, RefreshCw, Building2, User, X, Edit2,
   CalendarClock, FileText, Trash2, Bell, Sparkles,
+  type LucideIcon,
 } from 'lucide-react';
+
+/** Forma mínima de un error de axios cuando el server responde con
+ *  `{error: string}`. Permite tipar `catch (e)` sin recurrir a `any`. */
+type ApiErrorShape = { response?: { data?: { error?: string } }; message?: string };
+function apiErrorMessage(err: unknown, fallback: string): string {
+  const e = err as ApiErrorShape;
+  return e?.response?.data?.error ?? e?.message ?? fallback;
+}
 
 interface Policy {
   id: string;
@@ -52,7 +61,7 @@ interface Summary {
   primaAnualTotal: number;
 }
 
-const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; border: string; icon: any }> = {
+const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; border: string; icon: LucideIcon }> = {
   VIGENTE:   { label: 'Vigente',    bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', icon: ShieldCheck },
   POR_VENCER:{ label: 'Por vencer', bg: 'bg-amber-50',   text: 'text-amber-700',   border: 'border-amber-200',   icon: ShieldAlert },
   VENCIDA:   { label: 'Vencida',    bg: 'bg-red-50',     text: 'text-red-700',     border: 'border-red-200',     icon: ShieldX },
@@ -74,7 +83,20 @@ export default function Seguros() {
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState<{ mode: 'create' | 'edit' | 'renew'; policy?: Policy; preselectContractId?: string } | null>(null);
   const [activeContracts, setActiveContracts] = useState<Array<{ id: string; folio: string; bienDescripcion: string }>>([]);
-  const [alerts, setAlerts] = useState<{ total: number; criticas: number; altas: number; alerts: any[] } | null>(null);
+  const [alerts, setAlerts] = useState<{
+    total: number;
+    criticas: number;
+    altas: number;
+    alerts: Array<{
+      level: 'CRITICA' | 'ALTA' | 'MEDIA';
+      kind: 'POLIZA_VENCIMIENTO' | 'SIN_POLIZA' | string;
+      contractFolio: string;
+      cliente: string;
+      mensaje: string;
+      policyId?: string;
+      contractId?: string;
+    }>;
+  } | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -101,10 +123,11 @@ export default function Seguros() {
   useEffect(() => {
     api.get('/contracts?limit=200')
       .then(r => {
+        type ContractRow = { id: string; folio: string; bienDescripcion: string; estatus: string };
         setActiveContracts(
-          (r.data.data || [])
-            .filter((c: any) => ['VIGENTE', 'VENCIDO', 'EN_PROCESO'].includes(c.estatus))
-            .map((c: any) => ({ id: c.id, folio: c.folio, bienDescripcion: c.bienDescripcion }))
+          ((r.data.data || []) as ContractRow[])
+            .filter(c => ['VIGENTE', 'VENCIDO', 'EN_PROCESO'].includes(c.estatus))
+            .map(c => ({ id: c.id, folio: c.folio, bienDescripcion: c.bienDescripcion }))
         );
       })
       .catch((err) => {
@@ -424,7 +447,7 @@ export default function Seguros() {
 
 // ─── Stat card ───────────────────────────────────────────────
 function StatCard({ icon: Icon, iconColor, label, value, sub, active, alert, onClick }: {
-  icon: any; iconColor: string; label: string; value: string; sub: string;
+  icon: LucideIcon; iconColor: string; label: string; value: string; sub: string;
   active?: boolean; alert?: boolean; onClick?: () => void;
 }) {
   return (
@@ -497,8 +520,8 @@ function PolicyModal({ mode, policy, preselectContractId, contracts, onClose, on
         await api.post('/insurance', payload);
       }
       onSaved();
-    } catch (e: any) {
-      setError(e?.response?.data?.error || 'Error al guardar');
+    } catch (e) {
+      setError(apiErrorMessage(e, 'Error al guardar'));
     }
     setSaving(false);
   };
@@ -550,8 +573,8 @@ function PolicyModal({ mode, policy, preselectContractId, contracts, onClose, on
                         primaAnual: String(d.primaSugerida),
                         montoAsegurado: String(d.montoAsegurado || f.montoAsegurado),
                       }));
-                    } catch (e: any) {
-                      alert('Error: ' + (e?.response?.data?.error || e.message));
+                    } catch (e) {
+                      alert('Error: ' + apiErrorMessage(e, 'No se pudo obtener la sugerencia de renovación'));
                     }
                   }}
                   className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded hover:bg-purple-200 whitespace-nowrap"
