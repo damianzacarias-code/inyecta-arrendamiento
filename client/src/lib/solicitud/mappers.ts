@@ -63,10 +63,19 @@ function numOperacionesARango(n?: number | null): string | undefined {
   return 'MAS_CIEN';
 }
 
+/**
+ * Quita diacríticos antes de uppercase para que los regex de los
+ * mappers de enum matcheen variantes con acento del PDF
+ * (e.g. "Unión libre" → "UNION LIBRE").
+ */
+function normalizar(v: string): string {
+  return v.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+}
+
 /** Estado civil → enum del backend. Tolera variantes libres. */
 function estadoCivilEnum(v?: string | null): string | undefined {
   if (!v) return undefined;
-  const s = v.trim().toUpperCase();
+  const s = normalizar(v);
   if (/CASAD/.test(s)) return 'CASADO';
   if (/SOLTER/.test(s)) return 'SOLTERO';
   if (/DIVORC/.test(s)) return 'DIVORCIADO';
@@ -78,7 +87,7 @@ function estadoCivilEnum(v?: string | null): string | undefined {
 /** Régimen matrimonial → enum del backend. */
 function regimenMatrimonialEnum(v?: string | null): string | undefined {
   if (!v) return undefined;
-  const s = v.trim().toUpperCase();
+  const s = normalizar(v);
   if (/SOCIEDAD/.test(s)) return 'SOCIEDAD_CONYUGAL';
   if (/SEPARAC/.test(s)) return 'SEPARACION_DE_BIENES';
   return undefined;
@@ -87,7 +96,7 @@ function regimenMatrimonialEnum(v?: string | null): string | undefined {
 /** sexo/género → enum Genero del backend. */
 function generoEnum(v?: string | null): string | undefined {
   if (!v) return undefined;
-  const s = v.trim().toUpperCase();
+  const s = normalizar(v);
   if (s === 'H' || /MASC/.test(s) || /HOMBR/.test(s)) return 'MASCULINO';
   if (s === 'M' || /FEM/.test(s) || /MUJER/.test(s)) return 'FEMENINO';
   return undefined;

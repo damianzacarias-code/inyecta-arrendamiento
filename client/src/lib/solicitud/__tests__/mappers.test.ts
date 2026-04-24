@@ -355,11 +355,10 @@ describe('estadoCivilEnum', () => {
     expect(estadoCivilEnum('Divorciada')).toBe('DIVORCIADO');
     expect(estadoCivilEnum('VIUDO')).toBe('VIUDO');
     expect(estadoCivilEnum('Concubinato')).toBe('UNION_LIBRE');
-    // Nota: "Union libre" sin acento sí matchea (regex es /UNION/);
-    // "Unión libre" con acento NO matchea — la normalización de
-    // acentos queda como mejora futura del mapper. El test refleja
-    // el comportamiento real, no el deseable.
     expect(estadoCivilEnum('Union libre')).toBe('UNION_LIBRE');
+    // Variantes con acento (típicas en PDFs): la normalización NFD
+    // del mapper quita los diacríticos antes del match.
+    expect(estadoCivilEnum('Unión libre')).toBe('UNION_LIBRE');
   });
   it('devuelve undefined para vacío o desconocido', () => {
     expect(estadoCivilEnum(null)).toBeUndefined();
@@ -372,6 +371,7 @@ describe('regimenMatrimonialEnum', () => {
   it('detecta sociedad y separación', () => {
     expect(regimenMatrimonialEnum('Sociedad Conyugal')).toBe('SOCIEDAD_CONYUGAL');
     expect(regimenMatrimonialEnum('separación de bienes')).toBe('SEPARACION_DE_BIENES');
+    expect(regimenMatrimonialEnum('Separación de Bienes')).toBe('SEPARACION_DE_BIENES');
   });
   it('devuelve undefined para vacío o desconocido', () => {
     expect(regimenMatrimonialEnum(null)).toBeUndefined();
@@ -387,6 +387,7 @@ describe('generoEnum', () => {
     expect(generoEnum('M')).toBe('FEMENINO');
     expect(generoEnum('Femenino')).toBe('FEMENINO');
     expect(generoEnum('Mujer')).toBe('FEMENINO');
+    expect(generoEnum('Mujér')).toBe('FEMENINO');
   });
   it('devuelve undefined para vacío o desconocido', () => {
     expect(generoEnum(null)).toBeUndefined();
