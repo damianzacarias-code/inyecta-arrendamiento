@@ -88,7 +88,12 @@ export default function Seguros() {
   };
 
   const fetchAlerts = () => {
-    api.get('/insurance/alerts').then(r => setAlerts(r.data)).catch(() => {});
+    // Banda lateral de alertas: mejora visual, no bloquea la página.
+    // Si falla, no mostramos las alertas pero el listado de seguros
+    // sigue siendo funcional.
+    api.get('/insurance/alerts')
+      .then(r => setAlerts(r.data))
+      .catch((err) => console.warn('[Seguros] No se pudieron cargar alertas', err));
   };
 
   useEffect(() => { fetchData(); fetchAlerts(); }, [filter]);
@@ -102,7 +107,11 @@ export default function Seguros() {
             .map((c: any) => ({ id: c.id, folio: c.folio, bienDescripcion: c.bienDescripcion }))
         );
       })
-      .catch(() => {});
+      .catch((err) => {
+        // Lista para el dropdown de "asociar póliza"; si falla, el
+        // usuario captura el contrato manualmente.
+        console.warn('[Seguros] No se pudo cargar la lista de contratos', err);
+      });
   }, []);
 
   const filtered = data.filter(p => {

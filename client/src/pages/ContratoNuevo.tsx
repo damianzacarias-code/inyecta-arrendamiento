@@ -153,7 +153,13 @@ export default function ContratoNuevo() {
           shouldValidate: false,
         });
       })
-      .catch(() => {});
+      .catch((err) => {
+        // Prefill best-effort: si el cliente no se carga, el wizard
+        // sigue funcionando — el usuario puede buscarlo manualmente.
+        // Loggeamos para que aparezca en el devtools en lugar de
+        // fallar silenciosamente.
+        console.warn('[ContratoNuevo] No se pudo precargar cliente', err);
+      });
   }, [preClientId, cliente, methods]);
 
   // ── Prefill: datos desde una cotización existente ────────────────
@@ -174,7 +180,10 @@ export default function ContratoNuevo() {
                 shouldValidate: false,
               });
             })
-            .catch(() => {});
+            .catch((err) => {
+              // Mismo razonamiento que arriba: prefill opcional.
+              console.warn('[ContratoNuevo] No se pudo precargar cliente desde cotización', err);
+            });
         }
         const patch = methods.setValue;
         if (q.producto) patch('producto', q.producto);

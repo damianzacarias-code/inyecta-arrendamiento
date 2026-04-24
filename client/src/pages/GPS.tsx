@@ -89,7 +89,12 @@ export default function GPS() {
             .map((c: any) => ({ id: c.id, folio: c.folio, bienDescripcion: c.bienDescripcion }))
         );
       })
-      .catch(() => {});
+      .catch((err) => {
+        // Lista de contratos activos para el dropdown de "asociar GPS";
+        // si falla, el usuario simplemente no verá sugerencias y puede
+        // capturar el folio a mano. No bloquea la página de GPS.
+        console.warn('[GPS] No se pudo cargar la lista de contratos activos', err);
+      });
   }, []);
 
   const filtered = data.filter(d => {

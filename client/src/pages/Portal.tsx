@@ -118,23 +118,32 @@ export default function Portal() {
       .finally(() => setLoading(false));
   }, [token]);
 
-  // Cargar pagos cuando se entra a esa tab
+  // Cargar pagos / facturas cuando se entra a la tab.
+  // Estos catches NO bloquean el portal del arrendatario: el cliente ya
+  // ve sus contratos en la tab principal. Si falla la carga lateral,
+  // loggeamos para devtools en lugar de silenciar por completo.
   useEffect(() => {
     if (tab === 'pagos' && pagos.length === 0 && token) {
-      portalApi.get(`/${token}/payments`).then(r => setPagos(r.data.payments)).catch(() => {});
+      portalApi.get(`/${token}/payments`)
+        .then(r => setPagos(r.data.payments))
+        .catch((err) => console.warn('[Portal] No se pudieron cargar los pagos', err));
     }
     if (tab === 'facturas' && facturas.length === 0 && token) {
-      portalApi.get(`/${token}/invoices`).then(r => setFacturas(r.data.invoices)).catch(() => {});
+      portalApi.get(`/${token}/invoices`)
+        .then(r => setFacturas(r.data.invoices))
+        .catch((err) => console.warn('[Portal] No se pudieron cargar las facturas', err));
     }
   }, [tab, token]);
 
-  // Cargar detalle del contrato seleccionado
+  // Cargar detalle del contrato seleccionado.
+  // Si falla, contratoData queda en null y el panel mostrará el spinner
+  // — está cubierto por el caso de loading visual del propio detalle.
   useEffect(() => {
     if (!contratoActivo || !token) return;
     setContratoData(null);
     portalApi.get(`/${token}/contract/${contratoActivo}`)
       .then(r => setContratoData(r.data))
-      .catch(() => {});
+      .catch((err) => console.warn('[Portal] No se pudo cargar detalle del contrato', err));
   }, [contratoActivo, token]);
 
   if (loading) {

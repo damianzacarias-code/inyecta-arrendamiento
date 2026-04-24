@@ -138,7 +138,11 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
   useEffect(() => {
     api.get('/catalogs/asset-categories')
       .then((res) => setCategories(res.data))
-      .catch(() => {});
+      .catch((err) => {
+        // El cotizador funciona sin el catálogo (campos manuales);
+        // si falla, simplemente no hay autocomplete de categorías.
+        console.warn('[Cotizador] No se pudo cargar el catálogo de categorías', err);
+      });
   }, []);
 
   const simulate = useCallback(async () => {
