@@ -1,0 +1,25 @@
+# Caches y artefactos (nunca al contexto del build)
+node_modules
+dist
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Tests y verifies (no se necesitan en runtime)
+src/**/__tests__
+src/__verify__
+
+# Datos locales (BD de dev, PDFs subidos)
+uploads/
+data/
+
+# Editor/IDE
+.vscode
+.idea
+*.swp
+
+# Documentación interna (la imagen no la sirve)
+CLAUDE.md
+docs/

@@ -1,0 +1,19 @@
+# Caches y artefactos (no van al build context)
+node_modules
+dist
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Tests
+src/**/__tests__
+
+# Editor/IDE
+.vscode
+.idea
+*.swp
+
+# Documentación interna
+README.md

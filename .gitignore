@@ -11,6 +11,11 @@ build/
 .env
 .env.local
 .env.*.local
+.env.prod
+.env.production
+.env.staging
+!.env.example
+!.env.prod.example
 *.key
 *.cer
 *.pem

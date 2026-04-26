@@ -1,0 +1,122 @@
+# docker-compose.prod.yml — Skeleton de producción
+#
+# Levanta los 3 servicios (db + backend + frontend) en una sola red.
+# NO usar este archivo en desarrollo — para dev existe docker-compose.yml
+# (sólo Postgres). Aquí los 3 servicios viven en contenedor.
+#
+# Pre-requisitos antes del primer `docker compose -f docker-compose.prod.yml up`:
+#   1. Crear .env.prod con TODAS las variables (ver .env.prod.example).
+#      Mínimo no-negociable: JWT_SECRET (≥32 chars, NUNCA el de dev),
+#      POSTGRES_PASSWORD, BANCO_CLABE real (18 dígitos), CORS_ALLOWED_ORIGINS
+#      con el dominio de producción.
+#   2. Build de las imágenes:
+#        docker compose -f docker-compose.prod.yml build
+#   3. Levantar BD primero y aplicar migraciones:
+#        docker compose -f docker-compose.prod.yml up -d db
+#        docker compose -f docker-compose.prod.yml run --rm server \
+#          npx prisma migrate deploy
+#   4. Levantar todo:
+#        docker compose -f docker-compose.prod.yml up -d
+#
+# Notas:
+#   - El TLS termination NO va aquí. Va en un LB delante (ALB/nginx
+#     reverse proxy/Cloudflare). Este compose expone el frontend en :80
+#     y el backend NO se expone al host (sólo accesible por la red
+#     interna `inyecta`).
+#   - Volúmenes nombrados para BD y uploads → sobreviven a `down`,
+#     se borran sólo con `down -v`.
+#   - Healthchecks orquestan el orden de arranque (server espera a
+#     que db esté `healthy`, no sólo `started`).
+
+services:
+  # ──────────────────────────────────────────────────────────────
+  # PostgreSQL — datos de la SOFOM
+  # ──────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: inyecta_postgres_prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD requerido}
+      POSTGRES_DB: ${POSTGRES_DB:-inyecta_arrendamiento}
+    volumes:
+      - inyecta_pgdata_prod:/var/lib/postgresql/data
+      # Si necesitas dump nocturno con scripts/backup_db.sh, monta
+      # un volumen aquí (ej: /var/backups/inyecta:/backups) y corre
+      # el cron en el host apuntando a este path.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-inyecta_arrendamiento}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - inyecta
+    # NO exponer al host en producción. Si necesitas acceso desde el
+    # host (ej. para psql ad-hoc), usa `docker exec`. La línea de
+    # abajo queda comentada como recordatorio.
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+
+  # ──────────────────────────────────────────────────────────────
+  # Backend — Node + Express + Prisma
+  # ──────────────────────────────────────────────────────────────
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    image: inyecta/server:latest
+    container_name: inyecta_server_prod
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      # Override defensive: incluso si .env.prod tiene la URL apuntando
+      # a localhost, dentro del contenedor "db" es el hostname correcto.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-inyecta_arrendamiento}
+      NODE_ENV: production
+      PORT: 3001
+    volumes:
+      # Persistir PDFs de contratos, expedientes y comprobantes que el
+      # backend genera/recibe. Sobreviven a redeploys de la imagen.
+      - inyecta_uploads_prod:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - inyecta
+    # NO se expone al host. Sólo el frontend (nginx) habla con él via
+    # la red interna en `server:3001`.
+
+  # ──────────────────────────────────────────────────────────────
+  # Frontend — React build estático servido por nginx
+  # ──────────────────────────────────────────────────────────────
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    image: inyecta/client:latest
+    container_name: inyecta_client_prod
+    restart: unless-stopped
+    ports:
+      # Expuesto al host. En producción real esto va detrás de un LB
+      # con TLS (ALB / Cloudflare / nginx upstream); aquí mapeamos al
+      # 80 del host como skeleton para test local del compose.
+      - "80:80"
+    depends_on:
+      server:
+        condition: service_healthy
+    networks:
+      - inyecta
+
+volumes:
+  inyecta_pgdata_prod:
+    name: inyecta_pgdata_prod
+  inyecta_uploads_prod:
+    name: inyecta_uploads_prod
+
+networks:
+  inyecta:
+    name: inyecta_prod
+    driver: bridge
