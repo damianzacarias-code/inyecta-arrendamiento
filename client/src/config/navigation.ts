@@ -111,6 +111,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: 'Bitácora',            icon: ScrollText,     path: '/reportes/bitacora'        },
       { label: 'Catálogo (admin)',    icon: Settings,       path: '/admin/catalogo'           },
       { label: 'Plantillas (admin)',  icon: FileCheck2,     path: '/admin/templates'          },
+      { label: 'Usuarios (admin)',    icon: Users,          path: '/admin/usuarios'           },
     ],
   },
 ];

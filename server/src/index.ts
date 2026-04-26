@@ -26,6 +26,7 @@ import { templateRouter as solicitudCnbvTemplateRoutes, contractRouter as solici
 import extractRoutes from './routes/extract';
 import brandingRoutes from './routes/branding';
 import catalogConfigRoutes from './routes/catalog';
+import usersRoutes from './routes/users';
 import { bitacora } from './middleware/bitacora';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { requestId } from './middleware/requestId';
@@ -206,6 +207,9 @@ app.use('/api/config', brandingRoutes);
 // GET es público para sesiones autenticadas (lo lee el cotizador al boot).
 // PUT requiere rol ADMIN o DIRECTOR (ver routes/catalog.ts).
 app.use('/api/config', catalogConfigRoutes);
+// Administración de usuarios (empleados Inyecta). Sólo ADMIN puede crear/
+// editar; DIRECTOR sólo lectura. Ver routes/users.ts para reglas anti-lockout.
+app.use('/api/users', usersRoutes);
 
 // 404 para /api/* sin match — devuelve el mismo formato { error: {...} }
 app.use('/api', notFoundHandler);
