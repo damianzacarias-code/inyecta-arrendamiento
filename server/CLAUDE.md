@@ -1650,6 +1650,133 @@ bajo impacto que no requieren su aprobación.
         /admin/catalogo (ADMIN o DIRECTOR), editar y guardar. Las
         nuevas cotizaciones picks it up al instante; las ya
         guardadas conservan los valores con que se cotizaron.
+
+  - [x] H5: Dockerfiles + docker-compose.prod skeleton (deploy ready)
+        Patrón viejo: el repo se corría 100% nativo (postgres docker
+        sólo para dev, server en `npm run dev`, client en vite). Para
+        levantar producción había que reproducir manualmente la
+        instalación de Node+Postgres+nginx en cada servidor objetivo,
+        lo que hace el deploy frágil y no-reproducible.
+        Diseño nuevo: tres imágenes versionadas + un compose que las
+        orquesta. NO se hace TLS termination en el compose; va detrás
+        de un LB externo (ALB/Cloudflare/nginx upstream) que termina
+        HTTPS y reenvía al :80 del frontend.
+
+        Backend (server/Dockerfile) — multi-stage 3 capas:
+          • Stage 1 `deps` (node:20-bookworm-slim): apt-get openssl +
+            ca-certificates (Prisma runtime), `npm ci`, copia prisma/
+            y corre `npx prisma generate`. Cache layer: cualquier
+            cambio en src/ NO invalida deps.
+          • Stage 2 `build`: copia tsconfig + src y corre `npm run
+            build` → /app/dist.
+          • Stage 3 `runtime` (mismo base slim): apt-get openssl +
+            curl + tini, `npm ci --omit=dev` (sin tsx/typescript/
+            prisma CLI/vitest), regenera prisma con los archivos de
+            prisma/ recién copiados, copia /app/dist desde stage
+            build, mkdir uploads/ con chown node, USER node,
+            EXPOSE 3001, ENTRYPOINT [/usr/bin/tini, --],
+            HEALTHCHECK contra /api/health/live (no toca BD), CMD
+            ["node", "dist/index.js"].
+          • Por qué Debian-slim sobre Alpine: Prisma Client tiene
+            binarios distintos por libc. Con bookworm-slim el binario
+            "native" de `prisma generate` funciona sin declarar
+            binaryTargets extra en schema.prisma.
+          • tini como PID 1 para reapeo correcto de SIGTERM —
+            lib/shutdown.ts (B3) recibe la señal y drena requests
+            antes de matar el proceso.
+
+        Frontend (client/Dockerfile) — multi-stage 2 capas:
+          • Stage 1 `build` (node:20-bookworm-slim): `npm ci`, copia
+            tsconfig/vite.config/index.html/public/src y corre
+            `npm run build` → /app/dist.
+          • Stage 2 `runtime` (nginx:1.27-alpine): copia client/
+            nginx.conf a /etc/nginx/conf.d/default.conf y dist/ a
+            /usr/share/nginx/html. EXPOSE 80, HEALTHCHECK contra /.
+          • El cliente NO consume env vars en runtime (todo el estado
+            de cotización/branding/catálogo se hidrata desde el
+            backend al boot vía /api/config/*). El URL del backend lo
+            conoce nginx vía proxy_pass, no VITE_API_URL.
+
+        nginx.conf (cliente):
+          • `upstream backend { server server:3001; }` — el hostname
+            es el nombre del servicio en docker-compose. Para mover a
+            k8s basta cambiar a un FQDN tipo
+            inyecta-server.svc.cluster.local.
+          • `client_max_body_size 25M` para multipart de PDFs (debe
+            coincidir con el límite de multer del backend).
+          • `location /api/` proxy_pass con X-Real-IP, X-Forwarded-
+            For/Proto/Host, X-Request-ID (B2 — el backend respeta el
+            inbound o genera uno nuevo).
+          • `location /uploads/` también proxypass al backend (los
+            PDFs viven en disco del servicio server).
+          • Assets versionados (vite genera hash en filename): cache
+            1 año + Cache-Control immutable.
+          • SPA fallback: `try_files $uri $uri/ /index.html` para que
+            react-router maneje /clientes, /portal/:token, etc. y
+            no-cache en index.html para que un deploy nuevo se vea
+            sin forzar refresh.
+          • /healthz devuelve "ok\n" para el HEALTHCHECK del
+            Dockerfile.
+
+        docker-compose.prod.yml:
+          • 3 servicios sobre red bridge interna `inyecta_prod`.
+          • db (postgres:16-alpine): healthcheck pg_isready, volumen
+            nombrado inyecta_pgdata_prod. NO se expone al host (sólo
+            accesible vía la red — para psql ad-hoc usar `docker
+            exec`).
+          • server: build context ./server, env_file: .env.prod.
+            DATABASE_URL se construye explícitamente en environment
+            como override defensivo (postgresql://${POSTGRES_USER}:
+            ${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}) por si el
+            .env.prod tiene la URL apuntando a localhost. Volumen
+            nombrado inyecta_uploads_prod en /app/uploads (PDFs de
+            contratos/expedientes/comprobantes sobreviven a redeploys
+            de la imagen). depends_on: db con condition:
+            service_healthy. NO se expone al host — sólo nginx (en
+            client) habla con él via la red interna en `server:3001`.
+          • client: build context ./client, expone 80:80 al host
+            como skeleton para test local del compose; en producción
+            real esto va detrás de un LB con TLS. depends_on: server
+            con condition: service_healthy.
+          • Volúmenes nombrados (no anonymous) para que `down` los
+            preserve y sólo `down -v` los borre.
+
+        .env.prod.example (template, .env.prod va al .gitignore):
+          POSTGRES_USER/PASSWORD/DB, NODE_ENV, PORT, JWT_SECRET (con
+          hint `openssl rand -base64 48`), JWT_EXPIRES_IN,
+          LOG_LEVEL, BITACORA_LOG_GETS, CORS_ALLOWED_ORIGINS, bloque
+          CFDI (PROVIDER + EMISOR_RFC/NOMBRE/REGIMEN/
+          LUGAR_EXPEDICION) + bloque Facturama (USER/PASS/SANDBOX),
+          bloque BRAND_* (H2: razón social, nombre comercial,
+          dirección, teléfonos, email, web), bloque BANCO_* (H2:
+          nombre, CLABE, beneficiario), bloque EMAIL_* (H3: provider
+          NOOP|SMTP|SENDGRID|SES, FROM/REPLY_TO, SMTP_HOST/PORT/
+          USER/PASS/SECURE/REQUIRE_TLS), FRONTEND_BASE_URL.
+
+        .gitignore: agregadas .env.prod, .env.production, .env.staging
+        + excepción explícita !.env.prod.example para que el template
+        sí se trackee.
+
+        .dockerignores correspondientes (server/ y client/) para que
+        el build context NO incluya node_modules, dist, .env*, tests,
+        __verify__/, uploads/, data/, CLAUDE.md ni docs/.
+
+        Verificación: `git check-ignore .env.prod` y `.env.prod.example`
+        confirman ignore + excepción correctos.
+        Build de imágenes / smoke del compose se difiere para cuando
+        Damián provea credenciales reales (PAC, BANCO, CORS_ALLOWED_
+        ORIGINS, JWT_SECRET de producción) — el Dockerfile y compose
+        son skeleton estructural, no requieren validación con Docker
+        daemon en este momento.
+
+        Para primer deploy: copiar .env.prod.example a .env.prod y
+        rellenar las variables OBLIGATORIAS (JWT_SECRET ≥32 chars
+        ≠ dev, POSTGRES_PASSWORD, BANCO_CLABE 18 dígitos, CORS_
+        ALLOWED_ORIGINS con dominio de producción), build con
+        `docker compose -f docker-compose.prod.yml build`, levantar
+        BD primero y aplicar migraciones (`up -d db` + `run --rm
+        server npx prisma migrate deploy`), después `up -d` para
+        todo.
 ```
 
 ---
