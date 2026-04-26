@@ -1506,6 +1506,72 @@ bajo impacto que no requieren su aprobación.
         Para que Damián personalice, basta editar server/.env y
         reiniciar el backend — el cliente picks it up al siguiente
         load (singleton + hook se actualizan sin rebuild).
+
+  - [x] H3: Servicio de email con interfaz EmailProvider + NOOP default
+        Patrón viejo: cero salida de email. Las notificaciones in-app
+        funcionaban (campana) pero nunca tocaba la bandeja del usuario,
+        así que para enterarte de una solicitud nueva había que entrar
+        al sistema y mirar la campana.
+        Diseño nuevo (espejo del patrón ICfdiProvider):
+          • services/email/types.ts — interfaz `EmailProvider`
+            (name + send) y tipos `EmailPayload` / `EmailSendResult`.
+            Contrato fire-and-forget: `send` SIEMPRE resuelve, errores
+            van en el campo `error` del result, nunca con throw.
+          • services/email/NoopEmailProvider.ts — DEFAULT de fábrica.
+            No envía nada al exterior. Loggea a `email-noop` con nivel
+            debug y devuelve ok=true. Sistema funciona normalmente sin
+            configuración SMTP.
+          • services/email/SmtpEmailProvider.ts — implementación real
+            con nodemailer (lazy import para no pagar el costo si el
+            operador deja NOOP). Compatible con cualquier servidor
+            SMTP transaccional (Gmail Workspace, Outlook 365, Amazon
+            SES SMTP, SendGrid SMTP, Mailgun, Postmark, Resend, Brevo,
+            Zoho). Transporter cacheado tras la primera llamada.
+          • services/email/SendGridEmailProvider.ts — stub explícito
+            que devuelve ok=false con mensaje claro. Para activar se
+            instala @sendgrid/mail y se completa send() — el resto del
+            código no cambia.
+          • services/email/SesEmailProvider.ts — stub equivalente. La
+            recomendación práctica es usar SMTP a SES en lugar del SDK.
+          • services/email/index.ts — factory `getEmailProvider()` con
+            singleton lazy. Switch sobre `config.email.provider`. Mismo
+            patrón que `getCfdiProvider()`.
+        Variables nuevas en config/env.ts (Zod):
+          EMAIL_PROVIDER (NOOP|SMTP|SENDGRID|SES, default NOOP)
+          EMAIL_FROM, EMAIL_REPLY_TO
+          SMTP_HOST/PORT/USER/PASS/SECURE/REQUIRE_TLS
+          FRONTEND_BASE_URL (links absolutos en cuerpo de email)
+        superRefine: si EMAIL_PROVIDER=SMTP exige host+port+from. En
+        production con provider≠NOOP exige EMAIL_FROM (sin defaults).
+        Hook en lib/notificar.ts:
+          • Cada `notificar`, `notificarPorRol`, `notificarUsuario`
+            dispara después un `dispatchEmailEspejo()` con `void` (NO
+            await — un SMTP lento ralentizaría el handler de negocio).
+          • Fast-path: si provider=NOOP no se consulta la BD para
+            obtener emails (cero round-trips extra cuando email está
+            apagado).
+          • Subject = título de la notificación.
+          • Cuerpo text+html: mensaje + link absoluto basado en
+            FRONTEND_BASE_URL + payload.url + footer "mensaje
+            automático, no respondas".
+          • Errores se loggean con nivel warn/error en `notificar`,
+            NUNCA propagan a la operación de negocio.
+        Tests/verify:
+          • services/email/__tests__/NoopEmailProvider.test.ts (7 tests):
+            name, ok=true, messageId único, multi-destinatario, factory
+            default NOOP, singleton, reset crea nueva instancia.
+          • src/__verify__/email.verify.ts (9 checks): factory default
+            NOOP, send ok=true, provider=NOOP, messageId no vacío, sin
+            error, singleton, SMTP sin host → ok=false con mensaje
+            claro, no lanza excepción.
+          • Comandos: `npm test` (169/169 OK; antes 162),
+            `npm run verify:email` (9/9 OK).
+        Para que Damián configure email real: editar server/.env con
+        EMAIL_PROVIDER=SMTP + SMTP_HOST/PORT/USER/PASS/EMAIL_FROM, y
+        reiniciar backend. Sin redeployar nada del cliente. Si el
+        SMTP está caído o las credenciales están mal, las notifica-
+        ciones in-app siguen funcionando — sólo el email espejo falla
+        silenciosamente y queda en los logs.
 ```
 
 ---

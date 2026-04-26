@@ -18,7 +18,11 @@ async function main() {
   const port = (server.address() as { port: number }).port;
 
   const res = await fetch(`http://127.0.0.1:${port}/api/config/branding`);
-  const body = await res.json();
+  // El response shape se garantiza por GET /api/config/branding (config.branding).
+  // Aquí lo tratamos como `any` porque el verify es una sonda manual; los
+  // checks abajo validan la forma real campo por campo.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const body = (await res.json()) as any;
 
   const checks: Array<[string, unknown]> = [
     ['HTTP 200',                  res.status === 200],

@@ -21,8 +21,107 @@
  */
 import prisma from '../config/db';
 import { childLogger } from './logger';
+import { config } from '../config/env';
+import { getEmailProvider, type EmailPayload } from '../services/email';
 
 const log = childLogger('notificar');
+
+// ───────────────────────────────────────────────────────────────────
+// Email espejo de la notificación in-app
+// ───────────────────────────────────────────────────────────────────
+//
+// Cada notificación in-app intenta también enviar un email a los
+// mismos destinatarios. Es fire-and-forget: cualquier fallo del
+// proveedor (SMTP caído, NOOP, credenciales malas) se loggea pero
+// nunca propaga al llamador.
+//
+// La regla de negocio es simple: si el provider activo es NOOP, no
+// hay penalty en performance — el método `send` resuelve sin I/O.
+// Si es SMTP, cada email cuesta ~200-500ms de round-trip; por eso
+// el dispatch es paralelo y NO se await en el handler de negocio.
+
+function buildEmailFromNotificacion(
+  payload: NotificacionPayload,
+  to: string[],
+): EmailPayload {
+  const linkAbsoluto = payload.url
+    ? `${config.frontendBaseUrl.replace(/\/$/, '')}${
+        payload.url.startsWith('/') ? payload.url : '/' + payload.url
+      }`
+    : null;
+
+  const lineas = [payload.mensaje];
+  if (linkAbsoluto) {
+    lineas.push('', `Ver detalle: ${linkAbsoluto}`);
+  }
+  lineas.push(
+    '',
+    '---',
+    `${config.branding.empresa.nombreComercial} · Sistema de arrendamiento`,
+    'Este es un mensaje automático, no respondas a este correo.',
+  );
+
+  const text = lineas.join('\n');
+  const html = [
+    `<p style="font-family:Arial,sans-serif;color:#000;">${escapeHtml(payload.mensaje)}</p>`,
+    linkAbsoluto
+      ? `<p style="font-family:Arial,sans-serif;"><a href="${escapeAttr(linkAbsoluto)}" style="color:#184892;">Ver detalle</a></p>`
+      : '',
+    `<hr style="border:none;border-top:1px solid #ddd;margin-top:24px;" />`,
+    `<p style="font-family:Arial,sans-serif;color:#666;font-size:12px;">${escapeHtml(
+      config.branding.empresa.nombreComercial,
+    )} · Sistema de arrendamiento. Mensaje automático, no respondas a este correo.</p>`,
+  ].join('\n');
+
+  return {
+    to,
+    subject: payload.titulo,
+    text,
+    html,
+  };
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function escapeAttr(s: string): string {
+  return escapeHtml(s);
+}
+
+async function dispatchEmailEspejo(
+  payload: NotificacionPayload,
+  destinatariosIds: Set<string>,
+): Promise<void> {
+  // Fast-path: provider NOOP → ni siquiera buscamos los emails en BD.
+  if (config.email.provider === 'NOOP') return;
+  if (destinatariosIds.size === 0) return;
+
+  try {
+    const usuarios = await prisma.user.findMany({
+      where: { id: { in: Array.from(destinatariosIds) }, activo: true },
+      select: { email: true },
+    });
+    const emails = usuarios.map((u) => u.email).filter((e): e is string => !!e);
+    if (emails.length === 0) return;
+
+    const provider = getEmailProvider();
+    const result = await provider.send(buildEmailFromNotificacion(payload, emails));
+    if (!result.ok) {
+      log.warn(
+        { provider: result.provider, error: result.error, tipo: payload.tipo },
+        '[notificar] email espejo no enviado',
+      );
+    }
+  } catch (err) {
+    log.error({ err }, '[notificar] error en dispatchEmailEspejo');
+  }
+}
 
 // ───────────────────────────────────────────────────────────────────
 // Tipos
@@ -118,6 +217,11 @@ export async function notificar(payload: NotificacionPayload): Promise<void> {
       })),
       skipDuplicates: true,
     });
+
+    // Email espejo (fire-and-forget). NO se await aquí: si lo hacemos,
+    // un SMTP lento ralentizaría cada handler de negocio que dispare
+    // una notificación. El error nunca propaga (el helper atrapa).
+    void dispatchEmailEspejo(payload, destinatarios);
   } catch (err) {
     log.error({ err }, '[notificar] error encolando notificación');
   }
@@ -155,6 +259,12 @@ export async function notificarPorRol(
       })),
       skipDuplicates: true,
     });
+
+    // Email espejo (fire-and-forget) — mismo principio que `notificar`.
+    void dispatchEmailEspejo(
+      payload as NotificacionPayload,
+      new Set(usuarios.map((u) => u.id)),
+    );
   } catch (err) {
     log.error({ err }, '[notificarPorRol] error encolando notificación');
   }
@@ -186,6 +296,9 @@ export async function notificarUsuario(
         url:       payload.url       ?? null,
       },
     });
+
+    // Email espejo (fire-and-forget). Caso de un único destinatario.
+    void dispatchEmailEspejo(payload as NotificacionPayload, new Set([userId]));
   } catch (err) {
     log.error({ err }, '[notificarUsuario] error encolando notificación');
   }

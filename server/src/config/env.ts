@@ -34,6 +34,7 @@ dotenv.config({ override: !__isVitest });
 const nodeEnvEnum = z.enum(['development', 'test', 'staging', 'production']);
 const cfdiProviderEnum = z.enum(['MOCK', 'FACTURAMA', 'SW']);
 const extractProviderEnum = z.enum(['MOCK', 'CLAUDE']);
+const emailProviderEnum = z.enum(['NOOP', 'SMTP', 'SENDGRID', 'SES']);
 
 /**
  * Coerciona "true"/"false"/"1"/"0" → boolean.
@@ -145,6 +146,33 @@ const EnvSchema = z
       .string()
       .min(1)
       .default('FSMP Soluciones de Capital, S.A. de C.V., SOFOM, E.N.R.'),
+
+    // ── Email saliente (notificaciones, recordatorios) ──
+    // EMAIL_PROVIDER controla qué backend se usa:
+    //   NOOP     → no envía nada (default seguro de fábrica)
+    //   SMTP     → nodemailer con servidor SMTP genérico
+    //              (Gmail/Outlook/SES/SendGrid/Mailgun…)
+    //   SENDGRID → SDK nativo (stub — pendiente integrar)
+    //   SES      → SDK AWS nativo (stub — pendiente integrar)
+    //
+    // EMAIL_FROM es la dirección que aparece en el "De:" del mensaje.
+    // En production con SMTP exigimos que esté seteada (ver superRefine).
+    EMAIL_PROVIDER: emailProviderEnum.default('NOOP'),
+    EMAIL_FROM: z.string().optional(),
+    EMAIL_REPLY_TO: z.string().optional(),
+
+    // SMTP (sólo aplica si EMAIL_PROVIDER=SMTP)
+    SMTP_HOST: z.string().optional(),
+    SMTP_PORT: z.coerce.number().int().positive().max(65535).optional(),
+    SMTP_USER: z.string().optional(),
+    SMTP_PASS: z.string().optional(),
+    SMTP_SECURE: boolFromString.default(false),       // true=465 (TLS implícito), false=587 (STARTTLS)
+    SMTP_REQUIRE_TLS: boolFromString.default(true),   // exige STARTTLS aunque secure=false
+
+    // URL pública del frontend para incluir links absolutos en emails
+    // ("Revisa tu solicitud en https://app.inyecta.com.mx/operaciones/…").
+    // En dev default a localhost:5173.
+    FRONTEND_BASE_URL: z.string().url().default('http://localhost:5173'),
   })
   // Validaciones cruzadas (cosas que solo aplican en producción).
   .superRefine((env, ctx) => {
@@ -204,6 +232,44 @@ const EnvSchema = z
             'En production BANCO_CLABE debe tener 18 dígitos numéricos ' +
             '(opcionalmente con guiones). El placeholder con "X" no se ' +
             'acepta — configura la CLABE real antes de desplegar.',
+        });
+      }
+    }
+    // Email: si el operador eligió SMTP, exigir las credenciales
+    // mínimas. Mejor fallar al arrancar que silenciar emails.
+    if (env.EMAIL_PROVIDER === 'SMTP') {
+      if (!env.SMTP_HOST) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['SMTP_HOST'],
+          message: 'EMAIL_PROVIDER=SMTP requiere SMTP_HOST',
+        });
+      }
+      if (!env.SMTP_PORT) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['SMTP_PORT'],
+          message: 'EMAIL_PROVIDER=SMTP requiere SMTP_PORT (típicamente 465 o 587)',
+        });
+      }
+      if (!env.EMAIL_FROM) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['EMAIL_FROM'],
+          message:
+            'EMAIL_PROVIDER=SMTP requiere EMAIL_FROM (ej. "Inyecta <noreply@inyecta.com.mx>")',
+        });
+      }
+    }
+    // En production con email no-NOOP exigimos un EMAIL_FROM real
+    // (no se aceptan placeholders genéricos como "noreply@example.com").
+    if (env.NODE_ENV === 'production' && env.EMAIL_PROVIDER !== 'NOOP') {
+      if (!env.EMAIL_FROM) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['EMAIL_FROM'],
+          message:
+            `En production con EMAIL_PROVIDER=${env.EMAIL_PROVIDER} se requiere EMAIL_FROM`,
         });
       }
     }
@@ -286,6 +352,20 @@ export const config = {
       beneficiario: env.BANCO_BENEFICIARIO,
     },
   },
+  email: {
+    provider: env.EMAIL_PROVIDER,
+    from: env.EMAIL_FROM,
+    replyTo: env.EMAIL_REPLY_TO,
+    smtp: {
+      host: env.SMTP_HOST,
+      port: env.SMTP_PORT,
+      user: env.SMTP_USER,
+      pass: env.SMTP_PASS,
+      secure: env.SMTP_SECURE,
+      requireTLS: env.SMTP_REQUIRE_TLS,
+    },
+  },
+  frontendBaseUrl: env.FRONTEND_BASE_URL,
 } as const;
 
 export type AppConfig = typeof config;
