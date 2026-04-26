@@ -1434,6 +1434,78 @@ Migración cotizador — resumen rápido:
   • Valor residual ya NO está fusionado con depósito en garantía
     (eran conceptos distintos en el Excel pero la implementación
     los confundía).
+
+──────────────────────────────────────────────────────────────────
+Hardening operativo — Bloque autónomo de noche (26-04-2026)
+──────────────────────────────────────────────────────────────────
+Mientras Damián revisa la lista de pendientes que requieren su
+input (PAC, datos fiscales, lista de empleados, plantilla de
+contrato firmable, datos bancarios reales), se ejecutan tareas de
+bajo impacto que no requieren su aprobación.
+
+  - [x] H1: Folios ARR-NNN-YYYY atómicos (fix race condition)
+        Patrón viejo: prisma.contract.count() + 1. Race condition
+        documentada — dos requests concurrentes leen el mismo count
+        y generan el mismo folio; el 2º INSERT falla con P2002 y
+        además podría duplicar folio si la unicidad no estuviera.
+        Reemplazado por tabla folio_sequences con UPSERT atómico
+        + increment, todo dentro del mismo $transaction que crea
+        la entidad.
+        Nuevos archivos:
+          - prisma/schema.prisma: model FolioSequence
+            (scope, year, ultimo, updatedAt, @@id([scope, year]))
+          - server/src/services/folioSequence.ts: nextFolio (genérico),
+            nextContractFolio (year actual), nextQuotationFolio (year=0),
+            nextInvoiceFolio (scope=INVOICE_<serie>),
+            backfillSequenceFromMax (idempotente, una sola vez en
+            cada deployment con folios pre-existentes).
+          - server/src/scripts/backfillFolioSequences.ts: parsea
+            folios existentes (regex ARR-NNN-YYYY y COT-NNNN) +
+            invoice.groupBy por serie, siembra las secuencias.
+          - server/src/__verify__/folioSequence.verify.ts: 50
+            transacciones en Promise.all → exige 50 valores únicos
+            en rango [1, 50]. Falla el patrón viejo, pasa el nuevo.
+        Migrados routes/{contracts,quotations,invoices}.ts.
+        Backfill corrido en local: CONTRACT 2026 max=11, INVOICE_A
+        max=2. Tests siguen pasando (162/162 server, 101/101 client).
+        Commit: 9ca0496 fix(folios): generación atómica anti-race-condition.
+
+  - [x] H2: Datos del emisor (razón social, contacto, banco) a env vars
+        Antes: 8 archivos con FSMP/BBVA/CLABE/dirección hardcoded.
+        Cambiar el banco o mudar oficinas requería editar JSX y
+        rebuild del cliente.
+        Ahora:
+          • Server: BRAND_RAZON_SOCIAL, BRAND_NOMBRE_COMERCIAL,
+            BRAND_DIRECCION, BRAND_TELEFONOS, BRAND_EMAIL, BRAND_WEB,
+            BANCO_NOMBRE, BANCO_CLABE, BANCO_BENEFICIARIO en
+            config/env.ts (Zod, defaults = valores históricos).
+            superRefine en production exige BANCO_CLABE de 18
+            dígitos (rechaza el placeholder con "X").
+          • Endpoint público: GET /api/config/branding (sin auth,
+            mismo rationale que /portal — los datos ya son visibles
+            en cada cotización entregada al prospecto). Devuelve
+            { empresa, contacto, banco }.
+          • Cliente: lib/branding.ts singleton + hook useBranding().
+            App.tsx llama loadBranding() al boot. Hook re-renderiza
+            componentes cuando llega el dato fresco. Defaults
+            síncronos = valores históricos hardcoded (PDFs nunca
+            rompen aunque la fetch falle).
+          • cfdiProvider: si CFDI_EMISOR_NOMBRE no está set, cae
+            al BRAND_RAZON_SOCIAL en MAYÚSCULAS (formato SAT).
+        Refactor de 8 archivos:
+          PDFs:  CotizacionPDF, AmortizacionPDF, EstadoCuentaPDF,
+                 ReciboPDF, ChecklistExpedientePDF.
+          Pages: Login (footer), Portal (DatosBancarios), Cotizacion-
+                 Detalle (footer impreso).
+        Verify: src/__verify__/branding.verify.ts levanta una mini-
+        app y valida el shape del response (10/10 checks OK).
+        .env.example actualizado con 9 variables documentadas.
+        162/162 server tests + 101/101 client tests pasan; tsc
+        --noEmit limpio (cliente y server, excepto los pre-existing
+        top-level await en 3 routes/__tests__/*).
+        Para que Damián personalice, basta editar server/.env y
+        reiniciar el backend — el cliente picks it up al siguiente
+        load (singleton + hook se actualizan sin rebuild).
 ```
 
 ---

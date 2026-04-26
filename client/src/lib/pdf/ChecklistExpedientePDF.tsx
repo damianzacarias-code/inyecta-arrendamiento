@@ -21,6 +21,7 @@ import {
   StyleSheet,
 } from '@react-pdf/renderer';
 import { colors, fontSize, spacing } from './tokens';
+import { getBranding } from '@/lib/branding';
 
 // ───────────────────────────────────────────────────────────────────
 // Tipos del input (mismo shape que devuelve /api/contracts/:id/expediente)
@@ -294,10 +295,13 @@ export function ChecklistExpedientePDF({ data }: { data: ChecklistInput }) {
     year: 'numeric',
   });
 
+  // Branding leído del singleton (cargado al boot por App.tsx).
+  const branding = getBranding();
+
   return (
     <Document
       title={`Expediente ${data.contract.folio}`}
-      author="FSMP Soluciones de Capital, S.A. de C.V., SOFOM, E.N.R."
+      author={branding.empresa.razonSocial}
       subject="Checklist de documentos del expediente de crédito"
     >
       <Page size="LETTER" style={styles.page}>
@@ -306,9 +310,9 @@ export function ChecklistExpedientePDF({ data }: { data: ChecklistInput }) {
           <Image src="/brand/logo-inyecta.png" style={styles.logo} />
           <View style={styles.headerTextWrap}>
             <Text style={styles.razonSocial}>
-              FSMP Soluciones de Capital, S.A. de C.V., SOFOM, E.N.R.
+              {branding.empresa.razonSocial}
             </Text>
-            <Text style={styles.subTitle}>(Marca: Inyecta)</Text>
+            <Text style={styles.subTitle}>(Marca: {branding.empresa.nombreComercial})</Text>
           </View>
         </View>
 

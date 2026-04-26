@@ -113,6 +113,38 @@ const EnvSchema = z
       .string()
       .min(1)
       .default('FSMP SOLUCIONES DE CAPITAL SA DE CV SOFOM ENR'),
+
+    // ── Branding (datos públicos del emisor para PDFs y UI) ──
+    // Estos valores se devuelven por GET /api/config/branding (sin
+    // auth) y los consume el cliente para PDFs (cotización, recibo,
+    // estado de cuenta, amortización, checklist) y la página /portal.
+    // Defaults = valores históricos hardcoded; sólo cambia si Inyecta
+    // muda razón social, oficinas o cuenta bancaria.
+    BRAND_RAZON_SOCIAL: z
+      .string()
+      .min(1)
+      .default('FSMP Soluciones de Capital, S.A. de C.V., SOFOM, E.N.R.'),
+    BRAND_NOMBRE_COMERCIAL: z.string().min(1).default('Inyecta'),
+    BRAND_DIRECCION: z
+      .string()
+      .min(1)
+      .default(
+        'Av. Sierra Vista 1305, Piso 4 Oficina 7, Col. Lomas del Tecnológico, C.P. 78215, San Luis Potosí, S.L.P.',
+      ),
+    BRAND_TELEFONOS: z.string().min(1).default('444-521-7204 / 444-521-6980'),
+    BRAND_EMAIL: z.string().email().default('contacto@inyecta.com.mx'),
+    BRAND_WEB: z.string().min(1).default('www.inyecta.com.mx'),
+
+    // ── Datos bancarios para depósitos del cliente ──
+    // Públicos por diseño: aparecen en el portal y en estado de cuenta.
+    // Default es el placeholder histórico (CLABE enmascarada). En
+    // production se exige una CLABE real (18 dígitos) — ver superRefine.
+    BANCO_NOMBRE: z.string().min(1).default('BBVA México'),
+    BANCO_CLABE: z.string().min(1).default('012-180-XXXXXXXXXX-X'),
+    BANCO_BENEFICIARIO: z
+      .string()
+      .min(1)
+      .default('FSMP Soluciones de Capital, S.A. de C.V., SOFOM, E.N.R.'),
   })
   // Validaciones cruzadas (cosas que solo aplican en producción).
   .superRefine((env, ctx) => {
@@ -157,6 +189,23 @@ const EnvSchema = z
           'En production no se permite la clave de pruebas "0000000000". ' +
           'Solicita la clave real a Círculo de Crédito antes de desplegar.',
       });
+    }
+    // En production exigimos una CLABE real (18 dígitos exactos, sin
+    // separadores). El placeholder con "X" es claro indicador de que
+    // nadie configuró el banco real — sería inaceptable que apareciera
+    // en un estado de cuenta enviado al cliente.
+    if (env.NODE_ENV === 'production') {
+      const clabeLimpia = env.BANCO_CLABE.replace(/[\s\-]/g, '');
+      if (!/^\d{18}$/.test(clabeLimpia)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['BANCO_CLABE'],
+          message:
+            'En production BANCO_CLABE debe tener 18 dígitos numéricos ' +
+            '(opcionalmente con guiones). El placeholder con "X" no se ' +
+            'acepta — configura la CLABE real antes de desplegar.',
+        });
+      }
     }
   });
 
@@ -219,6 +268,23 @@ export const config = {
   circuloCredito: {
     claveOtorgante: env.CIRCULO_CREDITO_CLAVE_OTORGANTE,
     nombreOtorgante: env.CIRCULO_CREDITO_NOMBRE_OTORGANTE,
+  },
+  branding: {
+    empresa: {
+      razonSocial: env.BRAND_RAZON_SOCIAL,
+      nombreComercial: env.BRAND_NOMBRE_COMERCIAL,
+    },
+    contacto: {
+      direccion: env.BRAND_DIRECCION,
+      telefonos: env.BRAND_TELEFONOS,
+      email: env.BRAND_EMAIL,
+      web: env.BRAND_WEB,
+    },
+    banco: {
+      nombre: env.BANCO_NOMBRE,
+      clabe: env.BANCO_CLABE,
+      beneficiario: env.BANCO_BENEFICIARIO,
+    },
   },
 } as const;
 

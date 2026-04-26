@@ -15,22 +15,9 @@ import {
   Document, Page, Text, View, StyleSheet, Image,
 } from '@react-pdf/renderer';
 import { colors, fmtMoneySigned } from './tokens';
+import { getBranding } from '@/lib/branding';
 
-const RAZON_SOCIAL = 'FSMP SOLUCIONES DE CAPITAL, S.A. DE C.V., SOFOM, E.N.R.';
-const TITULO       = 'ESTADO DE CUENTA';
-
-const CONTACTO = {
-  direccion: 'Av. Sierra Vista 1305, Piso 4 Oficina 7, Col. Lomas del Tecnológico, C.P. 78215, San Luis Potosí, S.L.P.',
-  telefonos: 'Teléfonos: 444-521-7204 / 444-521-6980',
-  email:     'E-mail: contacto@inyecta.com.mx',
-  web:       'Página web: www.inyecta.com.mx',
-};
-
-const DATOS_BANCARIOS = {
-  beneficiario: 'FSMP Soluciones de Capital, S.A. de C.V., SOFOM, E.N.R.',
-  banco:        'BBVA México',
-  clabe:        '012-180-XXXXXXXXXX-X',
-};
+const TITULO = 'ESTADO DE CUENTA';
 
 // ────────────────────────────────────────────────────────────────────
 // Tipos (matchean lo que devuelve GET /api/portal/:token/contract/:id)
@@ -258,6 +245,21 @@ export function EstadoCuentaPDF({
 }: EstadoCuentaProps) {
   const corte = fechaCorte ?? new Date();
   const tasaPct = (contrato.tasaAnual * 100).toFixed(2) + '%';
+
+  // Branding leído del singleton (cargado al boot por App.tsx).
+  const branding = getBranding();
+  const RAZON_SOCIAL = branding.empresa.razonSocial.toUpperCase();
+  const CONTACTO = {
+    direccion: branding.contacto.direccion,
+    telefonos: `Teléfonos: ${branding.contacto.telefonos}`,
+    email:     `E-mail: ${branding.contacto.email}`,
+    web:       `Página web: ${branding.contacto.web}`,
+  };
+  const DATOS_BANCARIOS = {
+    beneficiario: branding.banco.beneficiario,
+    banco:        branding.banco.nombre,
+    clabe:        branding.banco.clabe,
+  };
 
   return (
     <Document

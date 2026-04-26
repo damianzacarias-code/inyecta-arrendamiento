@@ -17,28 +17,26 @@
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer';
 import { colors, fmtMoney, fmtMoneySigned } from './tokens';
 import type { ResultadoCotizacion } from '../cotizacion/calculos';
+import { getBranding } from '@/lib/branding';
 
 // ────────────────────────────────────────────────────────────────────
 // Constantes legales / contacto (mismos textos del Excel original)
 // ────────────────────────────────────────────────────────────────────
 
-const RAZON_SOCIAL = 'FSMP SOLUCIONES DE CAPITAL, S.A. DE C.V., SOFOM, E.N.R.';
-const TITULO       = 'COTIZACIÓN ARRENDAMIENTO';
+const TITULO = 'COTIZACIÓN ARRENDAMIENTO';
 
-const NOTAS = [
-  'Los seguros de los equipos arrendados podrán ser contratados con su aseguradora en forma multianual, con cobertura amplia contra el riesgo que este expuesto el bien objeto del arrendamiento, con endoso preferente e irrevocable a favor de FSMP SOLUCIONES DE CAPITAL, S.A. DE C.V., SOFOM, E.N.R.',
-  'La arrendataria deberá cubrir los gastos de mantenimiento, trámites y cualquier otro gasto relacionado con el bien objeto del arrendamiento.',
-  'Los vencimientos de las rentas serán mensuales según fecha acordada.',
-  'La presente cotización es de carácter informativo, por lo cual no presenta ningún compromiso para FSMP SOLUCIONES DE CAPITAL, S.A. DE C.V., SOFOM, E.N.R. y estará sujeta a la autorización del comité de crédito.',
-  'El IVA del interés de las rentas mensuales se calcula de acuerdo a lo establecido en el Artículo 18-A de LIVA',
-];
-
-const CONTACTO = {
-  direccion: 'Av. Sierra Vista 1305, Piso 4 Oficina 7, Col. Lomas del Tecnológico, C.P. 78215, San Luis Potosí, S.L.P.',
-  telefonos: 'Teléfonos: 444-521-7204 / 444-521-6980',
-  email:     'E-mail: contacto@inyecta.com.mx',
-  web:       'Página web: www.inyecta.com.mx',
-};
+/** Notas legales del Excel original. La razón social se interpola
+ *  para que cambios al BRAND_RAZON_SOCIAL del backend se reflejen
+ *  también en las cláusulas que la mencionan (1 y 4). */
+function notasLegales(razonSocial: string): string[] {
+  return [
+    `Los seguros de los equipos arrendados podrán ser contratados con su aseguradora en forma multianual, con cobertura amplia contra el riesgo que este expuesto el bien objeto del arrendamiento, con endoso preferente e irrevocable a favor de ${razonSocial}.`,
+    'La arrendataria deberá cubrir los gastos de mantenimiento, trámites y cualquier otro gasto relacionado con el bien objeto del arrendamiento.',
+    'Los vencimientos de las rentas serán mensuales según fecha acordada.',
+    `La presente cotización es de carácter informativo, por lo cual no presenta ningún compromiso para ${razonSocial} y estará sujeta a la autorización del comité de crédito.`,
+    'El IVA del interés de las rentas mensuales se calcula de acuerdo a lo establecido en el Artículo 18-A de LIVA',
+  ];
+}
 
 // ────────────────────────────────────────────────────────────────────
 // Estilos
@@ -220,12 +218,24 @@ export function CotizacionPDF({
   const productoLabel = data.producto === 'PURO' ? 'Puro' : 'Financiero';
   const seccion4Label = data.producto === 'PURO' ? 'Valor de rescate' : 'Opción de compra';
 
+  // Branding leído del singleton (cargado al boot por App.tsx).
+  const branding = getBranding();
+  const RAZON_SOCIAL = branding.empresa.razonSocial.toUpperCase();
+  const NOTAS = notasLegales(branding.empresa.razonSocial.toUpperCase());
+  const CONTACTO = {
+    direccion: branding.contacto.direccion,
+    telefonos: `Teléfonos: ${branding.contacto.telefonos}`,
+    email:     `E-mail: ${branding.contacto.email}`,
+    web:       `Página web: ${branding.contacto.web}`,
+  };
+  const docAuthor = `${branding.empresa.razonSocial} · ${branding.empresa.nombreComercial}`;
+
   return (
     <Document
       title={`Cotización ${data.nombreCliente}`}
-      author="FSMP Soluciones de Capital · Inyecta"
+      author={docAuthor}
       subject={`${TITULO} · ${productoLabel}`}
-      creator="Inyecta Arrendamiento"
+      creator={`${branding.empresa.nombreComercial} Arrendamiento`}
     >
       <Page size="LETTER" style={s.page}>
         {/* ── Fecha (esquina superior derecha) ─────────────── */}

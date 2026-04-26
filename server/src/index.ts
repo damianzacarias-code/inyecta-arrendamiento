@@ -24,6 +24,7 @@ import notificacionesRoutes from './routes/notificaciones';
 import expedienteRoutes from './routes/expediente';
 import { templateRouter as solicitudCnbvTemplateRoutes, contractRouter as solicitudCnbvContractRoutes } from './routes/solicitudCnbv';
 import extractRoutes from './routes/extract';
+import brandingRoutes from './routes/branding';
 import { bitacora } from './middleware/bitacora';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { requestId } from './middleware/requestId';
@@ -197,6 +198,9 @@ app.use('/api', expedienteRoutes);
 // Extracción automática de PDFs con Claude Vision (o MOCK si no hay API key).
 // POST /api/extract { kind, fileUrl } → { fields: {...}, provider: 'claude'|'mock' }
 app.use('/api/extract', extractRoutes);
+// Branding público (sin auth) — datos del emisor que el cliente embebe en
+// PDFs y muestra en el portal del arrendatario. GET /api/config/branding.
+app.use('/api/config', brandingRoutes);
 
 // 404 para /api/* sin match — devuelve el mismo formato { error: {...} }
 app.use('/api', notFoundHandler);

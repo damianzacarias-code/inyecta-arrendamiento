@@ -19,6 +19,7 @@ import { calcularCotizacion } from '@/lib/cotizacion/calculos';
 import { calcAmortPuro, calcAmortFinanciero } from '@/lib/cotizacion/amortizacion';
 import { CotizacionPDF } from '@/lib/pdf/CotizacionPDF';
 import { AmortizacionPDF } from '@/lib/pdf/AmortizacionPDF';
+import { useBranding } from '@/lib/branding';
 
 interface QuotationDetail {
   id: string;
@@ -112,6 +113,7 @@ const estadoLabels: Record<string, string> = {
 export default function CotizacionDetalle() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const branding = useBranding();
   const [quotation, setQuotation] = useState<QuotationDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -564,7 +566,7 @@ export default function CotizacionDetalle() {
 
       {/* Footer */}
       <div className="text-center text-xs text-gray-400 mt-8 print:mt-4">
-        <p>FSMP Soluciones de Capital, S.A. de C.V., SOFOM, E.N.R.</p>
+        <p>{branding.empresa.razonSocial}</p>
         <p>Vigencia: {formatDate(q.vigenciaHasta)} | Elaborado por: {q.user?.nombre} {q.user?.apellidos}</p>
       </div>
     </div>

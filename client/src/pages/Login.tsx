@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { LogIn, Eye, EyeOff } from 'lucide-react';
+import { useBranding } from '@/lib/branding';
 
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const branding = useBranding();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -103,7 +105,7 @@ export default function Login() {
           </form>
 
           <p className="text-center text-xs text-gray-400 mt-6">
-            FSMP Soluciones de Capital, S.A. de C.V., SOFOM, E.N.R.
+            {branding.empresa.razonSocial}
           </p>
         </div>
       </div>

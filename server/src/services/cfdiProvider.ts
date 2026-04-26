@@ -87,11 +87,14 @@ export interface ICfdiProvider {
 }
 
 // Datos del emisor (configurables vía config/env tipado).
+// Si CFDI_EMISOR_NOMBRE no está configurado, cae al BRAND_RAZON_SOCIAL
+// (en MAYÚSCULAS, como exige el SAT en el atributo Nombre del Emisor).
 function emisor() {
   const e = config.cfdi.emisor;
+  const fallbackNombre = config.branding.empresa.razonSocial.toUpperCase();
   return {
     rfc:     e.rfc             || 'FSC123456ABC',
-    nombre:  e.nombre          || 'FSMP SOLUCIONES DE CAPITAL SA DE CV',
+    nombre:  e.nombre          || fallbackNombre,
     regimen: e.regimen         || '601',
     cp:      e.lugarExpedicion || '78215', // SLP, sede Inyecta
   };

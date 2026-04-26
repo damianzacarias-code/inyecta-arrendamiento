@@ -13,16 +13,9 @@ import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/render
 import { colors, fmtMoney, fmtMoneySigned, fmtPct } from './tokens';
 import type { ResultadoCotizacion } from '../cotizacion/calculos';
 import type { FilaAmortPuro, FilaAmortFinanciero } from '../cotizacion/amortizacion';
+import { getBranding } from '@/lib/branding';
 
-const RAZON_SOCIAL = 'FSMP SOLUCIONES DE CAPITAL, S.A. DE C.V., SOFOM, E.N.R.';
-const TITULO       = 'TABLA DE AMORTIZACIÓN';
-
-const CONTACTO = {
-  direccion: 'Av. Sierra Vista 1305, Piso 4 Oficina 7, Col. Lomas del Tecnológico, C.P. 78215, San Luis Potosí, S.L.P.',
-  telefonos: 'Teléfonos: 444-521-7204 / 444-521-6980',
-  email:     'E-mail: contacto@inyecta.com.mx',
-  web:       'Página web: www.inyecta.com.mx',
-};
+const TITULO = 'TABLA DE AMORTIZACIÓN';
 
 // ────────────────────────────────────────────────────────────────────
 // Estilos
@@ -135,6 +128,7 @@ function PdfHeader({
 }: {
   data: ResultadoCotizacion; tasaAnual: number; logoUrl: string; folio?: string;
 }) {
+  const razonSocial = getBranding().empresa.razonSocial.toUpperCase();
   return (
     <View fixed>
       <View style={s.fechaWrap}>
@@ -143,7 +137,7 @@ function PdfHeader({
       <View style={s.logoWrap}>
         {logoUrl ? <Image src={logoUrl} style={s.logo} /> : null}
       </View>
-      <Text style={s.brandLine}>{RAZON_SOCIAL}</Text>
+      <Text style={s.brandLine}>{razonSocial}</Text>
       <Text style={s.titleLine}>
         {TITULO} — {data.producto === 'PURO' ? 'ARRENDAMIENTO PURO' : 'ARRENDAMIENTO FINANCIERO'}
       </Text>
@@ -177,12 +171,13 @@ function PdfHeader({
 }
 
 function PdfFooter() {
+  const c = getBranding().contacto;
   return (
     <View style={s.footer} fixed>
       <View style={s.footerRow}>
         <View style={{ flex: 1 }}>
-          <Text style={s.footerText}>{CONTACTO.direccion}</Text>
-          <Text style={s.footerText}>{CONTACTO.telefonos}  ·  {CONTACTO.email}  ·  {CONTACTO.web}</Text>
+          <Text style={s.footerText}>{c.direccion}</Text>
+          <Text style={s.footerText}>Teléfonos: {c.telefonos}  ·  E-mail: {c.email}  ·  Página web: {c.web}</Text>
         </View>
         <Text
           style={s.footerRight}
@@ -318,12 +313,13 @@ export function AmortizacionPDF({
 }: Props) {
   const isFin = data.producto === 'FINANCIERO';
 
+  const branding = getBranding();
   return (
     <Document
       title={`Amortización ${data.nombreCliente}`}
-      author="FSMP Soluciones de Capital · Inyecta"
+      author={`${branding.empresa.razonSocial} · ${branding.empresa.nombreComercial}`}
       subject={`${TITULO} ${data.producto}`}
-      creator="Inyecta Arrendamiento"
+      creator={`${branding.empresa.nombreComercial} Arrendamiento`}
     >
       <Page size="LETTER" orientation={isFin ? 'landscape' : 'portrait'} style={s.page}>
         <PdfHeader data={data} tasaAnual={tasaAnual} logoUrl={logoUrl} folio={folio} />

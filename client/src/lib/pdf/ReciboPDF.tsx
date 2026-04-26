@@ -20,16 +20,9 @@ import {
   Document, Page, Text, View, StyleSheet, Image,
 } from '@react-pdf/renderer';
 import { colors, fmtMoneySigned } from './tokens';
+import { getBranding } from '@/lib/branding';
 
-const RAZON_SOCIAL = 'FSMP SOLUCIONES DE CAPITAL, S.A. DE C.V., SOFOM, E.N.R.';
-const TITULO       = 'RECIBO DE PAGO';
-
-const CONTACTO = {
-  direccion: 'Av. Sierra Vista 1305, Piso 4 Oficina 7, Col. Lomas del Tecnológico, C.P. 78215, San Luis Potosí, S.L.P.',
-  telefonos: 'Teléfonos: 444-521-7204 / 444-521-6980',
-  email:     'E-mail: contacto@inyecta.com.mx',
-  web:       'Página web: www.inyecta.com.mx',
-};
+const TITULO = 'RECIBO DE PAGO';
 
 // Etiquetas humanas para el enum de Payment.tipo del backend.
 const TIPO_LABELS: Record<string, string> = {
@@ -346,10 +339,14 @@ export function ReciboPDF({ folio, pago, contrato, usuario }: ReciboData) {
 
   const tipoLabel = TIPO_LABELS[pago.tipo] || pago.tipo;
 
+  // Branding leído del singleton (cargado al boot por App.tsx).
+  const branding = getBranding();
+  const RAZON_SOCIAL = branding.empresa.razonSocial.toUpperCase();
+
   return (
     <Document
       title={`Recibo ${folio}`}
-      author="Inyecta SOFOM"
+      author={`${branding.empresa.nombreComercial} SOFOM`}
       subject="Recibo de pago — Cobranza"
     >
       <Page size="LETTER" style={s.page}>
@@ -484,8 +481,8 @@ export function ReciboPDF({ folio, pago, contrato, usuario }: ReciboData) {
 
         {/* Footer */}
         <View style={s.footer} fixed>
-          <Text>{CONTACTO.direccion}</Text>
-          <Text>{CONTACTO.telefonos} · {CONTACTO.email} · {CONTACTO.web}</Text>
+          <Text>{branding.contacto.direccion}</Text>
+          <Text>Teléfonos: {branding.contacto.telefonos} · E-mail: {branding.contacto.email} · Página web: {branding.contacto.web}</Text>
           <Text style={s.footerNote}>Documento informativo, no fiscal · Recibo {folio}</Text>
         </View>
       </Page>

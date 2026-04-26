@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from '@/context/AuthContext';
+import { loadBranding } from '@/lib/branding';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import Layout from '@/components/Layout';
 import Login from '@/pages/Login';
@@ -40,6 +42,13 @@ const queryClient = new QueryClient({
 });
 
 export default function App() {
+  // Cargar branding al boot. Fire-and-forget: si falla, los componentes
+  // que lo consumen (PDFs, /portal) caen al default hardcoded —
+  // nunca rompe la UI. Ver lib/branding.ts para detalles.
+  useEffect(() => {
+    void loadBranding();
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>

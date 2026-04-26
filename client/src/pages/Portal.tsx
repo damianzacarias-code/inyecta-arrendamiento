@@ -10,6 +10,7 @@ import axios from 'axios';
 import { PDFDownloadLink } from '@react-pdf/renderer';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { EstadoCuentaPDF } from '@/lib/pdf/EstadoCuentaPDF';
+import { useBranding } from '@/lib/branding';
 import {
   Building2, FileText, AlertTriangle,
   Receipt, Download, DollarSign, ArrowRight, ArrowLeft,
@@ -493,6 +494,7 @@ function Header({ cliente }: { cliente: Cliente }) {
 }
 
 function DatosBancarios() {
+  const { banco } = useBranding();
   return (
     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-4">
       <h3 className="font-semibold text-blue-900 mb-2 flex items-center gap-2">
@@ -501,15 +503,15 @@ function DatosBancarios() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
         <div>
           <div className="text-xs text-blue-700">Beneficiario</div>
-          <div className="font-medium text-blue-900">FSMP Soluciones de Capital S.A. de C.V.</div>
+          <div className="font-medium text-blue-900">{banco.beneficiario}</div>
         </div>
         <div>
           <div className="text-xs text-blue-700">Banco</div>
-          <div className="font-medium text-blue-900">BBVA México</div>
+          <div className="font-medium text-blue-900">{banco.nombre}</div>
         </div>
         <div>
           <div className="text-xs text-blue-700">CLABE</div>
-          <div className="font-mono font-medium text-blue-900">012-180-XXXXXXXXXX-X</div>
+          <div className="font-mono font-medium text-blue-900">{banco.clabe}</div>
         </div>
       </div>
       <p className="text-xs text-blue-700 mt-3">
