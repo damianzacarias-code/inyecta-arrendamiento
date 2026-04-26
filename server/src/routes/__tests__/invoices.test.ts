@@ -16,7 +16,7 @@
  * Es una decisión de la API; los tests validan el contrato real, no
  * uniformidad inexistente.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
@@ -34,8 +34,17 @@ vi.mock('../../config/db', () => ({
 
 // El módulo invoices.ts importa fs+path para crear FACTURAS_DIR en module scope.
 // Eso es OK en tests; mkdirSync es idempotente con recursive:true.
-const { default: invoiceRoutes } = await import('../invoices');
-const { errorHandler } = await import('../../middleware/errorHandler');
+// Importar DESPUÉS del mock para que la ruta resuelva al fake. Se hace
+// en beforeAll (no top-level await) para mantener tsconfig en
+// `module: commonjs`. vi.mock se hoistea, así que el mock ya está
+// activo cuando este import resuelve.
+let invoiceRoutes: express.Router;
+let errorHandler: express.ErrorRequestHandler;
+
+beforeAll(async () => {
+  invoiceRoutes = (await import('../invoices')).default as express.Router;
+  errorHandler = (await import('../../middleware/errorHandler')).errorHandler;
+});
 
 const JWT_SECRET = 'test-secret-only-for-vitest-do-not-use-anywhere-else-32';
 

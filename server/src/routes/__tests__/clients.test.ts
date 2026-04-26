@@ -17,7 +17,7 @@
  * la rama 500 (error de Prisma) — ese path lo cubre errorHandler.test
  * en el bloque A.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
@@ -38,8 +38,17 @@ vi.mock('../../config/db', () => ({
 }));
 
 // Importar DESPUÉS del mock para que la ruta resuelva al fake.
-const { default: clientRoutes } = await import('../clients');
-const { errorHandler } = await import('../../middleware/errorHandler');
+// Se hace en beforeAll (no top-level await) para mantener tsconfig en
+// `module: commonjs` — top-level await requiere ES modules y rompería
+// el build/test setup. vi.mock se hoistea al top, así que para cuando
+// beforeAll corre, el mock ya está activo.
+let clientRoutes: express.Router;
+let errorHandler: express.ErrorRequestHandler;
+
+beforeAll(async () => {
+  clientRoutes = (await import('../clients')).default as express.Router;
+  errorHandler = (await import('../../middleware/errorHandler')).errorHandler;
+});
 
 const JWT_SECRET = 'test-secret-only-for-vitest-do-not-use-anywhere-else-32';
 

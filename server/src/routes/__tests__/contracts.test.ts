@@ -12,7 +12,7 @@
  *   - 200 detalle con relaciones
  *   - 404 cuando findUnique devuelve null
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
@@ -30,8 +30,17 @@ vi.mock('../../config/db', () => ({
   default: mockPrisma,
 }));
 
-const { default: contractRoutes } = await import('../contracts');
-const { errorHandler } = await import('../../middleware/errorHandler');
+// Importar DESPUÉS del mock para que la ruta resuelva al fake. Se hace
+// en beforeAll (no top-level await) para mantener tsconfig en
+// `module: commonjs`. vi.mock se hoistea, así que el mock está activo
+// para cuando este import resuelve.
+let contractRoutes: express.Router;
+let errorHandler: express.ErrorRequestHandler;
+
+beforeAll(async () => {
+  contractRoutes = (await import('../contracts')).default as express.Router;
+  errorHandler = (await import('../../middleware/errorHandler')).errorHandler;
+});
 
 const JWT_SECRET = 'test-secret-only-for-vitest-do-not-use-anywhere-else-32';
 const STAGE_ORDER = ['SOLICITUD', 'ANALISIS_CLIENTE', 'ANALISIS_BIEN', 'COMITE', 'FORMALIZACION', 'DESEMBOLSO', 'ACTIVO'];
