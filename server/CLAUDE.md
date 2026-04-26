@@ -1777,6 +1777,120 @@ bajo impacto que no requieren su aprobación.
         BD primero y aplicar migraciones (`up -d db` + `run --rm
         server npx prisma migrate deploy`), después `up -d` para
         todo.
+
+  - [x] H6: /admin/usuarios — alta y gestión de empleados
+        Patrón viejo: el único alta de usuario era POST /api/auth/
+        register (creado para el bootstrap), accesible sólo a ADMIN
+        pero sin UI. Para dar de alta a un nuevo empleado había que
+        usar curl o DBeaver — flujo no apto para un operador no
+        técnico (que es justo Damián, en producción).
+        Diseño nuevo: CRUD completo con baja lógica + UI admin que
+        DIRECTOR puede inspeccionar (read-only) y ADMIN puede
+        operar.
+
+        Backend (server/src/routes/users.ts):
+          • GET /api/users — listado completo, ordenado por activo
+            desc / rol asc / apellidos asc. ADMIN o DIRECTOR.
+          • POST /api/users — alta. Solo ADMIN. Zod: email único
+            (lowercase), password ≥8 (mejora del ≥6 que usaba
+            /auth/register), nombre+apellidos requeridos, rol del
+            enum completo (ADMIN/DIRECTOR/ANALISTA/COBRANZA/
+            OPERACIONES/LEGAL). bcrypt 12 rondas.
+          • PATCH /api/users/:id — edita nombre/apellidos/rol/
+            activo. Solo ADMIN. Refine "Sin cambios" rechaza body
+            vacío con 400.
+          • POST /api/users/:id/reset-password — fija nueva pass
+            (≥8). Devuelve `{ ok: true }` SIN la nueva contraseña
+            — el ADMIN ya la conoce porque la capturó; transmitirla
+            al usuario por canal seguro es responsabilidad del
+            operador.
+          • PATCH /api/users/:id/deactivate y /activate — atajos
+            sobre PATCH /:id { activo: bool }. Existen como rutas
+            separadas para que la bitácora deje un registro
+            semánticamente claro.
+          • Sin DELETE físico: el usuario tiene relaciones
+            (cotizaciones, contratos, pagos, notas, bitácora,
+            notificaciones). Baja = activo=false → el login lo
+            rechaza con 'Credenciales inválidas' (igual que cuenta
+            no existe — no leak user-enum), pero el historial queda
+            intacto para auditoría PLD.
+          • Anti-lockout (validado en server, espejado en UI):
+              - Self-deactivation bloqueada (409 SELF_DEACTIVATION).
+              - Self-demotion de rol bloqueada (409 SELF_DEMOTION)
+                — debe pedir a otro ADMIN que cambie su rol.
+              - Cualquier operación que dejaría al sistema sin
+                ningún ADMIN activo se rechaza con 409 LAST_ADMIN
+                comparando count(rol=ADMIN, activo=true,
+                NOT id=target).
+          • Errores con AppError → errorHandler central → shape
+            consistente { error: { code, message } }. Las refines
+            de Zod salen como 400 VALIDATION_ERROR.
+
+        Frontend (client/src/pages/admin/Usuarios.tsx):
+          • Tabla zebra con badge de rol (6 colores: ADMIN morado,
+            DIRECTOR índigo, ANALISTA azul, COBRANZA esmeralda,
+            OPERACIONES ámbar, LEGAL slate). Estatus inline
+            (verde activo / gris desactivado). Identifica "Tu
+            cuenta" para que el ADMIN no se confunda.
+          • Acciones por fila (sólo isAdmin):
+              - Editar (lápiz) → modal con nombre/apellidos/rol
+              - Reset password (llave) → modal con captura de pass
+              - Toggle activo (toggle) → PATCH inline. Deshabilitado
+                con tooltip si es la cuenta del actor.
+          • DIRECTOR ve el listado pero los botones de acción no
+            se renderizan (consistencia con la guard del server).
+          • Modal único con `mode` (create/edit/reset) para no
+            anidar componentes. Cierra con click fuera (backdrop)
+            o el botón ✕. No usa <dialog> nativo porque queríamos
+            backdrop semi-transparente customizado.
+          • helper extractError(err) maneja tanto el shape nuevo
+            ({ error: { message } }) como el legacy ({ error:
+            'string' }) por si tocamos rutas sin migrar.
+
+        Wiring:
+          • App.tsx: nueva ruta /admin/usuarios.
+          • navigation.ts: entrada "Usuarios (admin)" en la sección
+            Reportes (junto a Catálogo y Plantillas).
+          • index.ts: app.use('/api/users', usersRoutes) antes del
+            notFoundHandler.
+
+        Verificación (server/src/__verify__/users.verify.ts):
+          • Levanta mini-app con /api/users + errorHandler. 12
+            checks reales contra Postgres:
+              1. GET /users sin token → 401
+              2. GET /users como ANALISTA → 403
+              3. GET /users como ADMIN → 200 + array
+              4. POST /users crea → 201 con id
+              5. POST con email dup → 409 EMAIL_EXISTS
+              6. PATCH edita rol y nombre → 200
+              7. Reset password → ok:true sin password en response
+              8. Deactivate → activo:false
+              9. Activate → activo:true
+              10. ADMIN se desactiva a sí mismo → 409 SELF_DEACTIVATION
+              11. ADMIN se autodegrada → 409 SELF_DEMOTION
+              12. PATCH /:id sin campos → 400 (Zod refine "Sin cambios")
+          • Genera JWTs reales con jwt.sign + config.jwtSecret
+            (mismo patrón que catalog.verify.ts; no stubea el
+            middleware porque el handler usa req.user.userId de
+            verdad para la lógica anti-lockout).
+          • Limpia al final: borra el usuario verify-* creado
+            durante la corrida.
+          • npm run verify:users → 12/12 OK.
+
+        Nota sobre /api/auth/register (legacy): se conserva sin
+        cambios porque el seed inicial podría depender de él en el
+        futuro. Hoy /api/users es la ruta canónica para alta de
+        empleados; /auth/register queda como compat path. Si en
+        algún momento se decide retirarlo, hacerlo en una migración
+        explícita (no es bloqueante).
+
+        Para que Damián dé de alta a su equipo: entrar a
+        /admin/usuarios, click "Nuevo usuario", llenar email +
+        password temporal + nombre + rol, transmitir la pass por
+        WhatsApp/llamada. El usuario entra con esa pass y luego
+        Damián la resetea o el usuario hace cambio (cambio de pass
+        por el propio usuario es feature pendiente — fuera de
+        scope de esta tarea).
 ```
 
 ---
