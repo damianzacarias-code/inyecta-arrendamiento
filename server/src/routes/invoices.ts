@@ -18,6 +18,7 @@ import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
 import { getCfdiProvider, CfdiInvoiceInput } from '../services/cfdiProvider';
 import { childLogger } from '../lib/logger';
+import { nextInvoiceFolio } from '../services/folioSequence';
 
 const log = childLogger('invoices');
 
@@ -181,13 +182,14 @@ router.post('/facturar', requireAuth, async (req: Request, res: Response) => {
     iva = round2(iva);
     const total = round2(subtotal + iva);
 
-    // ─── Folio consecutivo por serie ───
-    const last = await prisma.invoice.findFirst({
-      where: { serie: data.serie },
-      orderBy: { folio: 'desc' },
-      select: { folio: true },
-    });
-    const nextFolio = (last?.folio || 0) + 1;
+    // ─── Folio consecutivo por serie (atómico, anti-race) ───
+    // Antes: `findFirst orderBy folio desc + 1` → race condition.
+    // Ahora: la secuencia se incrementa atómicamente. Si el timbrado
+    // falla después, el folio queda "quemado" (skipped) — aceptado
+    // por SAT, los folios pueden tener gaps mientras no se dupliquen.
+    const nextFolio = await prisma.$transaction(async (tx) =>
+      nextInvoiceFolio(tx, data.serie),
+    );
 
     // ─── Llamar al provider de timbrado ───
     const provider = getCfdiProvider();

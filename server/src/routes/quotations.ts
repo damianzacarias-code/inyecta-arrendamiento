@@ -6,6 +6,7 @@ import { calcularArrendamiento, generarOpcionesRiesgo } from '../services/leaseC
 import { sembrarActoresIniciales } from '../services/expedienteSeeder';
 import { notificar } from '../lib/notificar';
 import { childLogger } from '../lib/logger';
+import { nextContractFolio, nextQuotationFolio } from '../services/folioSequence';
 
 const log = childLogger('quotations');
 
@@ -54,10 +55,6 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     const data = quotationSchema.parse(req.body);
     const userId = req.user!.userId;
 
-    // Generar folio
-    const count = await prisma.quotation.count();
-    const folio = `COT-${String(count + 1).padStart(4, '0')}`;
-
     // Calcular
     const resultado = calcularArrendamiento({
       producto: data.producto,
@@ -103,7 +100,11 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     const vigencia = new Date();
     vigencia.setDate(vigencia.getDate() + 30);
 
-    const quotation = await prisma.quotation.create({
+    // Folio atómico DENTRO de la tx — si la cotización falla al crear,
+    // el incremento de la secuencia se revierte también.
+    const quotation = await prisma.$transaction(async (tx) => {
+      const { folio } = await nextQuotationFolio(tx);
+      return tx.quotation.create({
       data: {
         folio,
         clientId: data.clientId || null,
@@ -152,6 +153,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         client: { select: { id: true, rfc: true, tipo: true } },
         user: { select: { id: true, nombre: true, apellidos: true } },
       },
+      });
     });
 
     return res.status(201).json({
@@ -401,12 +403,10 @@ router.post('/:id/convert', requireAuth, async (req: Request, res: Response) => 
       return res.status(400).json({ error: 'La cotización no tiene descripción del bien' });
     }
 
-    // Generar folio
-    const year = new Date().getFullYear();
-    const count = await prisma.contract.count();
-    const folio = `ARR-${String(count + 1).padStart(3, '0')}-${year}`;
-
     const contract = await prisma.$transaction(async (tx) => {
+      // Folio atómico DENTRO de la tx (CLAUDE.md §rules — fix race
+      // condition del patrón viejo `count + 1`).
+      const { folio } = await nextContractFolio(tx);
       const created = await tx.contract.create({
         data: {
           folio,

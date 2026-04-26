@@ -1118,3 +1118,27 @@ model ExpedienteDocumento {
   @@index([actorId, tipoDocumento])
   @@map("expediente_documentos")
 }
+
+// ============================================================
+// SECUENCIAS DE FOLIO — atómicas, una fila por (scope, year)
+// ============================================================
+// Reemplaza el patrón inseguro `count + 1` que tenía race condition
+// cuando dos usuarios firmaban contratos en el mismo segundo (los dos
+// obtenían el mismo count → segundo INSERT fallaba con P2002).
+//
+// Uso: `nextFolio(tx, 'CONTRACT', 2026)` dentro de una transacción
+// hace UPSERT con increment atómico (Postgres lock por fila).
+//
+// Scope convencionales:
+//   - 'CONTRACT'        → ARR-NNN-YYYY (year = año real, ej. 2026)
+//   - 'QUOTATION'       → COT-NNNN     (year = 0, no rota anual)
+//   - 'INVOICE_<serie>' → folio Int por serie SAT (year = 0)
+model FolioSequence {
+  scope     String   // 'CONTRACT' | 'QUOTATION' | 'INVOICE_<serie>'
+  year      Int      // 2026, o 0 si la serie no rota anual
+  ultimo    Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@id([scope, year])
+  @@map("folio_sequences")
+}

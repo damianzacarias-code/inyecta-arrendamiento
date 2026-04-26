@@ -15,6 +15,7 @@ import {
   proveedorSchema,
 } from '../schemas/contract';
 import { sembrarActoresIniciales } from '../services/expedienteSeeder';
+import { nextContractFolio } from '../services/folioSequence';
 
 const log = childLogger('contracts');
 
@@ -106,11 +107,6 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Cliente no encontrado' });
     }
 
-    // Generar folio
-    const year = new Date().getFullYear();
-    const count = await prisma.contract.count();
-    const folio = `ARR-${String(count + 1).padStart(3, '0')}-${year}`;
-
     const valorBienIVA = data.valorBien * 1.16;
 
     // Si viene desde una cotización, validar que no esté ya convertida
@@ -136,6 +132,9 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     }
 
     const contract = await prisma.$transaction(async (tx) => {
+      // Folio atómico DENTRO de la tx — si el INSERT del contrato
+      // aborta, el incremento de la secuencia se revierte también.
+      const { folio } = await nextContractFolio(tx);
       const created = await tx.contract.create({
         data: {
           folio,
