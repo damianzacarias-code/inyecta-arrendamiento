@@ -385,19 +385,46 @@ export function calcularMoratorios(
 // ═══════════════════════════════════════════════════════════════════
 
 /**
+ * Preset de un nivel de riesgo. Espejo de la tabla `risk_presets` del
+ * server. Lo declaramos local para que esta función NO dependa de
+ * Prisma (sigue siendo pura, testeable sin BD). El llamador puede:
+ *   • pasar el array desde BD (`prisma.riskPreset.findMany`)
+ *   • pasar `undefined` y dejar que use los defaults históricos
+ *     (útil en tests y en arranques sin migrar).
+ */
+export interface RiskPresetInput {
+  nivel: 'A' | 'B' | 'C' | string;
+  nombre: string;
+  engachePuroPct: number;
+  depositoPuroPct: number;
+  engancheFinPct: number;
+  depositoFinPct: number;
+  orden?: number;
+}
+
+/** Defaults históricos. Coinciden con el seed de la migración. */
+const DEFAULT_RISK_PRESETS: RiskPresetInput[] = [
+  { nivel: 'A', nombre: 'Riesgo bajo',  engachePuroPct: 0, depositoPuroPct: 0.16, engancheFinPct: 0.00, depositoFinPct: 0.16, orden: 1 },
+  { nivel: 'B', nombre: 'Riesgo medio', engachePuroPct: 0, depositoPuroPct: 0.21, engancheFinPct: 0.05, depositoFinPct: 0.16, orden: 2 },
+  { nivel: 'C', nombre: 'Riesgo alto',  engachePuroPct: 0, depositoPuroPct: 0.26, engancheFinPct: 0.10, depositoFinPct: 0.16, orden: 3 },
+];
+
+/**
  * Genera 6 escenarios (3 niveles de riesgo × 2 productos) para que el
  * ejecutivo le presente al cliente alternativas comparables.
  *
- * Niveles:
- *   - A (riesgo bajo)  → depósito 16% / enganche FIN 0%
- *   - B (riesgo medio) → depósito 21% PURO / 16% FIN; enganche FIN 5%
- *   - C (riesgo alto)  → depósito 26% PURO / 16% FIN; enganche FIN 10%
+ * Antes los porcentajes vivían como literales en esta función. Ahora se
+ * leen de la tabla `risk_presets` (con fallback a defaults históricos
+ * si el llamador no pasa nada) — ADMIN/DIRECTOR los puede ajustar
+ * desde /admin/catalogo sin redeploy.
  *
  * @param valorBien    valor SIN IVA del bien.
  * @param plazo        meses (12..48).
  * @param tasaAnual    decimal (ej: 0.36 = 36%).
  * @param gps          monto GPS — siempre financiado en estos escenarios.
  * @param comisionPct  comisión apertura — siempre financiada.
+ * @param presets      opcional: lista de presets desde BD.
+ *                     Si se omite, usa DEFAULT_RISK_PRESETS.
  * @returns            array de 6 cotizaciones con `{producto, nivel, ...resultado}`.
  */
 export function generarOpcionesRiesgo(
@@ -406,12 +433,11 @@ export function generarOpcionesRiesgo(
   tasaAnual: number,
   gps: number,
   comisionPct: number,
+  presets?: RiskPresetInput[],
 ) {
-  const niveles = [
-    { nivel: 'A', nombre: 'Riesgo bajo',  depositoPuro: 0.16, depositoFin: 0.16, engancheFin: 0.00 },
-    { nivel: 'B', nombre: 'Riesgo medio', depositoPuro: 0.21, depositoFin: 0.16, engancheFin: 0.05 },
-    { nivel: 'C', nombre: 'Riesgo alto',  depositoPuro: 0.26, depositoFin: 0.16, engancheFin: 0.10 },
-  ];
+  const niveles = (presets && presets.length > 0 ? presets : DEFAULT_RISK_PRESETS)
+    .slice()
+    .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
 
   const opciones = [];
 
@@ -420,11 +446,11 @@ export function generarOpcionesRiesgo(
     const puro = calcularArrendamiento({
       producto: 'PURO',
       valorBien, plazo, tasaAnual,
-      enganchePct: 0,
-      depositoGarantiaPct: nv.depositoPuro,
+      enganchePct: nv.engachePuroPct,
+      depositoGarantiaPct: nv.depositoPuroPct,
       comisionAperturaPct: comisionPct,
       comisionAperturaFinanciada: true,
-      valorResidualPct: nv.depositoPuro,
+      valorResidualPct: nv.depositoPuroPct,
       rentaInicial: 0,
       gpsInstalacion: gps,
       gpsFinanciado: true,
@@ -443,8 +469,8 @@ export function generarOpcionesRiesgo(
     const financiero = calcularArrendamiento({
       producto: 'FINANCIERO',
       valorBien, plazo, tasaAnual,
-      enganchePct: nv.engancheFin,
-      depositoGarantiaPct: nv.depositoFin,
+      enganchePct: nv.engancheFinPct,
+      depositoGarantiaPct: nv.depositoFinPct,
       comisionAperturaPct: comisionPct,
       comisionAperturaFinanciada: true,
       valorResidualPct: 0,
@@ -464,6 +490,57 @@ export function generarOpcionesRiesgo(
   }
 
   return opciones;
+}
+
+/**
+ * Helper async que carga los presets de la BD y llama a
+ * `generarOpcionesRiesgo`. Si la BD está vacía o falla la lectura,
+ * cae a defaults sin romper el flujo de cotización.
+ *
+ * Pensado para los handlers de quotations que ya viven en un contexto
+ * async — no mete a Prisma en el motor puro de cálculo.
+ */
+export async function generarOpcionesRiesgoConBd(
+  prisma: { riskPreset: { findMany: (args: { orderBy: { orden: 'asc' } }) => Promise<Array<{
+    nivel: string;
+    nombre: string;
+    engachePuroPct: { toNumber(): number } | string | number;
+    depositoPuroPct: { toNumber(): number } | string | number;
+    engancheFinPct:  { toNumber(): number } | string | number;
+    depositoFinPct:  { toNumber(): number } | string | number;
+    orden: number;
+  }>> } },
+  valorBien: number,
+  plazo: number,
+  tasaAnual: number,
+  gps: number,
+  comisionPct: number,
+) {
+  const toNum = (d: { toNumber(): number } | string | number): number => {
+    if (typeof d === 'number') return d;
+    if (typeof d === 'string') return Number(d);
+    return d.toNumber();
+  };
+  let presets: RiskPresetInput[] | undefined;
+  try {
+    const rows = await prisma.riskPreset.findMany({ orderBy: { orden: 'asc' } });
+    if (rows.length > 0) {
+      presets = rows.map((r) => ({
+        nivel: r.nivel,
+        nombre: r.nombre,
+        engachePuroPct:  toNum(r.engachePuroPct),
+        depositoPuroPct: toNum(r.depositoPuroPct),
+        engancheFinPct:  toNum(r.engancheFinPct),
+        depositoFinPct:  toNum(r.depositoFinPct),
+        orden: r.orden,
+      }));
+    }
+  } catch {
+    // fallback silencioso: si la lectura falla (BD recién migrada,
+    // permisos, etc.) seguimos con los defaults históricos en lugar
+    // de tumbar la cotización.
+  }
+  return generarOpcionesRiesgo(valorBien, plazo, tasaAnual, gps, comisionPct, presets);
 }
 
 // ═══════════════════════════════════════════════════════════════════

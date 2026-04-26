@@ -15,6 +15,7 @@ import {
 } from '@/lib/cotizacion/amortizacion';
 import { CotizacionPDF } from '@/lib/pdf/CotizacionPDF';
 import { AmortizacionPDF } from '@/lib/pdf/AmortizacionPDF';
+import { getCatalog } from '@/lib/catalog';
 
 /** Forma del payload de error del backend cuando la validación Zod
  *  falla: `{error: [{message: string, ...}, ...]}`. Cuando NO hay
@@ -134,12 +135,22 @@ interface CotizadorProps {
 
 export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
   const navigate = useNavigate();
+  // Defaults dinámicos del catálogo (cargado en App.tsx). Si la fetch
+  // aún no terminó, getCatalog() devuelve los hardcoded históricos
+  // — idénticos al seed de la BD, así que el usuario nunca ve un
+  // valor "raro" en el primer render.
+  const _catalog = getCatalog();
+  const _presetA = _catalog.riskPresets.find((p) => p.nivel === 'A');
   const [form, setForm] = useState({
     ...defaultForm,
+    tasaAnual: _catalog.catalog.tasaAnualDefault,
+    comisionAperturaPct: _catalog.catalog.comisionAperturaDefault,
+    gpsInstalacion: _catalog.catalog.gpsMontoDefault,
+    gpsFinanciado: _catalog.catalog.gpsFinanciableDefault,
+    depositoGarantiaPct: _presetA?.depositoPuroPct ?? defaultForm.depositoGarantiaPct,
     producto: productoInicial ?? defaultForm.producto,
     // Defaults por producto: PURO → residual 16%, FIN → residual 2% (opción de compra)
-    valorResidualPct: productoInicial === 'FINANCIERO' ? 0.02 : 0.16,
-    depositoGarantiaPct: productoInicial === 'FINANCIERO' ? 0.16 : 0.16,
+    valorResidualPct: productoInicial === 'FINANCIERO' ? 0.02 : (_presetA?.depositoPuroPct ?? 0.16),
   });
   const [result, setResult] = useState<SimulationResult | null>(null);
   const [categories, setCategories] = useState<AssetCategory[]>([]);
@@ -212,11 +223,31 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const riskDefaults: Record<string, { enganchePct: number; depositoGarantiaPct: number; valorResidualPct: number }> = {
-    A: { enganchePct: 0, depositoGarantiaPct: 0.16, valorResidualPct: 0.16 },
-    B: { enganchePct: 0.05, depositoGarantiaPct: 0.21, valorResidualPct: 0.21 },
-    C: { enganchePct: 0.10, depositoGarantiaPct: 0.26, valorResidualPct: 0.26 },
-  };
+  // Presets de riesgo desde el catálogo (BD). Los valores históricos
+  // hardcoded ya viven como fallback en lib/catalog.ts y como seed de
+  // la migración, así que aquí leer del singleton es 100% seguro.
+  // Para la columna `enganchePct` del cotizador "general", usamos
+  // engancheFinPct (legacy: B=5%, C=10%) — es el que tradicionalmente
+  // pide el cotizador al cliente. PURO toma engachePuroPct (cero).
+  const riskDefaults: Record<string, { enganchePct: number; depositoGarantiaPct: number; valorResidualPct: number }> = (() => {
+    const cat = getCatalog();
+    const out: Record<string, { enganchePct: number; depositoGarantiaPct: number; valorResidualPct: number }> = {};
+    for (const p of cat.riskPresets) {
+      out[p.nivel] = {
+        enganchePct: p.engancheFinPct,
+        depositoGarantiaPct: p.depositoPuroPct,
+        valorResidualPct: p.depositoPuroPct,
+      };
+    }
+    // Fallback duro por si el catálogo está vacío de niveles esperados.
+    return out.A
+      ? out
+      : {
+          A: { enganchePct: 0,    depositoGarantiaPct: 0.16, valorResidualPct: 0.16 },
+          B: { enganchePct: 0.05, depositoGarantiaPct: 0.21, valorResidualPct: 0.21 },
+          C: { enganchePct: 0.10, depositoGarantiaPct: 0.26, valorResidualPct: 0.26 },
+        };
+  })();
 
   const handleRiskChange = (level: 'A' | 'B' | 'C') => {
     const defaults = riskDefaults[level];

@@ -1142,3 +1142,65 @@ model FolioSequence {
   @@id([scope, year])
   @@map("folio_sequences")
 }
+
+// ──────────────────────────────────────────────────────────────────
+// Catálogo de tasas, comisiones y GPS (single-row config)
+// ──────────────────────────────────────────────────────────────────
+//
+// Antes: tasa 0.36, comisión 0.05, GPS $16k vivían como literales en
+// el wizard del cliente y en leaseCalculator del server (defaults
+// duplicados). Cambiar la tasa de la casa requería redeployar.
+//
+// Ahora: una sola fila con `clave='default'` que ADMIN/DIRECTOR
+// pueden editar desde /admin/catalogo, leída por el cotizador en
+// boot. Los presets de riesgo A/B/C viven en RiskPreset (tabla
+// aparte porque son N filas, no 1).
+//
+// Diseño con clave estable en lugar de id auto-incremental: facilita
+// `findUnique({ clave: 'default' })` sin necesidad de conocer el id
+// generado, y permite (a futuro) tener múltiples perfiles de tasas
+// (ej. clave='gobierno' con condiciones distintas).
+model Catalog {
+  clave                    String   @id  // 'default' (única por ahora)
+  // Tasa anual ordinaria (decimal: 0.36 = 36%)
+  tasaAnualDefault         Decimal  @db.Decimal(7, 4)
+  tasaAnualMin             Decimal  @db.Decimal(7, 4)
+  tasaAnualMax             Decimal  @db.Decimal(7, 4)
+  // Comisión de apertura (decimal: 0.05 = 5%)
+  comisionAperturaDefault  Decimal  @db.Decimal(7, 4)
+  comisionAperturaMin      Decimal  @db.Decimal(7, 4)
+  comisionAperturaMax      Decimal  @db.Decimal(7, 4)
+  // GPS — monto absoluto en MXN; suele ser único de instalación
+  gpsMontoDefault          Decimal  @db.Decimal(12, 2)
+  gpsFinanciableDefault    Boolean  @default(true)
+  // Multiplicador moratorio sobre la tasa ordinaria (CLAUDE.md §4.9)
+  // Default 2.0 → 36% ord. = 72% mor. Editable por si Inyecta cambia
+  // política comercial (ej. 1.5× para clientes preferentes).
+  tasaMoratoriaMultiplier  Decimal  @db.Decimal(4, 2) @default(2.0)
+  updatedAt                DateTime @updatedAt
+  updatedById              String?  // user.id que editó la última vez
+
+  @@map("catalog")
+}
+
+// Presets de depósito y enganche por nivel de riesgo (A/B/C). Antes
+// duplicados en client/src/pages/operacionNuevo/constants.ts y en
+// server/src/services/leaseCalculator.ts:411-413.
+//
+// Una fila por nivel. ADMIN/DIRECTOR puede ajustar los porcentajes;
+// el visor de opciones (generarOpcionesRiesgo) lee desde aquí.
+model RiskPreset {
+  nivel                String   @id  // 'A' | 'B' | 'C'
+  nombre               String           // 'Riesgo bajo' | 'medio' | 'alto'
+  // PURO: enganche (típicamente 0), depósito (= valor residual display)
+  engachePuroPct       Decimal  @db.Decimal(7, 4) @default(0)
+  depositoPuroPct      Decimal  @db.Decimal(7, 4)
+  // FINANCIERO: enganche y depósito independientes
+  engancheFinPct       Decimal  @db.Decimal(7, 4)
+  depositoFinPct       Decimal  @db.Decimal(7, 4)
+  orden                Int      @default(0)  // 1, 2, 3 para ordenar UI
+  updatedAt            DateTime @updatedAt
+  updatedById          String?
+
+  @@map("risk_presets")
+}

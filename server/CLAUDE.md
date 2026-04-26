@@ -1572,6 +1572,84 @@ bajo impacto que no requieren su aprobación.
         SMTP está caído o las credenciales están mal, las notifica-
         ciones in-app siguen funcionando — sólo el email espejo falla
         silenciosamente y queda en los logs.
+
+  - [x] H4: Catálogo dinámico de tasas, comisiones, GPS y presets de
+        riesgo a BD + endpoint + UI admin
+        Patrón viejo: tasaAnual=0.36, comisionAperturaPct=0.05,
+        gpsMonto=16000 y los 3 presets de riesgo (A/B/C) hardcoded
+        en cliente y servidor. Cambiar la política comercial — bajar
+        la tasa para una promoción, subir el GPS porque el proveedor
+        cambió, agregar un preset "Riesgo D" — requería editar
+        archivos `.tsx` y `.ts`, recompilar cliente y reiniciar
+        servidor.
+        Diseño nuevo (espejo del patrón branding/H2):
+          • Schema Prisma:
+              - model Catalog (clave PK 'default', tasaAnualDefault/
+                Min/Max, comisionApertura{Default,Min,Max}, gpsMonto-
+                Default, gpsFinanciableDefault, tasaMoratoriaMulti-
+                plier, updatedAt, updatedById).
+              - model RiskPreset (nivel PK 'A'|'B'|'C', nombre,
+                {engache,deposito}{Puro,Fin}Pct, orden, updatedAt,
+                updatedById).
+              - Migración 20260426181126_add_catalog_and_risk_presets
+                con CREATE TABLEs + seed inline (1 catalog + 3
+                presets) idempotente con ON CONFLICT DO NOTHING.
+          • Rutas (server/src/routes/catalog.ts):
+              - GET /api/config/catalog (requireAuth) — devuelve
+                { catalog, riskPresets } con Decimal serializado a
+                number. Si BD vacía, fallback a DEFAULT_CATALOG /
+                DEFAULT_RISK_PRESETS hardcoded (idénticos al seed).
+              - PUT /api/config/catalog (ADMIN/DIRECTOR) — upsert
+                de la fila 'default'. Zod refines: min ≤ default ≤
+                max para tasa y comisión, multiplier ∈ [1,5].
+              - PUT /api/config/catalog/risk/:nivel (ADMIN/DIRECTOR)
+                — update de un preset por nivel ('A'|'B'|'C').
+          • leaseCalculator refactor:
+              - generarOpcionesRiesgo(...) recibe `presets?` opcional
+                (queda PURA, testeable sin Prisma).
+              - generarOpcionesRiesgoConBd(prisma, ...) async wrapper
+                que lee de BD y cae a defaults si la query falla. Lo
+                consumen los 2 callsites de routes/quotations.ts.
+          • Cliente (espejo de lib/branding.ts):
+              - lib/catalog.ts singleton + getCatalog() síncrono +
+                useCatalog() hook + reloadCatalog() para invalidar.
+              - App.tsx llama loadCatalog() al boot junto con
+                loadBranding().
+              - Cotizador.tsx hidrata su estado inicial (tasaAnual,
+                comisionAperturaPct, gpsInstalacion, gpsFinanciado,
+                depositoGarantiaPct) desde getCatalog() en vez de
+                literales hardcoded. riskDefaults mapea
+                catalog.riskPresets en lugar de un objeto literal.
+                Hardcoded como fallback para edge case (catálogo
+                vacío de niveles).
+          • Admin UI: client/src/pages/admin/Catalogo.tsx — form en
+            4 secciones (tasa anual, comisión apertura, GPS+
+            moratoria, presets A/B/C). Convierte fracciones BD ↔
+            % humano (UI muestra 36.00, BD guarda 0.36). Validación
+            local espejo del Zod del server (rangos min/default/max,
+            % entre 0 y 100, nombre obligatorio). Submit lanza 4
+            PUTs en paralelo (catalog + 3 risk presets) y luego
+            reloadCatalog(). Si alguna PUT falla, no recarga el
+            cache para evitar estado inconsistente.
+          • Navegación: agregada entrada "Catálogo (admin)" en
+            sección Reportes (junto a "Plantillas (admin)" y
+            "Bitácora"). Rutas legacy /admin/tasas y /admin/comisiones
+            redirigen a /admin/catalogo.
+        Tests/verify:
+          • src/__verify__/catalog.verify.ts (14 checks): GET 200,
+            shape del catalog (clave default + 8 campos numéricos +
+            boolean + multiplier en rango), shape de riskPresets
+            (array, niveles A/B/C presentes, depositoPuroPct y
+            engancheFinPct numéricos). Genera JWT real para pasar
+            requireAuth (no stubea el middleware).
+          • Tests existentes 169/169 server + 101/101 client siguen
+            pasando — el refactor de leaseCalculator es
+            backward-compatible (presets opcional con default).
+          • Comandos: `npm test`, `npm run verify:catalog`.
+        Para que Damián ajuste la política comercial: entrar a
+        /admin/catalogo (ADMIN o DIRECTOR), editar y guardar. Las
+        nuevas cotizaciones picks it up al instante; las ya
+        guardadas conservan los valores con que se cotizaron.
 ```
 
 ---

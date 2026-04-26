@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
-import { calcularArrendamiento, generarOpcionesRiesgo } from '../services/leaseCalculator';
+import { calcularArrendamiento, generarOpcionesRiesgoConBd } from '../services/leaseCalculator';
 import { sembrarActoresIniciales } from '../services/expedienteSeeder';
 import { notificar } from '../lib/notificar';
 import { childLogger } from '../lib/logger';
@@ -78,9 +78,10 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     // Generar opciones de riesgo si se solicitan
     let opcionesData: any[] = [];
     if (data.generarOpciones) {
-      const opciones = generarOpcionesRiesgo(
+      const opciones = await generarOpcionesRiesgoConBd(
+        prisma,
         data.valorBien, data.plazo, data.tasaAnual,
-        data.gpsInstalacion, data.comisionAperturaPct
+        data.gpsInstalacion, data.comisionAperturaPct,
       );
       opcionesData = opciones.map(op => ({
         nombre: op.nombre,
@@ -305,7 +306,8 @@ router.post('/simulate', requireAuth, async (req: Request, res: Response) => {
 
     let opciones;
     if (data.generarOpciones) {
-      opciones = generarOpcionesRiesgo(
+      opciones = await generarOpcionesRiesgoConBd(
+        prisma,
         data.valorBien || 500000,
         data.plazo || 36,
         data.tasaAnual || 0.36,

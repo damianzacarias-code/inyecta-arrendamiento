@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from '@/context/AuthContext';
 import { loadBranding } from '@/lib/branding';
+import { loadCatalog } from '@/lib/catalog';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import Layout from '@/components/Layout';
 import Login from '@/pages/Login';
@@ -33,6 +34,7 @@ import ReportesProduccion from '@/pages/reportes/Produccion';
 import ReportesMetricas from '@/pages/reportes/Metricas';
 import ReportesBitacora from '@/pages/reportes/Bitacora';
 import AdminTemplates from '@/pages/admin/Templates';
+import AdminCatalogo from '@/pages/admin/Catalogo';
 import EnConstruccion from '@/pages/EnConstruccion';
 
 const queryClient = new QueryClient({
@@ -47,6 +49,11 @@ export default function App() {
   // nunca rompe la UI. Ver lib/branding.ts para detalles.
   useEffect(() => {
     void loadBranding();
+    // El catálogo (tasas, comisiones, GPS, presets de riesgo) requiere
+    // sesión. Si el usuario aún no ha hecho login, la fetch dará 401 y
+    // el cache mantiene los defaults — que coinciden con el seed de la
+    // BD, así que no hay drift visible.
+    void loadCatalog();
   }, []);
 
   return (
@@ -92,9 +99,12 @@ export default function App() {
               <Route path="documentos" element={<Documentos />} />
               <Route path="circulo-credito" element={<CirculoCredito />} />
 
-              {/* ─── Administración / Catálogos (stubs, fuera del menú) ─── */}
-              <Route path="admin/tasas" element={<EnConstruccion titulo="Administración · Tasas de Interés" />} />
-              <Route path="admin/comisiones" element={<EnConstruccion titulo="Administración · Comisiones" />} />
+              {/* ─── Administración / Catálogos ─── */}
+              {/* /admin/catalogo unifica tasas+comisiones+GPS+presets de riesgo
+                  en una sola página (las rutas legacy redirigen ahí). */}
+              <Route path="admin/catalogo" element={<AdminCatalogo />} />
+              <Route path="admin/tasas" element={<Navigate to="/admin/catalogo" replace />} />
+              <Route path="admin/comisiones" element={<Navigate to="/admin/catalogo" replace />} />
               <Route path="admin/templates" element={<AdminTemplates />} />
 
               {/* ─── CRM (stubs, fuera del menú) ─── */}

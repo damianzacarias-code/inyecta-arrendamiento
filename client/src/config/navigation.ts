@@ -32,6 +32,7 @@ import {
   ScrollText,
   FileCheck2,
   FileUp,
+  Settings,
 } from 'lucide-react';
 
 export interface NavSubItem {
@@ -108,6 +109,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: 'Métricas generales',  icon: Activity,       path: '/reportes/metricas'        },
       { label: 'Reportes operativos', icon: FileBarChart,   path: '/reportes'                 },
       { label: 'Bitácora',            icon: ScrollText,     path: '/reportes/bitacora'        },
+      { label: 'Catálogo (admin)',    icon: Settings,       path: '/admin/catalogo'           },
       { label: 'Plantillas (admin)',  icon: FileCheck2,     path: '/admin/templates'          },
     ],
   },

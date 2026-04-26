@@ -16,7 +16,8 @@
     "verify:errorHandler": "tsx src/__verify__/errorHandler.verify.ts",
     "verify:health": "tsx src/__verify__/health.verify.ts",
     "verify:branding": "tsx src/__verify__/branding.verify.ts",
-    "verify:email": "tsx src/__verify__/email.verify.ts"
+    "verify:email": "tsx src/__verify__/email.verify.ts",
+    "verify:catalog": "tsx src/__verify__/catalog.verify.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",

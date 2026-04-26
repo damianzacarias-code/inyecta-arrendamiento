@@ -25,6 +25,7 @@ import expedienteRoutes from './routes/expediente';
 import { templateRouter as solicitudCnbvTemplateRoutes, contractRouter as solicitudCnbvContractRoutes } from './routes/solicitudCnbv';
 import extractRoutes from './routes/extract';
 import brandingRoutes from './routes/branding';
+import catalogConfigRoutes from './routes/catalog';
 import { bitacora } from './middleware/bitacora';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { requestId } from './middleware/requestId';
@@ -201,6 +202,10 @@ app.use('/api/extract', extractRoutes);
 // Branding público (sin auth) — datos del emisor que el cliente embebe en
 // PDFs y muestra en el portal del arrendatario. GET /api/config/branding.
 app.use('/api/config', brandingRoutes);
+// Catálogo dinámico de tasas, comisiones y GPS + presets de riesgo A/B/C.
+// GET es público para sesiones autenticadas (lo lee el cotizador al boot).
+// PUT requiere rol ADMIN o DIRECTOR (ver routes/catalog.ts).
+app.use('/api/config', catalogConfigRoutes);
 
 // 404 para /api/* sin match — devuelve el mismo formato { error: {...} }
 app.use('/api', notFoundHandler);
