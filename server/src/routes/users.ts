@@ -36,6 +36,13 @@ import {
   PASSWORD_MIN_LENGTH,
   PASSWORD_MAX_LENGTH,
 } from '../lib/passwordPolicy';
+import {
+  onUserCreated,
+  onUserRoleChanged,
+  onUserDeactivated,
+  onUserActivated,
+  onPasswordResetByAdmin,
+} from '../lib/securityAlerts';
 
 const router = Router();
 const log = childLogger('users');
@@ -167,6 +174,13 @@ router.post(
     });
 
     log.info({ creadoPor: req.user?.userId, nuevoUserId: user.id, rol: user.rol }, 'usuario creado');
+    void onUserCreated({
+      actorId:      req.user!.userId,
+      actorEmail:   req.user!.email,
+      newUserId:    user.id,
+      newUserEmail: user.email,
+      rol:          user.rol,
+    });
     res.status(201).json(user);
   }),
 );
@@ -227,6 +241,35 @@ router.patch(
     });
 
     log.info({ actorId, targetId: id, cambios: Object.keys(data) }, 'usuario actualizado');
+
+    // Alertas de seguridad para cambios sensibles. Cada handler aplica
+    // sus propios filtros (rolAnterior===rolNuevo no dispara, etc.).
+    if (data.rol && data.rol !== target.rol) {
+      void onUserRoleChanged({
+        actorId:      req.user!.userId,
+        actorEmail:   req.user!.email,
+        targetId:     id,
+        targetEmail:  target.email,
+        rolAnterior:  target.rol,
+        rolNuevo:     data.rol,
+      });
+    }
+    if (data.activo === false && target.activo === true) {
+      void onUserDeactivated({
+        actorId:     req.user!.userId,
+        actorEmail:  req.user!.email,
+        targetId:    id,
+        targetEmail: target.email,
+      });
+    }
+    if (data.activo === true && target.activo === false) {
+      void onUserActivated({
+        actorId:     req.user!.userId,
+        actorEmail:  req.user!.email,
+        targetId:    id,
+        targetEmail: target.email,
+      });
+    }
     res.json(updated);
   }),
 );
@@ -272,6 +315,12 @@ router.post(
     await setPassword(id, password, { mustChange: true });
 
     log.info({ actorId: req.user?.userId, targetId: id }, 'password reseteado');
+    void onPasswordResetByAdmin({
+      actorId:     req.user!.userId,
+      actorEmail:  req.user!.email,
+      targetId:    id,
+      targetEmail: target.email,
+    });
     res.json({ ok: true });
   }),
 );
@@ -313,6 +362,14 @@ router.patch(
       select: userPublic,
     });
     log.info({ actorId, targetId: id }, 'usuario desactivado');
+    if (target.activo) {
+      void onUserDeactivated({
+        actorId:     req.user!.userId,
+        actorEmail:  req.user!.email,
+        targetId:    id,
+        targetEmail: target.email,
+      });
+    }
     res.json(updated);
   }),
 );
@@ -323,7 +380,10 @@ router.patch(
   requireRole('ADMIN'),
   asyncHandler(async (req: Request, res) => {
     const { id } = req.params;
-    const target = await prisma.user.findUnique({ where: { id }, select: { id: true } });
+    const target = await prisma.user.findUnique({
+      where:  { id },
+      select: { id: true, email: true, activo: true },
+    });
     if (!target) {
       throw new AppError('USER_NOT_FOUND', 'Usuario no encontrado', 404);
     }
@@ -333,6 +393,14 @@ router.patch(
       select: userPublic,
     });
     log.info({ actorId: req.user?.userId, targetId: id }, 'usuario re-activado');
+    if (!target.activo) {
+      void onUserActivated({
+        actorId:     req.user!.userId,
+        actorEmail:  req.user!.email,
+        targetId:    id,
+        targetEmail: target.email,
+      });
+    }
     res.json(updated);
   }),
 );

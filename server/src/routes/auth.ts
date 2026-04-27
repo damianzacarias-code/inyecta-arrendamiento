@@ -16,6 +16,7 @@ import {
   PASSWORD_MIN_LENGTH,
   PASSWORD_MAX_LENGTH,
 } from '../lib/passwordPolicy';
+import { onLoginFailed, onPasswordChanged } from '../lib/securityAlerts';
 
 const log = childLogger('auth');
 
@@ -54,11 +55,15 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
     });
 
     if (!user || !user.activo) {
+      // Fire-and-forget: alerta de seguridad. void evita que el SMTP
+      // ralentice la respuesta del login.
+      void onLoginFailed({ ip: req.ip ?? 'unknown', emailIntentado: data.email });
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
     const validPassword = await bcrypt.compare(data.password, user.password);
     if (!validPassword) {
+      void onLoginFailed({ ip: req.ip ?? 'unknown', emailIntentado: data.email });
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
@@ -227,6 +232,7 @@ router.post(
     await setPassword(userId, data.newPassword, { mustChange: false });
 
     log.info({ userId }, 'password cambiado por el usuario');
+    void onPasswordChanged({ userId, email: user.email });
     res.json({ ok: true });
   }),
 );

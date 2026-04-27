@@ -2063,6 +2063,69 @@ las brechas técnicas críticas que detecté en el análisis ISO/IEC
         `openssl rand -base64 48 > /etc/inyecta/backup.key && chmod 600`,
         agregarla al keyring offline (ej. 1Password) y exportar
         BACKUP_PASSPHRASE_FILE en el cron. Sin tocar el código.
+
+  - [x] S3: Alertas de seguridad en tiempo real
+        Patrón viejo: la única defensa anti-bruteforce era el
+        loginLimiter (5/15min/IP) — pero ningún operador se
+        enteraba si la oleada estaba en curso. Cambios sensibles
+        (alta/edición de rol, desactivación, reset de password)
+        quedaban únicamente en bitácora; nadie los veía a menos
+        que entrara al visor /admin/bitacora explícitamente.
+        Diseño nuevo (lib/securityAlerts.ts):
+          • 9 categorías de alerta:
+              - LOGIN_FAILED              fallido individual
+              - LOGIN_RATE_LIMITED        IP bloqueada por 429
+              - LOGIN_BURST               oleada agregada cross-IP
+              - PASSWORD_CHANGED          cambio voluntario
+              - PASSWORD_RESET_BY_ADMIN   reset por terceros
+              - USER_CREATED              alta de empleado
+              - USER_ROLE_CHANGED         cambio de rol con before/after
+              - USER_DEACTIVATED          baja
+              - USER_ACTIVATED            re-alta
+          • Cooldown anti-spam por categoría/sujeto:
+              LOGIN_FAILED        1 min/IP
+              LOGIN_RATE_LIMITED  5 min/IP
+              LOGIN_BURST         1 min/global (re-alerta si persiste)
+              Cambios sensibles   sin cooldown (siempre auditan)
+          • Burst detector: buffer FIFO de timestamps de fallos.
+            Si hay ≥20 fallos en 5 min (sumando IPs distintas) →
+            dispara LOGIN_BURST. Detecta credential-stuffing que
+            rota IPs y por sí mismo cada IP no llega al rate-limit.
+          • Cada alerta:
+              - log.warn estructurado (SIEM/grep-able)
+              - notificarPorRol(['ADMIN']) → campana + email espejo
+              - URL al visor de bitácora (/admin/bitacora)
+              - tipo SECURITY_<CATEGORIA>
+              - fire-and-forget (void): si falla, sólo log.error;
+                NO propaga al handler de negocio.
+        Hooks instalados:
+          • routes/auth.ts: login fallido (user inactivo, password
+            incorrecta), change-password exitoso.
+          • middleware/rateLimit.ts: handler del 429 dispara
+            onLoginRateLimited.
+          • routes/users.ts:
+              - POST /users → onUserCreated
+              - PATCH /:id → onUserRoleChanged si rol cambió;
+                onUserDeactivated/onUserActivated en transición real
+              - POST /reset-password → onPasswordResetByAdmin
+                (no dispara si actor === target — eso es
+                PASSWORD_CHANGED desde change-password)
+              - PATCH /deactivate y /activate → idem
+        Tests (lib/__tests__/securityAlerts.test.ts) — 16 tests:
+          • Cada handler dispara una sola alerta con el shape
+            correcto (tipo, mensaje, url, roles=[ADMIN]).
+          • Cooldown: 2do fallo desde la misma IP no re-alerta;
+            IPs distintas SÍ generan alertas separadas.
+          • Burst: 20 fallos desde 20 IPs distintas → 20 alertas
+            LOGIN_FAILED + 1 LOGIN_BURST.
+          • Filtros: rolAnterior===rolNuevo no dispara; actor===
+            target en reset no dispara.
+          • Robustez: si notificarPorRol revierte rechazo, el
+            helper no propaga.
+          • Mock con vi.hoisted para evitar TDZ con vi.mock.
+        Resultado: 185/185 tests (antes 169 + 16 nuevos).
+        verify:passwords (24/24) y verify:users (12/12) siguen
+        pasando — los hooks `void` no afectan el flujo de negocio.
 ```
 
 ---

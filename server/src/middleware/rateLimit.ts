@@ -19,6 +19,7 @@
  */
 import rateLimit from 'express-rate-limit';
 import type { Request, Response } from 'express';
+import { onLoginRateLimited } from '../lib/securityAlerts';
 
 // ───────────────────────────────────────────────────────────────────
 // Login — defensa anti-fuerza-bruta
@@ -32,8 +33,10 @@ export const loginLimiter = rateLimit({
   // Identificador: IP por defecto. Podríamos componerlo con email para
   // limitar por (IP, email), pero eso facilita user-enumeration leakeando
   // si el email existe → mejor solo IP.
-  handler: (_req: Request, res: Response, _next, options) => {
+  handler: (req: Request, res: Response, _next, options) => {
     const retryAfterSec = Math.ceil(options.windowMs / 1000);
+    // Alerta de seguridad: la IP llegó al límite. Fire-and-forget.
+    void onLoginRateLimited({ ip: req.ip ?? 'unknown' });
     res.status(429).json({
       error: {
         code: 'RATE_LIMITED',
