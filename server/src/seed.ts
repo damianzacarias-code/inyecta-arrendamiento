@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { validatePasswordStrength } from './lib/passwordPolicy';
 
 const prisma = new PrismaClient();
 
@@ -23,19 +24,22 @@ function resolveAdminPassword(): string {
   const fromEnv = process.env.SEED_ADMIN_PASSWORD;
 
   if (env === 'production') {
-    if (!fromEnv || fromEnv.length < 12) {
+    if (!fromEnv) {
       console.error(
-        '❌ En production se requiere SEED_ADMIN_PASSWORD (≥12 caracteres) ' +
-          'para crear el usuario admin inicial. Define la variable y vuelve ' +
-          'a correr el seed.',
+        '❌ En production se requiere SEED_ADMIN_PASSWORD para crear el ' +
+          'usuario admin inicial. Define la variable y vuelve a correr.',
       );
       process.exit(1);
     }
-    if (['admin123', 'password', 'changeme', '123456789012'].includes(fromEnv)) {
-      console.error(
-        '❌ SEED_ADMIN_PASSWORD es una contraseña trivial. ' +
-          'Usa una contraseña fuerte y única para el admin inicial.',
-      );
+    // Política completa (CLAUDE.md §10 — Hardening S1).
+    const violations = validatePasswordStrength(fromEnv, {
+      email:     'damian@inyecta.com',
+      nombre:    'Damian',
+      apellidos: 'Zacarias',
+    });
+    if (violations.length > 0) {
+      console.error('❌ SEED_ADMIN_PASSWORD no cumple la política:');
+      for (const v of violations) console.error(`   • ${v}`);
       process.exit(1);
     }
     return fromEnv;
@@ -54,11 +58,16 @@ async function seed() {
     where: { email: 'damian@inyecta.com' },
     update: {},
     create: {
-      email: 'damian@inyecta.com',
-      password: adminPassword,
-      nombre: 'Damian',
-      apellidos: 'Zacarias',
-      rol: 'ADMIN',
+      email:              'damian@inyecta.com',
+      password:           adminPassword,
+      nombre:             'Damian',
+      apellidos:          'Zacarias',
+      rol:                'ADMIN',
+      // El admin inicial debe cambiar la pass al primer login para
+      // que la pass del seed (admin123 en dev / SEED_ADMIN_PASSWORD
+      // en prod) no quede como permanente. CLAUDE.md §10 — S1.
+      mustChangePassword: true,
+      passwordChangedAt:  new Date(),
     },
   });
   // No imprimimos la contraseña (puede ser real en production).

@@ -18,7 +18,8 @@
     "verify:branding": "tsx src/__verify__/branding.verify.ts",
     "verify:email": "tsx src/__verify__/email.verify.ts",
     "verify:catalog": "tsx src/__verify__/catalog.verify.ts",
-    "verify:users": "tsx src/__verify__/users.verify.ts"
+    "verify:users": "tsx src/__verify__/users.verify.ts",
+    "verify:passwords": "tsx src/__verify__/passwordPolicy.verify.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",

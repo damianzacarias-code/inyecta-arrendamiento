@@ -7,6 +7,15 @@ import { config } from '../config/env';
 import { requireAuth } from '../middleware/auth';
 import { loginLimiter } from '../middleware/rateLimit';
 import { childLogger } from '../lib/logger';
+import { asyncHandler, AppError } from '../middleware/errorHandler';
+import {
+  assertPasswordStrong,
+  assertNotReusedRecently,
+  setPassword,
+  hashPassword,
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_MAX_LENGTH,
+} from '../lib/passwordPolicy';
 
 const log = childLogger('auth');
 
@@ -14,15 +23,24 @@ const router = Router();
 
 const loginSchema = z.object({
   email: z.string().email('Email inválido'),
-  password: z.string().min(6, 'La contraseña debe tener al menos 6 caracteres'),
+  // Login NO valida fuerza — solo presencia. Si bajamos la mínima
+  // longitud aquí, las cuentas viejas con passwords cortas que aún no
+  // han migrado pueden seguir entrando para luego cambiarla.
+  password: z.string().min(1, 'Contraseña requerida'),
 });
 
 const registerSchema = z.object({
   email: z.string().email('Email inválido'),
-  password: z.string().min(6, 'La contraseña debe tener al menos 6 caracteres'),
+  password: z.string().min(PASSWORD_MIN_LENGTH).max(PASSWORD_MAX_LENGTH),
   nombre: z.string().min(1, 'Nombre requerido'),
   apellidos: z.string().min(1, 'Apellidos requeridos'),
-  rol: z.enum(['ADMIN', 'DIRECTOR', 'ANALISTA', 'COBRANZA', 'OPERACIONES']).optional(),
+  // El enum incluye LEGAL (espejo de UserRole en schema.prisma).
+  rol: z.enum(['ADMIN', 'DIRECTOR', 'ANALISTA', 'COBRANZA', 'OPERACIONES', 'LEGAL']).optional(),
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Contraseña actual requerida'),
+  newPassword:     z.string().min(PASSWORD_MIN_LENGTH).max(PASSWORD_MAX_LENGTH),
 });
 
 // POST /api/auth/login
@@ -61,6 +79,10 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
         nombre: user.nombre,
         apellidos: user.apellidos,
         rol: user.rol,
+        // mustChangePassword: si true, el frontend debe forzar al
+        // usuario a /cambiar-password antes de cualquier otra ruta.
+        // CLAUDE.md §10 — Hardening S1.
+        mustChangePassword: user.mustChangePassword,
       },
     });
   } catch (error) {
@@ -86,15 +108,24 @@ router.post('/register', requireAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Ya existe un usuario con ese email' });
     }
 
-    const hashedPassword = await bcrypt.hash(data.password, 12);
+    // Política de fuerza con contexto del usuario nuevo.
+    assertPasswordStrong(data.password, {
+      email:     data.email,
+      nombre:    data.nombre,
+      apellidos: data.apellidos,
+    });
+
+    const hashedPassword = await hashPassword(data.password);
 
     const user = await prisma.user.create({
       data: {
-        email: data.email,
-        password: hashedPassword,
-        nombre: data.nombre,
-        apellidos: data.apellidos,
-        rol: data.rol || 'ANALISTA',
+        email:              data.email,
+        password:           hashedPassword,
+        nombre:             data.nombre,
+        apellidos:          data.apellidos,
+        rol:                data.rol || 'ANALISTA',
+        mustChangePassword: true,  // legacy bootstrap path
+        passwordChangedAt:  new Date(),
       },
       select: {
         id: true,
@@ -128,6 +159,8 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
         apellidos: true,
         rol: true,
         createdAt: true,
+        mustChangePassword: true,
+        passwordChangedAt: true,
       },
     });
 
@@ -141,5 +174,61 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
     return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
+
+/**
+ * POST /api/auth/change-password
+ *
+ * Cambio voluntario o forzado (mustChangePassword=true) de la contraseña
+ * del usuario autenticado. Reglas:
+ *   - Requiere conocer la contraseña actual (anti-hijack del token).
+ *   - La nueva contraseña pasa por la política completa
+ *     (assertPasswordStrong + assertNotReusedRecently).
+ *   - setPassword empuja la actual al historial, actualiza
+ *     passwordChangedAt y baja mustChangePassword a false.
+ *   - El response NO incluye datos sensibles. El cliente debería
+ *     refrescar /api/auth/me para sincronizar mustChangePassword.
+ *
+ * Pendiente para S4: invalidar JWTs emitidos antes de
+ * passwordChangedAt — hoy el token sigue siendo válido hasta su
+ * expiración natural.
+ */
+router.post(
+  '/change-password',
+  requireAuth,
+  asyncHandler(async (req: Request, res: Response) => {
+    const data = changePasswordSchema.parse(req.body);
+    const userId = req.user!.userId;
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, nombre: true, apellidos: true, password: true, activo: true },
+    });
+    if (!user || !user.activo) {
+      // Mismo mensaje que login para no leak user-enum.
+      throw new AppError('INVALID_CREDENTIALS', 'Credenciales inválidas', 401);
+    }
+
+    // Verificar contraseña actual (no exponemos si fue la actual o la
+    // nueva la que falló — el caller siempre obtiene el mismo error).
+    const ok = await bcrypt.compare(data.currentPassword, user.password);
+    if (!ok) {
+      throw new AppError('INVALID_CREDENTIALS', 'La contraseña actual es incorrecta', 401);
+    }
+
+    // Política completa sobre la nueva contraseña.
+    assertPasswordStrong(data.newPassword, {
+      email:     user.email,
+      nombre:    user.nombre,
+      apellidos: user.apellidos,
+    });
+    await assertNotReusedRecently(userId, data.newPassword);
+
+    // Persistir + bajar mustChangePassword (cambio voluntario).
+    await setPassword(userId, data.newPassword, { mustChange: false });
+
+    log.info({ userId }, 'password cambiado por el usuario');
+    res.json({ ok: true });
+  }),
+);
 
 export default router;

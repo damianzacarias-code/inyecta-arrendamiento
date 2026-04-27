@@ -23,13 +23,19 @@
  *  • Todas las escrituras quedan en bitácora vía el middleware global.
  */
 import { Router } from 'express';
-import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import type { Request } from 'express';
 import prisma from '../config/db';
 import { requireAuth, requireRole } from '../middleware/auth';
 import { childLogger } from '../lib/logger';
 import { asyncHandler, AppError } from '../middleware/errorHandler';
+import {
+  assertPasswordStrong,
+  hashPassword,
+  setPassword,
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_MAX_LENGTH,
+} from '../lib/passwordPolicy';
 
 const router = Router();
 const log = childLogger('users');
@@ -45,7 +51,10 @@ const rolSchema = z.enum(ROL_VALUES);
 
 const createUserSchema = z.object({
   email:     z.string().email('Email inválido').max(120).toLowerCase(),
-  password:  z.string().min(8, 'Mínimo 8 caracteres').max(120),
+  // Solo validamos longitud aquí; la política de complejidad / historial
+  // la corre assertPasswordStrong dentro del handler (necesita el ctx
+  // con email/nombre/apellidos para detectar passwords personales).
+  password:  z.string().min(PASSWORD_MIN_LENGTH).max(PASSWORD_MAX_LENGTH),
   nombre:    z.string().min(1, 'Nombre requerido').max(80).trim(),
   apellidos: z.string().min(1, 'Apellidos requeridos').max(80).trim(),
   rol:       rolSchema,
@@ -59,7 +68,7 @@ const updateUserSchema = z.object({
 }).refine((d) => Object.keys(d).length > 0, { message: 'Sin cambios' });
 
 const resetPasswordSchema = z.object({
-  password: z.string().min(8, 'Mínimo 8 caracteres').max(120),
+  password: z.string().min(PASSWORD_MIN_LENGTH).max(PASSWORD_MAX_LENGTH),
 });
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -132,14 +141,27 @@ router.post(
       throw new AppError('EMAIL_EXISTS', 'Ya existe un usuario con ese email', 409);
     }
 
-    const hashedPassword = await bcrypt.hash(data.password, 12);
+    // Política de fuerza con contexto del usuario nuevo (email/nombre/
+    // apellidos) para rechazar contraseñas que los contengan.
+    assertPasswordStrong(data.password, {
+      email:     data.email,
+      nombre:    data.nombre,
+      apellidos: data.apellidos,
+    });
+
+    const hashedPassword = await hashPassword(data.password);
+    // mustChangePassword=true para que el usuario cambie la pass que
+    // el ADMIN capturó por él al primer login. Esto cierra el flujo
+    // de "el ADMIN conoce mi contraseña inicial".
     const user = await prisma.user.create({
       data: {
-        email: data.email,
-        password: hashedPassword,
-        nombre: data.nombre,
-        apellidos: data.apellidos,
-        rol: data.rol,
+        email:              data.email,
+        password:           hashedPassword,
+        nombre:             data.nombre,
+        apellidos:          data.apellidos,
+        rol:                data.rol,
+        mustChangePassword: true,
+        passwordChangedAt:  new Date(),
       },
       select: userPublic,
     });
@@ -224,13 +246,30 @@ router.post(
     const { id } = req.params;
     const { password } = resetPasswordSchema.parse(req.body);
 
-    const target = await prisma.user.findUnique({ where: { id }, select: { id: true } });
+    const target = await prisma.user.findUnique({
+      where:  { id },
+      select: { id: true, email: true, nombre: true, apellidos: true },
+    });
     if (!target) {
       throw new AppError('USER_NOT_FOUND', 'Usuario no encontrado', 404);
     }
 
-    const hashed = await bcrypt.hash(password, 12);
-    await prisma.user.update({ where: { id }, data: { password: hashed } });
+    // Validar fuerza con contexto del target (no del actor) — la pass
+    // pertenece al usuario reseteado.
+    assertPasswordStrong(password, {
+      email:     target.email,
+      nombre:    target.nombre,
+      apellidos: target.apellidos,
+    });
+
+    // setPassword empuja la actual al historial, actualiza
+    // passwordChangedAt y marca mustChangePassword=true (el usuario
+    // debe cambiar la pass temporal que el ADMIN le compartió).
+    // NO chequea reuso aquí: el ADMIN no debe enterarse de las
+    // contraseñas anteriores del target. Si la pass coincide con
+    // alguna previa, igual queda registrada — el operador transmitió
+    // esa pass por canal seguro y el usuario la cambia al login.
+    await setPassword(id, password, { mustChange: true });
 
     log.info({ actorId: req.user?.userId, targetId: id }, 'password reseteado');
     res.json({ ok: true });

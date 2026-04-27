@@ -22,12 +22,21 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // ── Política de contraseñas (CLAUDE.md §10 — Hardening S1) ────────
+  // passwordChangedAt: timestamp del último cambio. Útil para auditoría
+  //   PLD y para invalidar tokens emitidos antes (S4 — JWT revocation).
+  // mustChangePassword: ADMIN reset → user debe cambiar al próximo login;
+  //   también lo seteamos en true para usuarios recién creados.
+  passwordChangedAt   DateTime  @default(now())
+  mustChangePassword  Boolean   @default(false)
+
   cotizaciones  Quotation[]
   contratos     Contract[]
   pagosRegistrados Payment[]
   notas         Note[]
   documentosSubidos ExpedienteDocumento[]
   notificaciones Notificacion[]
+  passwordHistory  PasswordHistory[]
 
   @@map("users")
 }
@@ -39,6 +48,22 @@ enum UserRole {
   COBRANZA
   OPERACIONES
   LEGAL          // CLAUDE.md §2 — recibe notificaciones de SOLICITUD_*
+}
+
+// ── Historial de contraseñas ─────────────────────────────────────────
+// Guarda las últimas N contraseñas hasheadas (bcrypt) por usuario para
+// rechazar reuso. La política mantiene las últimas 5 (configurable en
+// passwordPolicy.ts). El hash NUNCA se loggea ni se expone vía API.
+model PasswordHistory {
+  id             String   @id @default(cuid())
+  userId         String
+  hashedPassword String
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("password_history")
 }
 
 // ============================================================

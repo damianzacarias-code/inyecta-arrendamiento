@@ -117,7 +117,7 @@ async function main() {
   checks.push(['POST /users crea usuario → 201', async () => {
     const r = await call<{ id: string; email: string }>(port, 'POST', '/api/users', adminToken, {
       email,
-      password: 'temporal12345',
+      password: 'TempPass#2026!Qq',
       nombre: 'Verify',
       apellidos: 'Script',
       rol: 'ANALISTA',
@@ -132,7 +132,7 @@ async function main() {
   checks.push(['POST /users email duplicado → 409 EMAIL_EXISTS', async () => {
     const r = await call<{ error?: { code?: string } }>(port, 'POST', '/api/users', adminToken, {
       email,
-      password: 'temporal12345',
+      password: 'TempPass#2026!Qq',
       nombre: 'Otro',
       apellidos: 'Otro',
       rol: 'ANALISTA',
@@ -155,7 +155,7 @@ async function main() {
     if (!createdId) return false;
     const r = await call<{ ok?: boolean; password?: unknown }>(
       port, 'POST', `/api/users/${createdId}/reset-password`, adminToken,
-      { password: 'nueva-password-12345' },
+      { password: 'NewSecur3#PassZx' },
     );
     return r.status === 200 && r.body.ok === true && !('password' in (r.body ?? {}));
   }]);

@@ -1891,6 +1891,109 @@ bajo impacto que no requieren su aprobación.
         Damián la resetea o el usuario hace cambio (cambio de pass
         por el propio usuario es feature pendiente — fuera de
         scope de esta tarea).
+
+──────────────────────────────────────────────────────────────────
+Hardening de seguridad — S1 (27-04-2026, autónoma)
+──────────────────────────────────────────────────────────────────
+Mientras Damián revisa los gaps de los contratos PURO/FIN, ejecuto
+las brechas técnicas críticas que detecté en el análisis ISO/IEC
+27001 — independientes de su input. Bloque autónomo S1-S6.
+
+  - [x] S1: Política de contraseñas robusta + historial + cambio
+        Patrón viejo: dos validaciones inconsistentes (auth.ts ≥6,
+        users.ts ≥8), sin complejidad, sin historial, sin flag de
+        rotación, sin endpoint de cambio voluntario. El ADMIN
+        capturaba la pass inicial del usuario y nada lo forzaba a
+        cambiarla.
+        Diseño nuevo:
+          • Schema Prisma:
+              - User.passwordChangedAt DateTime @default(now())
+              - User.mustChangePassword Boolean @default(false)
+              - model PasswordHistory (id, userId, hashedPassword,
+                createdAt + index userId+createdAt + cascade delete)
+              - Migración 20260427181139_add_password_policy.
+          • lib/passwordPolicy.ts (módulo puro, sin Express):
+              - Constantes: MIN_LENGTH=10, MAX_LENGTH=120,
+                BCRYPT_ROUNDS=12, HISTORY_DEPTH=5.
+              - validatePasswordStrength(pwd, ctx) → array de
+                violaciones (TOO_SHORT/MISSING_UPPER/MISSING_LOWER/
+                MISSING_DIGIT/MISSING_SYMBOL/TRIVIAL_PATTERN/
+                CONTAINS_PERSONAL_DATA/WHITESPACE_NOT_ALLOWED).
+                Patrones triviales: password/qwerty/asdfgh/zxcvbn/
+                123456/inyecta/arrendamiento etc. (substring
+                case-insensitive).
+                Personal data: rechaza pass que contenga email-
+                local-part / nombre / cualquier palabra del apellido
+                (umbral ≥4 chars para no falsos positivos).
+              - assertPasswordStrong(pwd, ctx) → AppError 400
+                WEAK_PASSWORD con detail.violations[] para que la
+                UI muestre checklist completa.
+              - assertNotReusedRecently(userId, pwd) → bcrypt.compare
+                contra password actual + últimas N entradas de
+                history; AppError 400 PASSWORD_REUSE si match.
+              - hashPassword(pwd) → bcrypt 12 rounds.
+              - setPassword(userId, pwd, opts) → en una transacción:
+                  empuja current al history, actualiza password +
+                  passwordChangedAt + mustChangePassword, recorta
+                  history al límite (borra excedentes más viejos).
+              - changePassword(userId, pwd, ctx, opts) → combina
+                strength + reuse + setPassword. Atómico para el
+                caller.
+          • routes/users.ts (refactor de createUser y reset-pwd):
+              - createUserSchema: ya no min(8) inline, usa
+                PASSWORD_MIN_LENGTH del módulo.
+              - POST /users: assertPasswordStrong con ctx del nuevo
+                usuario, hashPassword, marca mustChangePassword=true
+                y passwordChangedAt=now (forza cambio al primer
+                login).
+              - POST /:id/reset-password: assertPasswordStrong + 
+                setPassword(mustChange=true). NO chequea reuso (el
+                ADMIN no debe enterarse de passwords previas del
+                target).
+          • routes/auth.ts:
+              - registerSchema: enum incluye LEGAL ahora; password
+                usa PASSWORD_MIN/MAX_LENGTH (consistencia).
+              - loginSchema: relajado a min(1) ("contraseña
+                requerida") para que cuentas legacy con pass corta
+                puedan entrar y cambiarla, en vez de quedar
+                bloqueadas para siempre.
+              - POST /login: response incluye user.mustChangePassword.
+              - POST /register (legacy): ahora pasa por
+                assertPasswordStrong + marca mustChangePassword=true.
+              - GET /me: retorna mustChangePassword + passwordChangedAt.
+              - POST /change-password (NUEVO): requireAuth, valida
+                currentPassword con bcrypt.compare, corre
+                assertPasswordStrong + assertNotReusedRecently +
+                setPassword(mustChange=false). Mismo error
+                INVALID_CREDENTIALS si la actual falla (no leak).
+                Pendiente para S4: invalidar JWTs emitidos antes de
+                passwordChangedAt.
+          • seed.ts: en producción ahora corre
+            validatePasswordStrength sobre SEED_ADMIN_PASSWORD
+            (antes solo verificaba longitud y blacklist trivial).
+            El admin inicial se crea con mustChangePassword=true
+            para forzar el cambio del seed pwd al primer login.
+        Verify (src/__verify__/passwordPolicy.verify.ts):
+          • 24 checks reales contra Postgres en 5 bloques:
+              Bloque 1 (validatePasswordStrength puro): 14 checks
+                cubriendo cada tipo de violación + caso happy.
+              Bloque 2 (assertPasswordStrong lanza AppError).
+              Bloque 3 (flujo end-to-end): crea user, 7 cambios
+                consecutivos OK, rechaza reuso de actual y reciente.
+              Bloque 4 (historial recortado a 5).
+              Bloque 5 (mustChangePassword + passwordChangedAt
+                actualizado + bcrypt.compare verifica el hash).
+            Cleanup: borra users 'verify-pw-*'.
+          • Comando: `npm run verify:passwords` (24/24 OK).
+        Tests existentes: 169/169 server siguen pasando. tsc
+        --noEmit limpio.
+        users.verify.ts: actualizadas las 3 passwords débiles
+        (`temporal12345` → `TempPass#2026!Qq`,
+         `nueva-password-12345` → `NewSecur3#PassZx`).
+        Para S4 (pendiente): cuando se invalide el JWT por
+        passwordChangedAt, basta comparar el `iat` del token
+        (segundos epoch) con `passwordChangedAt.getTime()/1000`
+        en requireAuth.
 ```
 
 ---
