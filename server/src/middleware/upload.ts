@@ -20,6 +20,10 @@ import fs from 'fs';
 import crypto from 'crypto';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import { AppError } from './errorHandler';
+import { isEnabled as cipherEnabled, encryptFileInPlace } from '../lib/uploadCipher';
+import { childLogger } from '../lib/logger';
+
+const cipherLog = childLogger('upload-cipher');
 
 const ROOT = path.resolve(__dirname, '..', '..', 'uploads');
 
@@ -117,7 +121,34 @@ const _uploadExpediente = multer({
 function wrapMulter(handler: RequestHandler): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     handler(req, res, (err: unknown) => {
-      if (!err) return next();
+      if (!err) {
+        // S6: cifrar el archivo recién escrito si está habilitado.
+        // Operación async; si falla, devolvemos UPLOAD_ENCRYPT_FAILED y
+        // borramos el plaintext para no dejar PII sin cifrar en disco.
+        const file = (req as Request).file;
+        if (cipherEnabled() && file?.path) {
+          encryptFileInPlace(file.path)
+            .then((encPath) => {
+              // Reescribimos req.file.path al .enc para que el handler
+              // de la ruta persista la URL nueva en BD.
+              (req as Request).file!.path = encPath;
+              (req as Request).file!.filename = path.basename(encPath);
+              cipherLog.debug({ file: encPath }, 'archivo cifrado en disco');
+              next();
+            })
+            .catch((cipherErr) => {
+              cipherLog.error({ err: cipherErr, file: file.path }, 'cifrado falló — borrando plaintext');
+              fs.promises.unlink(file.path).catch(() => {});
+              next(new AppError(
+                'UPLOAD_ENCRYPT_FAILED',
+                'Fallo al cifrar el archivo subido. Intenta de nuevo.',
+                500,
+              ));
+            });
+          return;
+        }
+        return next();
+      }
       // multer.MulterError tiene `code` con strings como LIMIT_FILE_SIZE
       const anyErr = err as { code?: string; message?: string; name?: string };
       if (err instanceof AppError) return next(err);
@@ -144,7 +175,12 @@ export const uploadContrato: RequestHandler = wrapMulter(_uploadContrato);
 export const uploadExpediente: RequestHandler = wrapMulter(_uploadExpediente);
 
 export function publicUrl(filename: string, kind: UploadKind): string {
-  return `/uploads/${kind}/${filename}`;
+  // Si el archivo termina en .enc (S6), removemos el sufijo en la URL
+  // pública: el handler de /uploads/* se encarga de resolver al .enc
+  // si existe (resolveServingPath). Esto mantiene URLs estables para
+  // archivos cifrados y legacy.
+  const stripped = filename.endsWith('.enc') ? filename.slice(0, -4) : filename;
+  return `/uploads/${kind}/${stripped}`;
 }
 
 export function deleteIfExists(relativeUrl: string | null | undefined) {
@@ -152,7 +188,13 @@ export function deleteIfExists(relativeUrl: string | null | undefined) {
   const safe = relativeUrl.replace(/^\/+/, '');
   if (!safe.startsWith('uploads/')) return;
   const full = path.resolve(__dirname, '..', '..', safe);
+  // Borra el plaintext si existe.
   if (fs.existsSync(full)) {
     try { fs.unlinkSync(full); } catch (_) { /* ignore */ }
+  }
+  // S6: borra también el .enc si existe.
+  const encPath = `${full}.enc`;
+  if (fs.existsSync(encPath)) {
+    try { fs.unlinkSync(encPath); } catch (_) { /* ignore */ }
   }
 }

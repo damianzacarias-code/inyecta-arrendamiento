@@ -173,6 +173,12 @@ const EnvSchema = z
     // ("Revisa tu solicitud en https://app.inyecta.com.mx/operaciones/…").
     // En dev default a localhost:5173.
     FRONTEND_BASE_URL: z.string().url().default('http://localhost:5173'),
+
+    // S6 — Cifrado en reposo de uploads. AES-256-GCM con master key
+    // de 32 bytes en base64. Genera con: `openssl rand -base64 32`.
+    // Si está vacío, los uploads se persisten en plaintext (modo
+    // legacy compatible). En production lo exigimos.
+    UPLOAD_MASTER_KEY: z.string().optional(),
   })
   // Validaciones cruzadas (cosas que solo aplican en producción).
   .superRefine((env, ctx) => {
@@ -201,6 +207,34 @@ const EnvSchema = z
           message: 'CFDI_PROVIDER=FACTURAMA requiere FACTURAMA_USER y FACTURAMA_PASS',
         });
       }
+    }
+    // S6 — Si UPLOAD_MASTER_KEY está set, debe ser base64 que decodifique
+    // a 32 bytes exactos. En production lo exigimos.
+    if (env.UPLOAD_MASTER_KEY) {
+      try {
+        const buf = Buffer.from(env.UPLOAD_MASTER_KEY, 'base64');
+        if (buf.length !== 32) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['UPLOAD_MASTER_KEY'],
+            message: `UPLOAD_MASTER_KEY debe ser 32 bytes (got ${buf.length}). Genera con: openssl rand -base64 32`,
+          });
+        }
+      } catch {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['UPLOAD_MASTER_KEY'],
+          message: 'UPLOAD_MASTER_KEY no es base64 válido',
+        });
+      }
+    } else if (env.NODE_ENV === 'production') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['UPLOAD_MASTER_KEY'],
+        message:
+          'En production se requiere UPLOAD_MASTER_KEY para cifrar uploads en reposo. ' +
+          'Genera con: openssl rand -base64 32',
+      });
     }
     if (env.EXTRACT_PROVIDER === 'CLAUDE' && !env.ANTHROPIC_API_KEY) {
       ctx.addIssue({

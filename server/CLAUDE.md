@@ -2290,6 +2290,132 @@ las brechas técnicas críticas que detecté en el análisis ISO/IEC
           3. Próximo login pedirá el código.
         Si pierde el Authenticator y los backup codes: otro ADMIN
         usa POST /api/users/:id/mfa/reset para liberarlo.
+
+  - [x] S6: Cifrado en reposo de uploads (AES-256-GCM)
+        Patrón viejo: PDFs de identificaciones, comprobantes de
+        domicilio, actas constitutivas, escrituras y demás expediente
+        del cliente quedaban en disco como plaintext bajo
+        `server/uploads/`. Cualquier snapshot/backup de disco /
+        compromiso del host exponía la PII reguladda en claro.
+        Diseño nuevo (opt-in con guard de production):
+          • lib/uploadCipher.ts — AES-256-GCM con key wrapping:
+              - Master key 32 bytes en UPLOAD_MASTER_KEY (base64).
+                Genera: `openssl rand -base64 32`.
+              - Cada archivo lleva su propia DEK (data key) cifrada
+                con la master vía AES-GCM (key wrapping). Permite
+                rotar la master sin re-cifrar TODO — solo las DEKs.
+              - Layout .enc: magic "INY1" (4) + dekIV (12) + dekTag
+                (16) + dekCt (32) + payIV (12) + payTag (16) + ct.
+                Overhead = 92 bytes / archivo.
+              - encryptBuffer / decryptBuffer (memory).
+              - encryptFileInPlace: lee plaintext, escribe `.enc`
+                con permisos 600, borra plaintext SOLO tras
+                confirmar la escritura del .enc (atomicidad).
+              - decryptToStream: devuelve Readable del plaintext.
+              - resolveServingPath: prefiere .enc, cae a plaintext
+                legacy, null si no existe.
+              - isEnabled() → false si UPLOAD_MASTER_KEY no está;
+                permite degradación graceful a plaintext.
+          • middleware/encryptedStatic.ts — reemplazo de
+            express.static('/uploads'):
+              - Defensa de path traversal explícita (path.normalize +
+                startsWith del rootDir).
+              - Si .enc existe → descifra al vuelo + Content-Type por
+                ext + Cache-Control: private, no-store + pipe a res.
+              - Si solo plaintext existe → fallthrough a
+                express.static (preserva ETag/range/Last-Modified).
+              - Si nada existe → 404.
+              - Si descifrado falla (tampering, corrupción) → 500
+                JSON, NUNCA devuelve raw.
+          • middleware/upload.ts — hook post-multer:
+              - Tras escribir el archivo, si cipherEnabled() llama
+                encryptFileInPlace, reescribe req.file.path al
+                `.enc`, y deja que la ruta persista la URL nueva.
+              - Si el cifrado falla, borra el plaintext (no dejar
+                PII sin cifrar) y devuelve 500
+                UPLOAD_ENCRYPT_FAILED.
+              - publicUrl ahora strip-ea el sufijo `.enc` para que
+                el frontend siempre vea URLs estables.
+              - deleteIfExists borra ambos (.pdf y .pdf.enc) por
+                seguridad.
+          • config/env.ts:
+              - UPLOAD_MASTER_KEY validado con Zod superRefine: si
+                está set debe decodificar a 32 bytes exactos; en
+                production lo exigimos.
+        Verify (src/__verify__/uploadCipher.verify.ts) — 13/13:
+          1. isEnabled true con MASTER_KEY set.
+          2-3. encryptFileInPlace borra plaintext, escribe .enc.
+          4. legacy plaintext intacto.
+          5. .enc empieza con magic "INY1".
+          6. .enc no contiene plaintext en claro (substring check).
+          7-8. GET /uploads/cifrado.pdf devuelve plaintext original.
+          9-10. GET /uploads/legacy.pdf también funciona (compat).
+          11. GET inexistente → 404.
+          12. Path traversal rechazado (404/403, nunca 200).
+          13. Tampering del .enc → 500 (auth tag rechazo).
+        Tests unitarios (lib/__tests__/uploadCipher.test.ts) — 16:
+          isEnabled/getMasterKey (3), encryptBuffer/decryptBuffer
+          (8: round-trip pequeño y 1MB, IVs distintos, overhead 92,
+          magic/truncado, tampering payload+DEK, key distinta),
+          encryptFileInPlace + decryptToStream + resolveServingPath
+          (5: round-trip, prefiere .enc, plaintext legacy, null).
+        210/210 tests + 10 verify scripts OK; tsc limpio.
+        Para que Damián habilite cifrado en producción:
+          1. Generar key: `openssl rand -base64 32 > /etc/inyecta/upload.key`
+          2. chmod 600 /etc/inyecta/upload.key
+          3. Export UPLOAD_MASTER_KEY en .env.prod (o leer del
+             archivo y exportar al cron/systemd unit).
+          4. Reiniciar backend. Los uploads NUEVOS quedan cifrados;
+             los existentes (legacy plaintext) siguen sirviendo.
+          5. Re-cifrado masivo de archivos pre-S6: script utility
+             `for f in uploads/**/*; do node -e
+             "encryptFileInPlace('$f')"; done` (no incluido — se
+             escribirá si Damián decide migrar el histórico).
+
+──────────────────────────────────────────────────────────────────
+Resumen del bloque Hardening S1-S6 (27-04-2026)
+──────────────────────────────────────────────────────────────────
+6 mejoras de seguridad ejecutadas autónomamente mientras Damián
+revisa los gaps de los contratos:
+  • S1: Política de contraseñas robusta + historial + must-change.
+  • S2: Backups cifrados (GPG/OpenSSL) con guard de producción.
+  • S3: Alertas de seguridad en tiempo real (9 categorías).
+  • S4: JWT revocable + endpoints /logout y /logout-all.
+  • S5: MFA/2FA TOTP con backup codes one-time.
+  • S6: Cifrado en reposo de uploads (AES-256-GCM key wrapping).
+
+Métricas finales:
+  • 210/210 tests (de 169 al inicio del bloque).
+  • 10/10 verify scripts pasando con exit 0.
+  • 4 migraciones Prisma (password_policy, revoked_tokens, mfa,
+    + add_perf_indexes pre-existente).
+  • 4 deps nuevas (otplib@12, qrcode, @types/qrcode).
+  • 6 commits secuenciales con conventional commits en español.
+  • 0 cambios a reglas de negocio.
+  • 0 push (mantenido en local per instrucción del Damián).
+
+Endpoints nuevos:
+  POST /api/auth/change-password    (S1)
+  POST /api/auth/logout             (S4)
+  POST /api/auth/logout-all         (S4)
+  POST /api/auth/mfa/setup          (S5)
+  POST /api/auth/mfa/verify-setup   (S5)
+  POST /api/auth/mfa/disable        (S5)
+  GET  /api/auth/mfa/status         (S5)
+  POST /api/users/:id/mfa/reset     (S5)
+
+Variables de env nuevas:
+  BACKUP_PASSPHRASE / _FILE / BACKUP_ENCRYPT  (S2)
+  UPLOAD_MASTER_KEY                            (S6)
+
+Próximos pasos sugeridos para Damián:
+  • Actualizar .env.prod.example con las nuevas variables.
+  • Habilitar MFA para su propia cuenta (POST /api/auth/mfa/setup).
+  • Generar UPLOAD_MASTER_KEY y BACKUP_PASSPHRASE_FILE para el
+    cron de respaldos en el primer deploy productivo.
+  • UI cliente: agregar /perfil con cambio de password,
+    enrollment MFA, y "cerrar todas las sesiones" (los endpoints
+    ya están listos, falta el componente React).
 ```
 
 ---

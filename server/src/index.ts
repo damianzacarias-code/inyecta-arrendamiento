@@ -36,6 +36,7 @@ import {
   warmupRevokedTokens,
   startCleanupTimer as startRevokeCleanup,
 } from './lib/tokenRevocation';
+import { encryptedStatic } from './middleware/encryptedStatic';
 
 const app = express();
 
@@ -110,8 +111,12 @@ app.use(
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
-// Servir archivos subidos (PDFs, imágenes de documentos)
-app.use('/uploads', express.static(path.resolve(__dirname, '..', 'uploads')));
+// Servir archivos subidos (PDFs, imágenes de documentos).
+// S6 — encryptedStatic resuelve transparente: si existe `<path>.enc`
+// lo descifra al vuelo, si es plaintext legacy lo sirve directo.
+// Cuando UPLOAD_MASTER_KEY no está set, no hay archivos cifrados y
+// el handler degrada a express.static normal.
+app.use('/uploads', encryptedStatic(path.resolve(__dirname, '..', 'uploads')));
 
 // ─────────────────────────────────────────────────────────────────
 // Health check con DB ping
