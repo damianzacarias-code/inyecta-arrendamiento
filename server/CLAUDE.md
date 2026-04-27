@@ -2126,6 +2126,94 @@ las brechas técnicas críticas que detecté en el análisis ISO/IEC
         Resultado: 185/185 tests (antes 169 + 16 nuevos).
         verify:passwords (24/24) y verify:users (12/12) siguen
         pasando — los hooks `void` no afectan el flujo de negocio.
+
+  - [x] S4: JWT revocable + endpoint logout server-side
+        Patrón viejo: el JWT era stateless puro. Hacer logout solo
+        borraba el token del localStorage del cliente; si alguien
+        copiaba el token (xss, screen share, log de proxy) podía
+        seguir usándolo hasta su expiración natural (24h por default).
+        No había forma de "cerrar todas las sesiones" tras detectar
+        compromiso.
+        Diseño nuevo:
+          • Schema Prisma:
+              - model RevokedToken (jti PK, userId, expiresAt,
+                revokedAt, reason + index expiresAt + index userId
+                + cascade delete con user).
+              - Migración 20260427182846_add_revoked_tokens.
+          • lib/tokenRevocation.ts:
+              - In-memory Set<string> de jtis revocados activos.
+                Hidratado al boot vía warmupRevokedTokens().
+              - isRevoked(jti) síncrono (cache lookup) — usado por
+                requireAuth en cada request.
+              - revokeToken(jti, userId, expiresAt, reason) →
+                upsert en BD + add al cache. Si expiresAt ya pasó,
+                no-op (evita inflar tabla con tokens muertos).
+              - revokeAllForUser(userId) → borra revoked_tokens
+                del user (revoke-all real lo hace passwordChangedAt).
+              - cleanupExpired() → borra registros con expiresAt
+                pasado, sincroniza cache.
+              - startCleanupTimer() → setInterval 1h, .unref()
+                para no impedir process.exit. Idempotente.
+          • middleware/auth.ts (requireAuth) ahora aplica 3 barreras:
+              1. jwt.verify (firma + exp).
+              2. isRevoked(jti) (logout explícito).
+              3. iat ≥ user.passwordChangedAt - 1s (invalida tokens
+                 emitidos antes de cambio de password / logout-all).
+            La barrera 3 consulta prisma.user.findUnique con cache
+            in-memory (TTL 60s, ~16 bytes/entry) para no añadir
+            round-trip por cada request.
+            invalidateUserPwdCache(userId) exportado para que
+            change-password/logout-all bypasse el TTL en la misma
+            instancia.
+          • routes/auth.ts:
+              - login emite jti = randomUUID() en el JWT
+                (jsonwebtoken `jwtid` option).
+              - POST /logout (NUEVO): registra el jti en
+                revoked_tokens con reason='logout'. Idempotente.
+                Tokens sin jti (legacy) son aceptados pero no
+                revocan (cliente debe descartarlos localmente).
+              - POST /logout-all (NUEVO): bumpea
+                user.passwordChangedAt = now → invalida todos los
+                JWTs vivos del user en cualquier réplica vía
+                barrera 3. Limpia revoked_tokens del user (ya no
+                hace falta acumularlos).
+              - change-password: invalidateUserPwdCache(userId)
+                tras setPassword para que la barrera 3 vea el nuevo
+                passwordChangedAt sin esperar TTL.
+          • index.ts: warmupRevokedTokens() + startCleanupTimer()
+            al boot, fire-and-forget.
+        Ajustes a tests existentes:
+          • clients/contracts/invoices/extract.test.ts: el mock de
+            prisma ahora incluye `user.findUnique` que devuelve
+            `{ passwordChangedAt: new Date(0), activo: true }` —
+            permite que requireAuth acepte el token de pruebas.
+          • users.verify.ts: el "ANALISTA stub" antes era un
+            userId inventado; ahora se hace upsert de un user real
+            verify-analista-stub@inyecta.local porque requireAuth
+            valida existencia.
+          • catalog.verify.ts: idem, usa el realAdmin del seed.
+        Verify (src/__verify__/jwtRevocation.verify.ts) — 17/17:
+          1-4. login devuelve token con jti/iat/exp.
+          5.   token funciona en /protected.
+          6-8. /logout 200 + isRevoked()=true + row en BD.
+          9.   mismo token después → 401 'Token revocado'.
+          10.  token sin jti (legacy) sigue funcionando.
+          11.  bumpear passwordChangedAt → token con iat anterior
+               rechazado con 401.
+          12-13. /logout-all bumpea pwd y mata tokens nuevos.
+          14-15. cleanupExpired borra vencidos.
+          16-17. _cacheClear + warmupRevokedTokens hidrata desde BD.
+        Comando: `npm run verify:jwtRevocation`.
+        Resultado final:
+          - 185/185 tests (sin nuevos, solo ajustes a mocks).
+          - 9 verify scripts pasando (errorHandler, health,
+            branding, email, catalog, users, passwords, jwtRevocation,
+            (folioSequence existente)).
+          - tsc --noEmit limpio.
+        Para que Damián cierre todas las sesiones de un user
+        comprometido: `POST /api/auth/logout-all` con el token del
+        user, o desactivar al user (PATCH /api/users/:id { activo:
+        false }) — ambos disparan la barrera 3 inmediatamente.
 ```
 
 ---

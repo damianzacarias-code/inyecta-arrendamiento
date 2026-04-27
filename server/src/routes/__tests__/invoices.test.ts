@@ -26,6 +26,14 @@ const mockPrisma = {
     findMany: vi.fn(),
     findUnique: vi.fn(),
   },
+  // requireAuth (S4) consulta passwordChangedAt + activo. Para tests
+  // de rutas protegidas, devolvemos un user activo con changedAt = 0.
+  user: {
+    findUnique: vi.fn().mockResolvedValue({
+      passwordChangedAt: new Date(0),
+      activo: true,
+    }),
+  },
 };
 
 vi.mock('../../config/db', () => ({

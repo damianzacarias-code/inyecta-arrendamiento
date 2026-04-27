@@ -14,14 +14,17 @@ import express from 'express';
 import http from 'http';
 import jwt from 'jsonwebtoken';
 import { config } from '../config/env';
+import prisma from '../config/db';
 import catalogConfigRoutes from '../routes/catalog';
 
 // Generamos un JWT real para pasar requireAuth — no tiene sentido
 // stub-ear el middleware: el handler SÍ usa req.user.userId al
 // guardar el editor. Si falla la firma, el verify aborta limpio.
-function makeToken(): string {
+// S4: requireAuth ahora también verifica que el userId exista en BD,
+// así que necesitamos usar un user real (el primer ADMIN del seed).
+function makeToken(userId: string): string {
   return jwt.sign(
-    { userId: 'verify-script', email: 'verify@local', rol: 'ADMIN' },
+    { userId, email: 'verify@local', rol: 'ADMIN' },
     config.jwtSecret,
     { expiresIn: '5m' },
   );
@@ -36,7 +39,12 @@ async function main() {
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const port = (server.address() as { port: number }).port;
 
-  const token = makeToken();
+  const realAdmin = await prisma.user.findFirst({ where: { rol: 'ADMIN', activo: true } });
+  if (!realAdmin) {
+    console.error('verify error: no hay ADMIN activo. Corre `npm run db:seed`.');
+    process.exit(1);
+  }
+  const token = makeToken(realAdmin.id);
   const res = await fetch(`http://127.0.0.1:${port}/api/config/catalog`, {
     headers: { Authorization: `Bearer ${token}` },
   });

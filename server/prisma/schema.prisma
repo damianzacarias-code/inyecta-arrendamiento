@@ -37,6 +37,7 @@ model User {
   documentosSubidos ExpedienteDocumento[]
   notificaciones Notificacion[]
   passwordHistory  PasswordHistory[]
+  revokedTokens    RevokedToken[]
 
   @@map("users")
 }
@@ -64,6 +65,29 @@ model PasswordHistory {
 
   @@index([userId, createdAt])
   @@map("password_history")
+}
+
+// ── Tokens revocados (logout server-side) ────────────────────────────
+// CLAUDE.md §10 — Hardening S4. Los JWTs llevan jti (UUID); cuando un
+// usuario hace logout, registramos el jti aquí. requireAuth consulta
+// esta tabla (con cache LRU) y rechaza cualquier token cuyo jti esté
+// presente.
+//
+// expiresAt = exp del token original. Un job de limpieza borra los
+// registros vencidos (no hace falta retener jtis ya inválidos por
+// expiración natural — el verify de jsonwebtoken los rechaza primero).
+model RevokedToken {
+  jti        String   @id
+  userId     String
+  expiresAt  DateTime
+  revokedAt  DateTime @default(now())
+  reason     String?  // 'logout', 'logout_all', 'password_change', etc.
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([userId])
+  @@map("revoked_tokens")
 }
 
 // ============================================================

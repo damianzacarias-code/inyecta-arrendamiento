@@ -85,8 +85,24 @@ async function main() {
     process.exit(1);
   }
 
-  const adminToken    = makeToken(realAdmin.id, 'ADMIN');
-  const analistaToken = makeToken('analista-stub-id', 'ANALISTA');
+  const adminToken = makeToken(realAdmin.id, 'ADMIN');
+
+  // S4: requireAuth ahora valida que el userId del JWT exista en BD
+  // y esté activo. Crear un ANALISTA real (efímero) para el test de
+  // 403; si ya existe (corridas anteriores que no limpiaron), lo
+  // reutilizamos.
+  const analistaStub = await prisma.user.upsert({
+    where:  { email: 'verify-analista-stub@inyecta.local' },
+    update: { activo: true },
+    create: {
+      email:    'verify-analista-stub@inyecta.local',
+      password: '$2a$12$verifyanalistastubpasswdneverusedXXXXXXXXXXXXXXXXXXXXXX',
+      nombre:   'VerifyAnalista',
+      apellidos: 'Stub',
+      rol:      'ANALISTA',
+    },
+  });
+  const analistaToken = makeToken(analistaStub.id, 'ANALISTA');
 
   // Email único por corrida con timestamp para no colisionar entre runs.
   const stamp = Date.now();

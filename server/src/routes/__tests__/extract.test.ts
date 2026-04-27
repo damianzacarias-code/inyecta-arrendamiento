@@ -12,10 +12,25 @@
  * No toca BD ni red. El provider que se usa es el MockProvider
  * (EXTRACT_PROVIDER no se setea explícitamente — toma su default 'MOCK').
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
+
+// requireAuth (S4) consulta prisma.user.findUnique para validar
+// passwordChangedAt + activo. Mock minimal para los tests de extract,
+// que no tocan BD para nada más.
+vi.mock('../../config/db', () => ({
+  default: {
+    user: {
+      findUnique: vi.fn().mockResolvedValue({
+        passwordChangedAt: new Date(0),
+        activo: true,
+      }),
+    },
+  },
+}));
+
 import extractRoutes from '../extract';
 import { errorHandler } from '../../middleware/errorHandler';
 import { _resetExtractProviderForTests } from '../../services/pdfExtract';

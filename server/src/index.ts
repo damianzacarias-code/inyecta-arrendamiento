@@ -32,6 +32,10 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { requestId } from './middleware/requestId';
 import { logger, httpLogger } from './lib/logger';
 import { installShutdown } from './lib/shutdown';
+import {
+  warmupRevokedTokens,
+  startCleanupTimer as startRevokeCleanup,
+} from './lib/tokenRevocation';
 
 const app = express();
 
@@ -226,6 +230,12 @@ const server = app.listen(config.port, () => {
     `🏢 Inyecta Arrendamiento API escuchando en :${config.port}`,
   );
 });
+
+// S4 — Hidratar lista de revocación de JWTs y arrancar cleanup horario.
+// Fire-and-forget: si la BD no responde al boot, el sistema sigue
+// operando sin lista de revocación (mejor disponibilidad que rechazar
+// todo). El próximo warmup/cleanup la recargará.
+void warmupRevokedTokens().then(() => startRevokeCleanup());
 
 // SIGTERM / SIGINT → cierra HTTP server primero (drena requests en
 // vuelo, deja de aceptar nuevos), después libera Prisma. Si algo se
