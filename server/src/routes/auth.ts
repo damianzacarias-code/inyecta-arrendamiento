@@ -19,6 +19,13 @@ import {
 } from '../lib/passwordPolicy';
 import { onLoginFailed, onPasswordChanged } from '../lib/securityAlerts';
 import { revokeToken, revokeAllForUser } from '../lib/tokenRevocation';
+import {
+  setupMfa,
+  verifyMfaSetup,
+  verifyMfaToken,
+  disableMfa,
+  isMfaEnabled,
+} from '../lib/mfa';
 
 const log = childLogger('auth');
 
@@ -30,6 +37,10 @@ const loginSchema = z.object({
   // longitud aquí, las cuentas viejas con passwords cortas que aún no
   // han migrado pueden seguir entrando para luego cambiarla.
   password: z.string().min(1, 'Contraseña requerida'),
+  // S5: si el usuario tiene MFA habilitado, el cliente debe enviar
+  // mfaToken en este mismo request (mejor UX que round-trip extra).
+  // Acepta TOTP 6 dígitos o backup code XXXX-XXXX.
+  mfaToken: z.string().min(1).optional(),
 });
 
 const registerSchema = z.object({
@@ -69,6 +80,22 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
+    // S5 — Si el user tiene MFA, exigimos el token en este mismo request.
+    if (user.mfaEnabled) {
+      if (!data.mfaToken) {
+        // Status 200 + flag mfaRequired:true (no es 401 porque las
+        // credenciales fueron correctas — el cliente sabe que debe
+        // pedir el TOTP y reintentar). NO devolvemos token aquí.
+        return res.status(200).json({ mfaRequired: true });
+      }
+      try {
+        await verifyMfaToken({ userId: user.id, token: data.mfaToken });
+      } catch {
+        void onLoginFailed({ ip: req.ip ?? 'unknown', emailIntentado: data.email });
+        return res.status(401).json({ error: 'Código MFA inválido' });
+      }
+    }
+
     // jti = identificador único del token. Necesario para que /logout
     // pueda revocar este JWT específico vía revoked_tokens.
     // CLAUDE.md §10 — Hardening S4.
@@ -95,6 +122,8 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
         // usuario a /cambiar-password antes de cualquier otra ruta.
         // CLAUDE.md §10 — Hardening S1.
         mustChangePassword: user.mustChangePassword,
+        // S5: el cliente puede mostrar un badge "2FA activo".
+        mfaEnabled:         user.mfaEnabled,
       },
     });
   } catch (error) {
@@ -173,6 +202,8 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
         createdAt: true,
         mustChangePassword: true,
         passwordChangedAt: true,
+        mfaEnabled:         true,
+        mfaEnrolledAt:      true,
       },
     });
 
@@ -302,6 +333,73 @@ router.post(
     await revokeAllForUser(userId);
     log.info({ userId }, 'logout-all (todas las sesiones invalidadas)');
     res.json({ ok: true });
+  }),
+);
+
+// ── MFA / 2FA TOTP — CLAUDE.md §10 Hardening S5 ─────────────────────
+
+const mfaTokenSchema = z.object({
+  token: z.string().min(1, 'token requerido'),
+});
+
+/**
+ * POST /api/auth/mfa/setup — paso 1: genera secret + QR.
+ * El cliente debe mostrar el QR + el secret en texto. mfaEnabled NO
+ * se vuelve true hasta que el usuario verifique con /verify-setup.
+ */
+router.post(
+  '/mfa/setup',
+  requireAuth,
+  asyncHandler(async (req: Request, res: Response) => {
+    const result = await setupMfa({
+      userId: req.user!.userId,
+      email:  req.user!.email,
+    });
+    // No incluimos el secret crudo en logs (lo redactea pino, pero
+    // no devolvemos como header tampoco).
+    res.json(result);
+  }),
+);
+
+/**
+ * POST /api/auth/mfa/verify-setup { token } — paso 2: confirma el
+ * setup ingresando un código TOTP del autenticador. Si OK marca
+ * mfaEnabled=true y devuelve los 10 backup codes (mostrar UNA vez).
+ */
+router.post(
+  '/mfa/verify-setup',
+  requireAuth,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { token } = mfaTokenSchema.parse(req.body);
+    const result = await verifyMfaSetup({ userId: req.user!.userId, token });
+    res.json(result);
+  }),
+);
+
+/**
+ * POST /api/auth/mfa/disable { token } — desactiva MFA. Requiere un
+ * código MFA actual (TOTP o backup code) — no basta con tener el
+ * JWT, evita que el robo de un token desactive la 2FA del dueño.
+ */
+router.post(
+  '/mfa/disable',
+  requireAuth,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { token } = mfaTokenSchema.parse(req.body);
+    await disableMfa({ userId: req.user!.userId, token });
+    res.json({ ok: true });
+  }),
+);
+
+/**
+ * GET /api/auth/mfa/status — info del estado MFA del usuario actual.
+ */
+router.get(
+  '/mfa/status',
+  requireAuth,
+  asyncHandler(async (req: Request, res: Response) => {
+    const enabled = await isMfaEnabled(req.user!.userId);
+    res.json({ enabled });
   }),
 );
 

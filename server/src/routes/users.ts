@@ -43,6 +43,7 @@ import {
   onUserActivated,
   onPasswordResetByAdmin,
 } from '../lib/securityAlerts';
+import { adminResetMfa } from '../lib/mfa';
 
 const router = Router();
 const log = childLogger('users');
@@ -402,6 +403,31 @@ router.patch(
       });
     }
     res.json(updated);
+  }),
+);
+
+/**
+ * POST /api/users/:id/mfa/reset — el ADMIN borra el setup MFA del
+ * target. Caso de uso: el usuario perdió el autenticador y los
+ * backup codes. Tras el reset, el target queda sin MFA y debe
+ * re-enrollar al próximo login. CLAUDE.md §10 — Hardening S5.
+ */
+router.post(
+  '/:id/mfa/reset',
+  requireAuth,
+  requireRole('ADMIN'),
+  asyncHandler(async (req: Request, res) => {
+    const { id } = req.params;
+    const target = await prisma.user.findUnique({
+      where:  { id },
+      select: { id: true, email: true },
+    });
+    if (!target) {
+      throw new AppError('USER_NOT_FOUND', 'Usuario no encontrado', 404);
+    }
+    await adminResetMfa({ userId: id });
+    log.info({ actorId: req.user?.userId, targetId: id }, 'MFA reseteado por admin');
+    res.json({ ok: true });
   }),
 );
 

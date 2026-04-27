@@ -2214,6 +2214,82 @@ las brechas técnicas críticas que detecté en el análisis ISO/IEC
         comprometido: `POST /api/auth/logout-all` con el token del
         user, o desactivar al user (PATCH /api/users/:id { activo:
         false }) — ambos disparan la barrera 3 inmediatamente.
+
+  - [x] S5: MFA/2FA TOTP con backup codes
+        Patrón viejo: solo password. Si las creds se filtraban (phishing,
+        breach de BD), el atacante entraba sin obstáculo. PLD/CNBV
+        recomiendan 2FA para roles con acceso a PII y operaciones
+        financieras (toda la nómina de Inyecta).
+        Diseño nuevo (RFC 6238 TOTP + backup codes one-time):
+          • Schema:
+              - User.mfaSecret (base32, nullable),
+                User.mfaEnabled (default false),
+                User.mfaEnrolledAt.
+              - model MfaBackupCode (id, userId, hashedCode, consumedAt,
+                + index userId+consumedAt + cascade delete).
+              - Migración 20260427183xxx_add_mfa.
+          • Dependencias: otplib@12 (API estable, ampliamente usada)
+            + qrcode (genera data:image/png para el QR).
+          • lib/mfa.ts:
+              - setupMfa: genera secret base32 + otpauth URI + QR
+                dataURL (240px, error correction M). Persiste secret
+                pendiente; mfaEnabled SIGUE en false.
+              - verifyMfaSetup: usuario ingresa código TOTP del
+                authenticator. Si válido → mfaEnabled=true,
+                mfaEnrolledAt=now, GENERA 10 backup codes
+                (XXXX-XXXX hex mayús), bcrypt 12, mostrados UNA vez.
+              - verifyMfaToken: detecta shape (TOTP=6 dígitos vs
+                backup=alfanumérico). TOTP usa authenticator.check
+                con window=1 (tolera ±30s drift). Backup code
+                normaliza (sin guión, upper) y bcrypt.compare contra
+                no-consumidos; consume tras éxito (one-time).
+              - disableMfa: requiere token MFA actual (anti-hijack
+                de JWT). Borra secret + backup codes.
+              - adminResetMfa: borra todo el setup del target. El
+                user re-enrolla al próximo login.
+              - normalizeBackupCode: helper para que el hash y el
+                input pasen por la misma transformación (caso
+                inicial bug: hasheaba con guión, comparaba sin).
+          • routes/auth.ts:
+              - login: si mfaEnabled, exige mfaToken en el mismo
+                request. Sin token → 200 mfaRequired:true (no es 401
+                porque la pass fue correcta). Con token inválido →
+                401 + onLoginFailed.
+              - POST /mfa/setup, /mfa/verify-setup, /mfa/disable,
+                GET /mfa/status — todos requireAuth.
+              - login response y /me retornan mfaEnabled.
+          • routes/users.ts:
+              - POST /:id/mfa/reset (ADMIN only) — para usuario que
+                perdió autenticador y backup codes.
+          • UI issuer: config.branding.empresa.razonSocial (lo que
+            ve el usuario en su Authenticator).
+        Verify (src/__verify__/mfa.verify.ts) — 22/22:
+          0a-b. generateBackupCodes formato + cantidad.
+          1-1b. login sin MFA OK + mfaEnabled=false en response.
+          2-5.  /setup devuelve secret/qrDataUrl/otpauthUri.
+          6.    verify-setup con código bogus → 400.
+          7-9.  verify-setup OK marca enabled=true + 10 backup codes
+                con formato correcto.
+          10-11. mfaSecret/mfaEnabled persistidos.
+          12.   login sin mfaToken → 200 mfaRequired:true.
+          13.   login con TOTP correcto → 200 token.
+          14.   login con TOTP inválido → 401.
+          15-16. login con backup code consume y rechaza al 2do uso.
+          17-19. disable borra secret + backup codes.
+        Tests unitarios (lib/__tests__/mfa.test.ts) — 9 nuevos:
+          generateBackupCodes (formato, cantidad, unicidad),
+          normalizeBackupCode (guión, espacios, mayúsculas, idempotencia),
+          authenticator (generate+check, secrets distintos rechazados,
+          keyuri formato).
+        Comandos: `npm run verify:mfa` + `npm test`.
+        Resultado: 194/194 tests + 10 verify scripts OK; tsc limpio.
+        Para que Damián habilite MFA en su cuenta:
+          1. POST /api/auth/mfa/setup → escanea QR con su Authenticator.
+          2. POST /api/auth/mfa/verify-setup { token: "123456" } →
+             guarda los 10 backup codes en sitio seguro (1Password).
+          3. Próximo login pedirá el código.
+        Si pierde el Authenticator y los backup codes: otro ADMIN
+        usa POST /api/users/:id/mfa/reset para liberarlo.
 ```
 
 ---

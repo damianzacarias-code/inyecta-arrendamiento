@@ -30,6 +30,17 @@ model User {
   passwordChangedAt   DateTime  @default(now())
   mustChangePassword  Boolean   @default(false)
 
+  // ── MFA / 2FA TOTP (CLAUDE.md §10 — Hardening S5) ─────────────────
+  // mfaSecret: base32 del secret TOTP. Cifrado en reposo si MFA_KEK
+  //   está set; si no, plaintext (acceso a la BD = compromiso total
+  //   de las cuentas igual). Ver lib/mfa.ts.
+  // mfaEnabled: solo true después de que el usuario verifica un
+  //   primer código TOTP correcto (enrollment confirmado).
+  // mfaEnrolledAt: timestamp del enrollment confirmado.
+  mfaSecret           String?
+  mfaEnabled          Boolean   @default(false)
+  mfaEnrolledAt       DateTime?
+
   cotizaciones  Quotation[]
   contratos     Contract[]
   pagosRegistrados Payment[]
@@ -38,8 +49,26 @@ model User {
   notificaciones Notificacion[]
   passwordHistory  PasswordHistory[]
   revokedTokens    RevokedToken[]
+  mfaBackupCodes   MfaBackupCode[]
 
   @@map("users")
+}
+
+// ── Backup codes para MFA (CLAUDE.md §10 — Hardening S5) ─────────────
+// 10 códigos one-time generados al enrollment. Cada uno se usa una sola
+// vez (consumedAt) si el usuario pierde su autenticador. Hash bcrypt 12
+// — el código en claro NUNCA queda persistido (se muestra una sola vez).
+model MfaBackupCode {
+  id          String    @id @default(cuid())
+  userId      String
+  hashedCode  String
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, consumedAt])
+  @@map("mfa_backup_codes")
 }
 
 enum UserRole {
