@@ -1994,6 +1994,75 @@ las brechas técnicas críticas que detecté en el análisis ISO/IEC
         passwordChangedAt, basta comparar el `iat` del token
         (segundos epoch) con `passwordChangedAt.getTime()/1000`
         en requireAuth.
+
+  - [x] S2: Backups cifrados (GPG ó OpenSSL) con guard de producción
+        Patrón viejo: backup_db.sh dejaba dumps en
+        ~/.inyecta-backups/inyecta_*.dump.gz en CLARO. Cualquier
+        snapshot de disco / fuga de bucket S3 / restore en máquina
+        comprometida exponía PII regulada (PFAE/PM, RFC, CURP, FIEL,
+        cuentas bancarias) sin barrera adicional.
+        Diseño nuevo (híbrido GPG/OpenSSL):
+          • backup_db.sh detecta y prefiere herramienta:
+              - gpg disponible → AES256 + SHA512 + S2K iter alto
+                (--symmetric con passphrase por --passphrase-fd 0
+                para no tocar argv ni filesystem temporal).
+                Output: inyecta_<ts>.dump.gz.gpg
+              - openssl como fallback → -aes-256-cbc -pbkdf2
+                -iter 200000 -salt (NIST recomienda ≥10k; 200k
+                da ~70ms/intento → frena bruteforce offline).
+                Output: inyecta_<ts>.dump.gz.enc
+              - Sin passphrase → behaviorprevio (.dump.gz en
+                claro) para dev/staging.
+          • Variables nuevas:
+              BACKUP_PASSPHRASE          — passphrase inline
+              BACKUP_PASSPHRASE_FILE     — ruta a archivo (modo
+                                            preferido para cron;
+                                            warn si perms >600)
+              BACKUP_ENCRYPT=auto|force|off
+                                          auto (default): cifra
+                                          si hay passphrase
+                                          force: aborta sin pass
+                                          off: nunca cifra
+                                          (override de seguridad)
+          • Guards de production (NODE_ENV=production):
+              - sin passphrase → exit 6 (no deja dump en claro)
+              - BACKUP_ENCRYPT=off override permitido (caso:
+                pipeline que cifra después con KMS upstream)
+          • Permisos: BACKUP_DIR queda en 700, dumps en 600.
+          • Rotación: el find ahora cubre las 3 extensiones
+            (.dump.gz, .dump.gz.gpg, .dump.gz.enc).
+        restore_db.sh:
+          • Detecta cifrado por extensión del archivo.
+          • Pide passphrase si el archivo está cifrado; aborta
+            con mensaje claro si falta.
+          • Pipe: gpg --decrypt | gunzip | pg_restore  (.gpg)
+                  openssl enc -d | gunzip | pg_restore  (.enc)
+                  gunzip | pg_restore                    (.dump.gz)
+          • Misma confirmación interactiva ("RESTAURAR") y
+            bypass NONINTERACTIVE=1 que el patrón viejo.
+          • passphrase via fd 3 (heredoc) para no leak por argv.
+        Verificación end-to-end (Postgres real local):
+          • Backup en claro → archivo .dump.gz, 38KB.
+          • Backup cifrado (passphrase inline) → .dump.gz.enc
+            con header "Salted__" (magic OpenSSL).
+          • Backup cifrado (BACKUP_PASSPHRASE_FILE con perms 600)
+            → .dump.gz.enc.
+          • Round-trip: createdb temp + restore .enc + verifica
+            30 tablas + 1 user → drop. OK.
+          • Negativos:
+              - production sin passphrase → exit 6 ✓
+              - BACKUP_ENCRYPT=force sin passphrase → exit 7 ✓
+              - BACKUP_ENCRYPT=off en production → permite (override) ✓
+              - restore con passphrase incorrecta → openssl
+                "bad decrypt" + pg_restore aborta ✓
+        Cron sugerido (documentado en el header del script):
+          0 3 * * * cd /opt/inyecta && \
+            BACKUP_PASSPHRASE_FILE=/etc/inyecta/backup.key \
+            ./scripts/backup_db.sh >> /var/log/inyecta-backup.log 2>&1
+        Para que Damián habilite cifrado: generar passphrase con
+        `openssl rand -base64 48 > /etc/inyecta/backup.key && chmod 600`,
+        agregarla al keyring offline (ej. 1Password) y exportar
+        BACKUP_PASSPHRASE_FILE en el cron. Sin tocar el código.
 ```
 
 ---
