@@ -12,6 +12,29 @@ Sistema de arrendamiento financiero y puro para **FSMP Soluciones de Capital, S.
 - **Arrendamiento PURO** — arrendamiento operativo, el bien nunca se transfiere al cliente, valor de rescate alto (16%)
 - **Arrendamiento FINANCIERO** — arrendamiento con opción de compra simbólica (2%), amortiza todo el capital
 
+### 1.1 Estado operativo — fase de PRUEBAS
+
+> Damián 28-04-2026: el sistema **NO está en producción**. Cualquier
+> contrato, cotización, cliente, factura, expediente o usuario en la BD
+> de desarrollo es **prueba descartable**. Cuando se cambie una regla
+> de negocio o se detecte un bug histórico que invalida datos
+> guardados:
+>
+>  • Los datos viejos se pueden **borrar y recrear** sin temor.
+>  • NO hay riesgo de "perder un contrato real firmado".
+>  • NO hay obligación de migrar / backfill / preservar histórico —
+>    eso solo aplicará cuando Damián diga "vamos a empezar
+>    operaciones".
+>
+> **Hasta entonces**, ante un bug que dejó datos inconsistentes:
+>   1. Aplica el fix.
+>   2. Sugiere borrar los registros afectados.
+>   3. Espera confirmación o procede si el operador ya dio la regla.
+>
+> Esta nota se invalida cuando Damián anuncie el inicio de operaciones
+> reales. A partir de ese momento, cualquier cambio debe asumir datos
+> de cliente reales y planear migraciones / backfill.
+
 ---
 
 ## 2. STACK TÉCNICO
@@ -85,7 +108,7 @@ Tamaño base PDF:        9pt
 | comisionFinanciada      | B12       | "FINANCIADO"/"CONTADO" | Si financiada se suma al PV del PMT                                                           |
 | porcentajeDeposito      | H8 / E18  | 0.10  ó  $77,586.21    | **Dual**. PURO: queda como FV del PMT. FIN: monto que el cliente entrega y se reembolsa al final del contrato |
 | valorResidual           | H10 / E21 | 0.16  ó  $100,000      | **Dual**. SOLO PURO: precio simbólico al cierre (display PDF). En FIN se ignora.              |
-| valorResidualEsComision | —         | true / false (PURO)    | Checkbox UI: si true, valorResidual = comisionApertura. Solo PURO.                            |
+| valorResidualEsDeposito | —         | true / false (PURO)    | Checkbox UI: si true, valorResidualResuelto = depositoGarantia (cliente "pierde" depósito a cambio del bien). Solo PURO. Renombrado el 27-04-2026 desde `valorResidualEsComision` (regla de negocio corregida). |
 | seguroAnual             | E12       | $0  ó  "Pendiente"     | Captura **anual**. "Pendiente" ⇒ no entra en cálculos hasta que se especifique.               |
 | seguroFinanciado        | B13       | FINANCIADO / CONTADO   | Si financiado, suma `seguroAnual × plazo/12` a B17                                            |
 | gpsMonto                | E10       | $16,000                | si es financiado                                                                              |
@@ -112,8 +135,8 @@ PV_pmt       (B19) = baseBien + (comisionFinanciada ? comisionApertura : 0)
 depositoGarantia (E18) = (H8 < 2) ? baseBien × H8 : H8   ← patrón dual
 
 valorResidualResuelto (E21) =
-    PURO  : valorResidualEsComision
-              ? comisionApertura
+    PURO  : valorResidualEsDeposito
+              ? depositoGarantia
               : ((H10 < 2) ? baseBien × H10 : H10)   ← patrón dual
     FIN   : ignorado (no se captura)
 ```
@@ -283,20 +306,28 @@ En FINANCIERO el residual es FIJO 2% del baseBien (opción de compra
 simbólica per ley) y no se captura por separado.
 ```
 
-### 4.13 Checkbox "valor residual = comisión de apertura" (solo PURO)
+### 4.13 Checkbox "valor residual = depósito en garantía" (solo PURO)
 
 UI: checkbox al lado del campo Valor Residual. Cuando se marca:
 
 ```
-if (producto === 'PURO' && valorResidualEsComision) {
-  valorResidualResuelto = comisionApertura
+if (producto === 'PURO' && valorResidualEsDeposito) {
+  valorResidualResuelto = depositoGarantia
 } else if (producto === 'PURO') {
   valorResidualResuelto = (H10 < 2) ? baseBien × H10 : H10
 }
 ```
 
-Útil cuando el cliente "compensa" su residual contra la comisión que
-ya pagó.
+Útil cuando el cliente "pierde" el depósito en garantía a cambio del
+bien al final del contrato (mecánica natural de un PURO con opción de
+compra simbólica al cierre).
+
+> Renombrado el 27-04-2026 desde el nombre legacy
+> `valorResidualEsComision` (cuando la regla apuntaba erróneamente a la
+> comisión de apertura). Migración Prisma:
+> `20260427230000_rename_residual_es_comision_to_deposito` con `RENAME
+> COLUMN` — preserva valores existentes, sólo cambia la semántica del
+> cálculo upstream.
 
 ### 4.14 Seguro anual con opción "Pendiente"
 
@@ -2420,7 +2451,92 @@ Próximos pasos sugeridos para Damián:
 
 ---
 
-## 11. INSTRUCCIONES PARA CLAUDE CODE
+## 11. PENDIENTES — FASE ROLES (NO implementar todavía)
+
+> Damián 27-04-2026: dejé los `TODO(roles)` en el código y la lista
+> abajo para no perderlos cuando empecemos esa fase. Mientras tanto,
+> el cotizador permite todo a todos los roles para hacer pruebas y
+> comparaciones.
+
+### R1 · Restringir Riesgo Bajo a gerencia
+
+**Comportamiento al implementar:**
+- En `client/src/pages/Cotizador.tsx`, el botón del nivel "Bajo" se
+  deshabilita con tooltip cuando `useAuth().user.rol ∉ {ADMIN, DIRECTOR}`.
+- En `server/src/routes/quotations.ts` y `contracts.ts`, validación
+  defensiva: si `req.user.rol ∉ {ADMIN, DIRECTOR}` y `data.nivelRiesgo === 'A'`
+  → 403 `RIESGO_BAJO_FORBIDDEN`.
+
+**Por qué no se implementa hoy:** Damián quiere comparar resultados
+entre niveles para calibrar la política comercial antes de cerrar el
+acceso. Cuando lo active, los analistas, cobranza, operaciones y legal
+sólo verán Medio y Alto.
+
+### R2 · Bloqueo cuando el aporte está debajo del mínimo del nivel
+
+**Hoy:** la lib `distribuirAporte` devuelve `valido: false` con un
+warning informativo cuando el aporte capturado no alcanza el mínimo
+del nivel. La UI muestra el warning amarillo pero **no bloquea** el
+botón "Generar PDF" / "Guardar cotización".
+
+**Comportamiento al implementar:**
+- Cliente: deshabilitar el botón de submit cuando `!distribucion.valido`.
+- Server: devolver 400 desde el handler de POST si el aporte no alcanza.
+  Ya existe la validación cruzada en `services/distribucion.ts`
+  (`validarDistribucion`) — sólo hay que añadir un check extra de
+  `aporteInicialPct >= MINIMOS_NIVEL[nivel].aporteMin`.
+- ADMIN/DIRECTOR mantienen el override vía el flag `edicionManual: true`
+  (ya implementado en backend).
+
+### R3 · Restringir el flag `edicionManual` a gerencia
+
+Hoy cualquier rol puede enviar `edicionManual: true` y saltarse la
+distribución automática. En fase Roles: validar en server que
+`req.user.rol ∈ {ADMIN, DIRECTOR}` cuando llegue ese flag, si no →
+400 `EDIT_MANUAL_FORBIDDEN`.
+
+### R5 · `/documentos` huérfana (decisión pendiente)
+
+La página `client/src/pages/Documentos.tsx` y la entrada del sidebar
+"Arrendatarios → Documentos" llaman a 4 endpoints que **no existen** en
+el server:
+  GET  /api/documents
+  GET  /api/documents/catalogo
+  GET  /api/documents?clientId=...
+  POST /api/documents/init-checklist
+
+Hoy la página muestra "No se pudo cargar el dashboard de documentos /
+El recurso no existe o fue eliminado".
+
+**Causa**: la migración `20260422_expediente_por_actor` reemplazó el
+modelo legacy `ClientDocument` por `ExpedienteActor + ExpedienteDocumento`
+(documentos por contrato, no por cliente). Eliminaron el route y el
+modelo pero no la página. La fuente de verdad real está en
+`ContratoDetalle.tsx → ExpedienteTab`.
+
+**Decisión pendiente con Damián** (3 opciones, por orden de esfuerzo):
+1. Eliminar la entrada del menú + borrar `Documentos.tsx` — refleja
+   la realidad actual (todo es por contrato).
+2. Reimplementar como dashboard agregado de alertas (todos los
+   `ExpedienteDocumento PENDIENTE/RECHAZADO` cross-contratos, agrupados
+   por cliente). ~3-4h de backend.
+3. Redirigir `/documentos` a un reporte existente. 5 min.
+
+### R4 · Subtítulo opción "Menor renta" en PDFs (cosmético, requiere review visual)
+
+Cuando se implemente, en `CotizacionPDF.tsx` y `CaratulaPDF.tsx`:
+- Pasar `nivelRiesgo` y `opcionBajo` a los props del PDF.
+- Renderizar un banner / chip pequeño bajo el bloque "Pago inicial":
+  - Riesgo Bajo opción A → "Opción menor desembolso"
+  - Riesgo Bajo opción B → "Opción menor renta"
+- Riesgo Medio/Alto → sin chip (es el caso default).
+
+Diferido a revisión visual con Damián para no alterar el layout del
+PDF que ya está validado contra el Excel original.
+
+---
+
+## 12. INSTRUCCIONES PARA CLAUDE CODE
 
 1. **Al iniciar una sesión:** lee este archivo completo, luego lee el estado actual del código en los archivos relevantes para la tarea que vas a hacer. No asumas nada sobre el estado del proyecto.
 

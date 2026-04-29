@@ -170,6 +170,12 @@ model Client {
   capitalSocial        Decimal?
   folioMercantil       String?       // folio del Registro Público de Comercio
   fechaInscripcionRPC  DateTime?     // fecha de inscripción de la escritura constitutiva
+  // Notario de la escritura constitutiva (PM) — exigido por declaración II-A
+  // de los contratos PURO/FIN. Antes solo guardábamos el número de escritura
+  // como string libre; ahora desglosado.
+  notarioConstNombre   String?
+  notarioConstNumero   String?
+  notarioConstLugar    String?
   // Metadata
   sector          String?
   actividadEconomica String?
@@ -345,6 +351,15 @@ model RepresentanteLegal {
   // Solo PM: inscripción de poderes en RPC
   fechaInscripcionPoderes DateTime?
   folioInscripcionPoderes String?
+  // Solo PM: datos completos de la escritura del PODER que acredita al
+  // representante legal en el contrato (declaración II-B PURO/FIN).
+  // El poder a veces es la misma escritura constitutiva, pero suele ser
+  // posterior — por eso se captura aparte.
+  poderEscrituraNumero String?
+  poderEscrituraFecha  DateTime?
+  poderNotarioNombre   String?
+  poderNotarioNumero   String?
+  poderNotarioLugar    String?
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -409,18 +424,32 @@ model Quotation {
   enganchePorcentaje  Decimal   @default(0)
   depositoGarantia       Decimal   @default(0)
   depositoGarantiaPct    Decimal   @default(0)
+  /// Aporte inicial total que el cliente entrega (% de valorBien). El
+  /// cotizador lo distribuye automáticamente en `enganche` y
+  /// `depositoGarantia` según el nivel de riesgo (lib distribucion.ts).
+  /// Default 0 para retro-compat con cotizaciones antes del cambio.
+  aporteInicialPct       Decimal   @default(0)
   comisionApertura       Decimal   @default(0)
   comisionAperturaPct    Decimal   @default(0.05)
   comisionAperturaFinanciada Boolean @default(true)
   rentaInicial           Decimal   @default(0)
   gpsInstalacion         Decimal   @default(0)
   gpsFinanciado          Boolean   @default(true)
+  /// Clave del GpsProveedor seleccionado al cotizar. null si "Sin GPS".
+  /// Se persiste para auditar qué proveedor se usó (los precios pueden
+  /// cambiar después en el catálogo).
+  gpsProveedor           String?
   seguroAnual            Decimal   @default(0)
   seguroFinanciado       Boolean   @default(true)
   seguroPendiente        Boolean   @default(false)  // CLAUDE.md §4.14: si true, no entra en cálculos
   valorResidual          Decimal   @default(0)
   valorResidualPct       Decimal   @default(0)
-  valorResidualEsComision Boolean  @default(false)  // CLAUDE.md §4.13: PURO checkbox "residual = comisión apertura"
+  // CLAUDE.md §4.13 — PURO checkbox "Valor residual = depósito en garantía".
+  // Cuando es true, valorResidualResuelto = depositoGarantia (el cliente
+  // "pierde" el depósito a cambio del bien al final del contrato). El nombre
+  // legacy del campo era valorResidualEsComision; renombrado por el operador
+  // que clarificó la regla de negocio el 27-04-2026.
+  valorResidualEsDeposito Boolean  @default(false)
 
   // Resultados
   montoFinanciar    Decimal?
@@ -522,8 +551,18 @@ model Contract {
   bienMarca       String?
   bienModelo      String?
   bienAnio        Int?
-  bienNumSerie    String?
+  bienNumSerie    String?         // serie de maquinaria/equipo
   bienEstado      String?         // nuevo/seminuevo
+  // Identificación de vehículo (cláusula DÉCIMA SEXTA prohíbe alterar
+  // las "características esenciales o de identificación" — son éstas).
+  bienColor       String?
+  bienPlacas      String?
+  bienNIV         String?         // VIN/NIV vehicular (17 chars)
+  bienMotor       String?         // número de motor
+  // Lugar de entrega del bien (cláusula TERCERA PURO/FIN). Puede diferir
+  // del domicilio fiscal del cliente (entrega directa del proveedor a
+  // sucursal, obra, planta, etc.).
+  lugarEntregaBien String?
   proveedor       String?         // DEPRECATED — usar modelo Proveedor (1:1)
 
   // Parámetros financieros
@@ -538,13 +577,20 @@ model Contract {
   // Montos
   enganche              Decimal  @default(0)
   depositoGarantia      Decimal  @default(0)
+  /// Snapshot del aporte inicial total (% sobre valorBien) elegido al
+  /// firmar el contrato. enganche y depositoGarantia se derivan de aquí
+  /// vía lib distribucion.ts (cliente) o validación cruzada (server).
+  aporteInicialPct      Decimal  @default(0)
   comisionApertura      Decimal  @default(0)
   rentaInicial          Decimal  @default(0)
   gpsInstalacion        Decimal  @default(0)
+  /// Snapshot del proveedor GPS elegido. null si "Sin GPS".
+  gpsProveedor          String?
   seguroAnual           Decimal  @default(0)
   seguroPendiente       Boolean  @default(false)  // CLAUDE.md §4.14
   valorResidual         Decimal  @default(0)
-  valorResidualEsComision Boolean @default(false) // CLAUDE.md §4.13: PURO
+  // §4.13 — PURO: residual = depósito en garantía (renombrado 27-04-2026).
+  valorResidualEsDeposito Boolean @default(false)
   montoFinanciar        Decimal
   rentaMensual          Decimal
   rentaMensualIVA       Decimal
@@ -555,6 +601,9 @@ model Contract {
   fechaEntregaBien      DateTime?
   fechaVencimiento      DateTime?
   fechaTerminacion      DateTime?
+  // Día del mes en que se paga la renta (cláusula OCTAVA FIN: "cada día
+  // XX de mes"). Si null, se infiere del día de fechaInicio.
+  diaPagoMensual        Int?
 
   // Estado del contrato
   estatus         ContractStatus   @default(EN_PROCESO)
@@ -589,6 +638,15 @@ model Contract {
   perfilTransaccional  PerfilTransaccional?
   proveedorData        Proveedor?
   declaracionesPEP     DeclaracionPEP[]
+
+  // Avales (deudores solidarios). El expediente legacy guardaba el
+  // aval como ExpedienteActor con datosAdicionales: Json no tipado.
+  // El modelo Aval estructura los datos demográficos completos que
+  // exigen los contratos (RFC, CURP, domicilio, estado civil + cónyuge).
+  avales               Aval[]
+
+  // Pagaré (sólo FIN, cláusula DÉCIMA TERCERA). 1:1.
+  pagare               Pagare?
 
   @@map("contracts")
 }
@@ -650,6 +708,24 @@ model Proveedor {
   nombreContacto String?
   telefono       String?
   email          String?
+
+  // Identidad fiscal (cláusula SEGUNDA FIN: "LA ARRENDADORA se obliga a
+  // adquirir el bien"). Sin RFC no se puede emitir CFDI de compra.
+  rfc            String?
+  // Domicilio fiscal (para CFDI y cláusula de notificaciones)
+  calle          String?
+  numExterior    String?
+  numInterior    String?
+  colonia        String?
+  municipio      String?
+  ciudad         String?
+  estado         String?
+  pais           String?  @default("México")
+  cp             String?
+  // Datos bancarios para dispersión del monto de adquisición
+  banco          String?
+  clabe          String?
+  numCuenta      String?
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -1255,10 +1331,156 @@ model Catalog {
   // Default 2.0 → 36% ord. = 72% mor. Editable por si Inyecta cambia
   // política comercial (ej. 1.5× para clientes preferentes).
   tasaMoratoriaMultiplier  Decimal  @db.Decimal(4, 2) @default(2.0)
+  // Folio CONDUSEF del Registro de Contratos de Adhesión (cláusula I-F
+  // PURO/FIN). Uno por producto. Vive en config porque es por
+  // plantilla, no por contrato.
+  folioCondusefPuro        String?
+  folioCondusefFin         String?
   updatedAt                DateTime @updatedAt
   updatedById              String?  // user.id que editó la última vez
 
   @@map("catalog")
+}
+
+// ============================================================
+// AVALES / DEUDORES SOLIDARIOS
+// ------------------------------------------------------------
+// Cláusula VIGÉSIMA CUARTA PURO / DÉCIMA QUINTA FIN: "EL DEUDOR
+// SOLIDARIO Y/O AVALISTA se constituye como obligado principal,
+// renuncia a beneficios de orden, excusión y división, y se
+// obliga a no enajenar sus bienes sin consentimiento" — por eso
+// se necesita el régimen matrimonial y los datos del cónyuge:
+// si es sociedad conyugal, el cónyuge co-grava su patrimonio.
+//
+// Espejo del modelo RepresentanteLegal pero N:1 con Contract
+// (un contrato puede tener varios avales — clientes corporativos
+// suelen exigir aval del accionista mayoritario + del CEO).
+// ============================================================
+model Aval {
+  id              String   @id @default(cuid())
+  contractId      String
+  contract        Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  orden           Int      @default(1)  // 1, 2, 3 — para listar en orden estable
+
+  tipo            ClientType  // PFAE | PM
+
+  // Identidad PF
+  nombre          String
+  apellidoPaterno String?
+  apellidoMaterno String?
+  rfc             String?
+  curp            String?
+  fiel            String?
+  fechaNacimiento DateTime?
+  lugarNacimiento String?
+  nacionalidad    String?  @default("Mexicana")
+
+  // Estado civil + cónyuge (relevante por gravamen patrimonial)
+  estadoCivil        EstadoCivil?
+  regimenMatrimonial RegimenMatrimonial?
+  nombreConyuge      String?
+  rfcConyuge         String?
+
+  // Domicilio
+  calle           String?
+  numExterior     String?
+  numInterior     String?
+  colonia         String?
+  municipio       String?
+  ciudad          String?
+  estado          String?
+  pais            String?  @default("México")
+  cp              String?
+
+  // Contacto
+  telefono        String?
+  email           String?
+
+  // Si el aval es PM
+  razonSocial          String?
+  fechaConstitucion    DateTime?
+  folioMercantil       String?
+  notarioConstNombre   String?
+  notarioConstNumero   String?
+  notarioConstLugar    String?
+  // Rep legal del aval PM
+  repLegalNombre       String?
+  repLegalRfc          String?
+  poderEscrituraNumero String?
+  poderEscrituraFecha  DateTime?
+  poderNotarioNombre   String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([contractId, orden])
+  @@index([contractId])
+  @@map("avales")
+}
+
+// ============================================================
+// PAGARÉ — sólo FINANCIERO (cláusula DÉCIMA TERCERA)
+// ------------------------------------------------------------
+// "LA ARRENDATARIA y EL OBLIGADO SOLIDARIO Y/O AVALISTA suscriben
+// a la orden de LA ARRENDADORA un pagaré por el importe total del
+// precio pactado por concepto de renta global. Dicho título de
+// crédito deberá tener como fecha de vencimiento la misma fecha
+// de terminación del plazo forzoso."
+//
+// Es título ejecutivo independiente — sin él Inyecta no tendría
+// vía cambiaria, sólo civil/mercantil. 1:1 con Contract.
+// ============================================================
+model Pagare {
+  id               String   @id @default(cuid())
+  contractId       String   @unique
+  contract         Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  numeroPagare     String                 // serie del pagaré (puede coincidir con folio del contrato)
+  fechaSuscripcion DateTime               // generalmente = Contract.fechaFirma
+  fechaVencimiento DateTime               // = Contract.fechaVencimiento
+  montoPagare      Decimal                // = renta × plazo con IVA (renta global)
+  lugarSuscripcion String?
+  observaciones    String?
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("pagares")
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Proveedores de GPS — catálogo dinámico
+// ──────────────────────────────────────────────────────────────────
+//
+// Reemplaza el campo manual `gpsInstalacion` (default $4,200) por un
+// catálogo con precios por plazo. Damián 28-04-2026:
+//
+//   • Bienes < $500,000 → default GBR
+//   • Bienes ≥ $500,000 → default Tecno Logistic
+//   • "Sin GPS" siempre disponible pero con advertencia visible
+//   • Plazos no en la tabla (12, 18, 30, 42) → siguiente mayor (24/36/48)
+//   • Descripción del paquete sólo visible en UI del sistema, no en PDF
+//
+// El precio elegido se copia a `gpsInstalacion` de Quotation/Contract
+// (downstream el motor de cálculo recibe un solo número, sin saber del
+// proveedor — desacopla el catálogo del lease calculator).
+model GpsProveedor {
+  clave        String   @id            // 'GBR' | 'TECNO_LOGISTIC' | ... (clave estable, NO id auto)
+  nombre       String                  // 'GBR' / 'Tecno Logistic'
+  /// Texto que el operador ve junto al precio en el dropdown del cotizador.
+  /// NO se imprime en el PDF (decisión Damián 28-04-2026).
+  descripcion  String?
+  /// Precios por plazo. La función `precioGpsPorPlazo(plazo)` redondea
+  /// hacia arriba al siguiente plazo de la tabla (12/18/24 → precio24m,
+  /// 30/36 → precio36m, 42/48 → precio48m).
+  precio24m    Decimal  @db.Decimal(12, 2)
+  precio36m    Decimal  @db.Decimal(12, 2)
+  precio48m    Decimal  @db.Decimal(12, 2)
+  orden        Int      @default(0)
+  activo       Boolean  @default(true)
+  updatedAt    DateTime @updatedAt
+  updatedById  String?
+
+  @@map("gps_proveedores")
 }
 
 // Presets de depósito y enganche por nivel de riesgo (A/B/C). Antes

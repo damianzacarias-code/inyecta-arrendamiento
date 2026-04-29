@@ -80,6 +80,14 @@ export const representanteLegalSchema = z
     // Inscripción de poderes (solo PM — lo refuerza clientSchema a nivel padre)
     fechaInscripcionPoderes: dateOpt,
     folioInscripcionPoderes: optionalString,
+    // Datos completos de la escritura del poder (declaración II-B PURO/FIN).
+    // El poder a veces es la misma escritura constitutiva pero suele ser
+    // posterior — por eso se captura aparte.
+    poderEscrituraNumero: optionalString,
+    poderEscrituraFecha: dateOpt,
+    poderNotarioNombre: optionalString,
+    poderNotarioNumero: optionalString,
+    poderNotarioLugar: optionalString,
   })
   .superRefine(refineEstadoCivil);
 
@@ -176,6 +184,10 @@ export const clientFieldsSchema = z.object({
   capitalSocial: decimalOpt,
   folioMercantil: optionalString,
   fechaInscripcionRPC: dateOpt,
+  // Notario de la escritura constitutiva (declaración II-A PURO/FIN)
+  notarioConstNombre: optionalString,
+  notarioConstNumero: optionalString,
+  notarioConstLugar: optionalString,
 
   // Metadata
   sector: optionalString,

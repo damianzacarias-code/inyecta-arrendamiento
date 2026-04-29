@@ -4,6 +4,7 @@ import api from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import LoadErrorState, { describeApiError } from '@/components/LoadErrorState';
 import { FileText, Eye, ChevronLeft, ChevronRight, FolderOpen } from 'lucide-react';
+import { riskLabel, riskBadgeClasses } from '@/lib/cotizacion/riesgoLabels';
 
 interface Quotation {
   id: string;
@@ -154,8 +155,8 @@ export default function Cotizaciones() {
                       <td className="px-4 py-3 text-right font-medium text-gray-900">{formatCurrency(Number(q.rentaMensualIVA))}</td>
                       <td className="px-4 py-3 text-center text-gray-600">{q.plazo}m</td>
                       <td className="px-4 py-3 text-center">
-                        <span className="text-xs font-medium bg-inyecta-100 text-inyecta-700 px-2 py-0.5 rounded">
-                          {q.nivelRiesgo}
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded ${riskBadgeClasses(q.nivelRiesgo)}`}>
+                          {riskLabel(q.nivelRiesgo)}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">

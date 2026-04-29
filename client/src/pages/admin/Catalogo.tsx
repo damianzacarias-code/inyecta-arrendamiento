@@ -22,9 +22,10 @@ import { useEffect, useState } from 'react';
 import api from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { useCatalog, reloadCatalog } from '@/lib/catalog';
+import GpsProveedoresSection from '@/components/admin/GpsProveedoresSection';
 import {
   Settings, AlertTriangle, CheckCircle2, Shield, Save, Percent,
-  MapPin, Banknote, RotateCcw,
+  MapPin, Banknote, RotateCcw, Navigation,
 } from 'lucide-react';
 
 // ── helpers de conversión BD ↔ UI ───────────────────────────────────
@@ -515,6 +516,16 @@ export default function Catalogo() {
         <span className="text-xs text-gray-400 ml-auto">
           Solo afecta cotizaciones nuevas. Las existentes conservan su tasa.
         </span>
+      </div>
+
+      {/* ── Sección Proveedores GPS — autocontenida, no comparte el
+            form principal porque tiene su propio CRUD por fila. ── */}
+      <div className="mt-8 bg-white border border-gray-200 rounded-xl p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <Navigation size={18} className="text-inyecta-600" />
+          <h2 className="text-base font-bold text-gray-800">Proveedores GPS</h2>
+        </div>
+        <GpsProveedoresSection />
       </div>
     </form>
   );

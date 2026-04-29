@@ -70,6 +70,11 @@ const catalogUpdateSchema = z
     gpsMontoDefault:         z.coerce.number().min(0).max(1_000_000),
     gpsFinanciableDefault:   z.boolean(),
     tasaMoratoriaMultiplier: z.coerce.number().min(1).max(5),
+    // Folios CONDUSEF — opcionales (null hasta que Damián registre las
+    // plantillas en CONDUSEF). Sin formato fuerte porque varía por
+    // entidad supervisora.
+    folioCondusefPuro:       z.string().trim().max(60).optional().nullable(),
+    folioCondusefFin:        z.string().trim().max(60).optional().nullable(),
   })
   .refine((d) => d.tasaAnualMin <= d.tasaAnualDefault && d.tasaAnualDefault <= d.tasaAnualMax, {
     message: 'tasaAnualMin ≤ tasaAnualDefault ≤ tasaAnualMax',
@@ -129,6 +134,9 @@ function serializeCatalog(c: Awaited<ReturnType<typeof prisma.catalog.findUnique
     gpsMontoDefault:         toNumber(c.gpsMontoDefault),
     gpsFinanciableDefault:   c.gpsFinanciableDefault,
     tasaMoratoriaMultiplier: toNumber(c.tasaMoratoriaMultiplier),
+    // Folios CONDUSEF (uno por producto). null hasta que Damián los registre.
+    folioCondusefPuro:       c.folioCondusefPuro ?? null,
+    folioCondusefFin:        c.folioCondusefFin ?? null,
     updatedAt:               c.updatedAt.toISOString(),
     updatedById:             c.updatedById,
   };
@@ -230,6 +238,90 @@ router.put(
     });
     log.info({ userId, nivel }, 'risk preset actualizado');
     return res.json(serializePresets([updated])[0]);
+  }),
+);
+
+// ──────────────────────────────────────────────────────────────────
+// Proveedores GPS — catálogo dinámico
+// ──────────────────────────────────────────────────────────────────
+//
+// GET  /api/config/gps-proveedores        → todos (incluye inactivos)
+// PUT  /api/config/gps-proveedores/:clave → upsert (ADMIN/DIRECTOR)
+// DEL  /api/config/gps-proveedores/:clave → soft delete (activo=false)
+
+const gpsProveedorSchema = z.object({
+  nombre:      z.string().trim().min(1).max(80),
+  descripcion: z.string().trim().max(200).optional().nullable(),
+  precio24m:   z.coerce.number().min(0).max(1_000_000),
+  precio36m:   z.coerce.number().min(0).max(1_000_000),
+  precio48m:   z.coerce.number().min(0).max(1_000_000),
+  orden:       z.coerce.number().int().min(0).max(99).default(0),
+  activo:      z.boolean().default(true),
+});
+
+const gpsClaveSchema = z.string().trim().min(1).max(40).regex(
+  /^[A-Z0-9_]+$/,
+  'La clave sólo acepta MAYÚSCULAS, números y guión bajo (ej. GBR, TECNO_LOGISTIC).',
+);
+
+function serializeGpsProveedor(p: Awaited<ReturnType<typeof prisma.gpsProveedor.findFirst>>) {
+  if (!p) return null;
+  return {
+    clave: p.clave,
+    nombre: p.nombre,
+    descripcion: p.descripcion,
+    precio24m: toNumber(p.precio24m),
+    precio36m: toNumber(p.precio36m),
+    precio48m: toNumber(p.precio48m),
+    orden: p.orden,
+    activo: p.activo,
+    updatedAt: p.updatedAt.toISOString(),
+    updatedById: p.updatedById,
+  };
+}
+
+router.get(
+  '/gps-proveedores',
+  requireAuth,
+  asyncHandler(async (_req: Request, res) => {
+    const filas = await prisma.gpsProveedor.findMany({ orderBy: [{ orden: 'asc' }, { nombre: 'asc' }] });
+    res.json({ proveedores: filas.map((p) => serializeGpsProveedor(p)) });
+  }),
+);
+
+router.put(
+  '/gps-proveedores/:clave',
+  requireAuth,
+  requireRole('ADMIN', 'DIRECTOR'),
+  asyncHandler(async (req: Request, res) => {
+    const clave = gpsClaveSchema.parse(req.params.clave);
+    const data = gpsProveedorSchema.parse(req.body);
+    const userId = req.user!.userId;
+    const upserted = await prisma.gpsProveedor.upsert({
+      where: { clave },
+      create: { clave, ...data, updatedById: userId },
+      update: { ...data, updatedById: userId },
+    });
+    log.info({ userId, clave }, 'GPS proveedor actualizado');
+    res.json(serializeGpsProveedor(upserted));
+  }),
+);
+
+router.delete(
+  '/gps-proveedores/:clave',
+  requireAuth,
+  requireRole('ADMIN', 'DIRECTOR'),
+  asyncHandler(async (req: Request, res) => {
+    const clave = gpsClaveSchema.parse(req.params.clave);
+    const userId = req.user!.userId;
+    // Soft delete: marca activo=false en lugar de DROP — preserva el
+    // histórico (cotizaciones viejas pueden referenciar la clave).
+    const updated = await prisma.gpsProveedor.update({
+      where: { clave },
+      data: { activo: false, updatedById: userId },
+    });
+    log.info({ userId, clave }, 'GPS proveedor desactivado');
+    res.json(serializeGpsProveedor(updated));
   }),
 );
 

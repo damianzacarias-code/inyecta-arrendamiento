@@ -117,16 +117,18 @@ export interface InputsCotizacion {
   // ── Valor residual (CLAUDE.md §4.12) — solo PURO ─────────────────
   /**
    * Patrón dual %/monto absoluto (§4.15). Solo PURO. En FIN se ignora.
-   * Si `valorResidualEsComision = true`, ESTE valor se ignora y se
-   * usa la comisión de apertura como residual (§4.13).
+   * Si `valorResidualEsDeposito = true`, ESTE valor se ignora y se
+   * usa el depósito en garantía como residual (§4.13).
    */
   valorResidual: number;
 
   /**
-   * CLAUDE.md §4.13: solo PURO. Si true, valorResidual = comisión
-   * apertura (ignorando el campo `valorResidual`). En FIN se ignora.
+   * CLAUDE.md §4.13: solo PURO. Si true, valorResidual = depósito en
+   * garantía (ignorando el campo `valorResidual`). En FIN se ignora.
+   * Renombrado desde `valorResidualEsComision` el 27-04-2026 — antes
+   * el cálculo apuntaba a comisión, regla de negocio corregida.
    */
-  valorResidualEsComision?: boolean;
+  valorResidualEsDeposito?: boolean;
 
   // ── GPS ──────────────────────────────────────────────────────────
   gpsMonto: number;
@@ -140,9 +142,13 @@ export interface InputsCotizacion {
   seguroEsContado: boolean;
 
   // ── Enganche / Pago anticipado ───────────────────────────────────
+  // El enganche SIEMPRE es de contado: el cliente lo entrega al inicio
+  // y se muestra como "Pago anticipado" en la cotización. La fórmula
+  // B17 del Excel oficial siempre lo resta del baseBien
+  // (independientemente de cualquier modalidad), así que no había razón
+  // de exponer un toggle al usuario. La modalidad legacy "engancheEsContado"
+  // se eliminó el 27-04-2026 a pedido de Damián.
   engancheMonto: number;
-  /** true = pago inicial / false = reduce el monto a financiar */
-  engancheEsContado: boolean;
 
   // ── Datos descriptivos ───────────────────────────────────────────
   nombreBien: string;
@@ -239,8 +245,8 @@ export interface ResultadoCotizacion {
  *   7. Sección "Monto a financiar" = display con IVA del bien
  *      (NO entra al PMT — solo se muestra al cliente).
  *   8. Residual display (§4.5):
- *      PURO:       valorResidualResuelto (E21) = comisiónApertura
- *                  si valorResidualEsComision, si no
+ *      PURO:       valorResidualResuelto (E21) = depositoGarantia
+ *                  si valorResidualEsDeposito, si no
  *                  resolverDual(valorResidual, baseBien).
  *      FINANCIERO: baseBien × 0.02 (precio simbólico, §4.5).
  *
@@ -265,13 +271,13 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
   const gpsFinanciado = inp.gpsEsContado ? new Decimal(0) : new Decimal(inp.gpsMonto);
   const gpsContado    = inp.gpsEsContado ? new Decimal(inp.gpsMonto) : new Decimal(0);
 
-  // ── Enganche (siempre reduce baseBien per Excel B17) ─────────────
-  // En el Excel B17 SIEMPRE resta el enganche (E17), independientemente
-  // de si el cliente lo paga al contado o lo difiere. La distinción
-  // contado/financiado es solo para presentación en la cotización.
-  const engancheTotal      = new Decimal(inp.engancheMonto);
-  const engancheFinanciado = !inp.engancheEsContado ? engancheTotal : new Decimal(0);
-  const engancheContado    =  inp.engancheEsContado ? engancheTotal : new Decimal(0);
+  // ── Enganche (SIEMPRE de contado, reduce baseBien per Excel B17) ─
+  // Reduce baseBien (E17 → B17) y aparece como pago inicial. La
+  // modalidad "financiada" se eliminó el 27-04-2026 a pedido de Damián
+  // — la fórmula del Excel oficial siempre lo trata como pago inicial,
+  // y exponer el toggle generaba confusión sin cambiar la matemática.
+  const engancheTotal   = new Decimal(inp.engancheMonto);
+  const engancheContado = engancheTotal;
 
   // ── Seguro (CLAUDE.md §4.14) ─────────────────────────────────────
   // - seguroPendiente: 0 en B17 y 0 en pago inicial (no entra hasta
@@ -307,11 +313,12 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
   // Lo que ve el cliente en la sección "Monto a financiar". El seguro
   // financiado se muestra como total prorrateado al plazo (consistente
   // con lo que entra a B17).
+  // El enganche siempre es de contado → no se descuenta del display
+  // del monto a financiar; el cliente lo verá en "Pago inicial".
   const montoTotalDisplay = valorConIVA
     .plus(comisionFinanciada)
     .plus(seguroFinanciadoTotal)
-    .plus(gpsFinanciado)
-    .minus(engancheFinanciado);
+    .plus(gpsFinanciado);
 
   // ── Monto REAL financiado / PV del PMT (B19) ─────────────────────
   // B19 = B17 + comisiónFinanciada (sin IVA del bien)
@@ -321,20 +328,30 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
   const depositoGarantia = resolverDual(inp.porcentajeDeposito, baseBien);
 
   // ── Valor residual resuelto (E21, §4.12 + §4.13) ────────────────
-  //   PURO  : si valorResidualEsComision ⇒ = comisión apertura,
+  //   PURO  : si valorResidualEsDeposito ⇒ = depósito en garantía
+  //             (cliente "pierde" depósito a cambio del bien),
   //           si no ⇒ resolverDual(valorResidual, baseBien).
   //   FIN   : baseBien × 0.02 (opción de compra simbólica, §4.5).
   const valorResidualResuelto =
     inp.producto === 'PURO'
-      ? (inp.valorResidualEsComision
-          ? comisionMonto
+      ? (inp.valorResidualEsDeposito
+          ? depositoGarantia
           : resolverDual(inp.valorResidual, baseBien))
       : baseBien.times(0.02);
 
   // ── FV del PMT ───────────────────────────────────────────────────
-  // PURO: depósito real al final del plazo (queda como saldo final)
-  // FINANCIERO: 0 — amortiza todo el capital
-  const fvPMT = inp.producto === 'PURO' ? depositoGarantia : new Decimal(0);
+  // PURO: el FV del PMT es el VALOR RESIDUAL RESUELTO (saldo final del
+  //   contrato — lo que queda al cierre del plazo forzoso). Antes
+  //   pasaba aquí `depositoGarantia` directamente, lo que daba una
+  //   renta inflada cuando residual ≠ depósito (caso típico: 16% ≠
+  //   10%) y dejaba la tabla de amortización terminando en el depósito
+  //   en lugar del residual mostrado al cliente. Bug detectado por
+  //   Damián el 28-04-2026 reproducido al centavo contra Excel.
+  //   `valorResidualResuelto` ya cubre los dos casos correctamente:
+  //     • valorResidualEsDeposito = true (§4.13) → vale `depositoGarantia`
+  //     • si no                                  → vale `resolverDual(valorResidual, baseBien)`
+  // FINANCIERO: 0 — amortiza todo el capital.
+  const fvPMT = inp.producto === 'PURO' ? valorResidualResuelto : new Decimal(0);
 
   // ── Renta mensual ────────────────────────────────────────────────
   const rentaNeta = calcPMT(
@@ -354,14 +371,24 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
   const residualTotal   = residualDisplay.times(IVA.plus(1));
 
   // ── Porcentaje del residual (solo display) ───────────────────────
-  // PURO con flag "= comisión": el % efectivo es la tasa de comisión.
+  // PURO con flag "= depósito": el % efectivo es el del depósito en garantía.
   // PURO con valor dual: si <2 es %, si ≥2 calculamos el % implícito
   // sobre baseBien para mostrarlo coherente.
   // FINANCIERO: siempre 2%.
   let residualPorcentaje: number;
   if (inp.producto === 'PURO') {
-    if (inp.valorResidualEsComision) {
-      residualPorcentaje = inp.tasaComisionApertura;
+    if (inp.valorResidualEsDeposito) {
+      // El depósito ya está calculado en `depositoGarantia`. El %
+      // efectivo se reduce a `inp.porcentajeDeposito` cuando es <2,
+      // o al ratio implícito cuando se capturó como monto absoluto.
+      residualPorcentaje = inp.porcentajeDeposito < 2
+        ? inp.porcentajeDeposito
+        : (baseBien.isZero()
+            ? 0
+            : new Decimal(inp.porcentajeDeposito)
+                .dividedBy(baseBien)
+                .toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
+                .toNumber());
     } else if (inp.valorResidual < 2) {
       residualPorcentaje = inp.valorResidual;
     } else if (baseBien.isZero()) {
@@ -388,6 +415,11 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
 
   // ── Redondeo final ───────────────────────────────────────────────
   const r2 = (d: Decimal) => d.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
+  // CLAUDE.md §4.4: el total con IVA de la renta usa TRUNC (no ROUND)
+  // específicamente para que la suma anual al cliente no acumule
+  // $0.005/mes de diferencia. ROUND_DOWN en Decimal.js trunca hacia
+  // cero (equivalente a TRUNC para valores positivos).
+  const r2Trunc = (d: Decimal) => d.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber();
 
   return {
     fecha:           fechaStr,
@@ -409,7 +441,10 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
       comisionAperturaFinanciada: r2(comisionFinanciada),
       seguroFinanciado:           r2(seguroFinanciadoTotal),
       gpsFinanciado:              r2(gpsFinanciado),
-      descuentoEnganche:          r2(engancheFinanciado),
+      // descuentoEnganche se conserva en el shape por compat (PDFs/Detalle
+      // que aún lo leen) pero ahora es siempre 0 — el enganche ya no se
+      // descuenta del monto a financiar, va sólo a "Pago inicial".
+      descuentoEnganche:          0,
       total:                      r2(montoTotalDisplay),
     },
 
@@ -425,7 +460,10 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
     rentaMensual: {
       montoNeto: r2(rentaDecimal),
       iva:       r2(rentaIVA),
-      total:     r2(rentaDecimal.times(IVA.plus(1))),
+      // §4.4 — TRUNC, NO ROUND. La diferencia con (montoNeto + iva)
+      // redondeados es ≤ $0.01 por periodo; el Excel oficial trunca
+      // aquí para que la suma anual al cliente no le sume centavos.
+      total:     r2Trunc(rentaDecimal.times(IVA.plus(1))),
     },
 
     residual: {

@@ -18,8 +18,11 @@ interface ClientRow {
   ciudad?: string;
   estado?: string;
   createdAt: string;
-  docProgress: { total: number; recibidos: number; requeridosTotal: number; requeridosRecibidos: number };
-  _count: { cotizaciones: number; contratos: number };
+  // Estos dos bloques los puebla el server vía aggregate; si por algún
+  // motivo no llegan (cambio de payload, error parcial), defendemos en
+  // render con `?.` + defaults — la pantalla NO debe quedar en blanco.
+  docProgress?: { total: number; recibidos: number; requeridosTotal: number; requeridosRecibidos: number } | null;
+  _count?: { cotizaciones: number; contratos: number } | null;
 }
 
 function clientDisplayName(c: ClientRow): string {
@@ -141,58 +144,41 @@ export default function Clientes() {
                     <th className="px-4 py-3 text-left font-medium text-gray-500">Nombre / Razon Social</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-500">RFC</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-500">Contacto</th>
-                    <th className="px-4 py-3 text-center font-medium text-gray-500">Documentos</th>
                     <th className="px-4 py-3 text-center font-medium text-gray-500">Operaciones</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-500">Registro</th>
                     <th className="px-4 py-3"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {clients.map((c) => {
-                    const pct = c.docProgress.requeridosTotal > 0
-                      ? Math.round((c.docProgress.requeridosRecibidos / c.docProgress.requeridosTotal) * 100)
-                      : 0;
-                    return (
-                      <tr key={c.id} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded ${
-                            c.tipo === 'PM' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'
-                          }`}>
-                            {c.tipo === 'PM' ? <Building2 size={12} /> : <User size={12} />}
-                            {c.tipo}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 font-medium text-gray-900">{clientDisplayName(c)}</td>
-                        <td className="px-4 py-3 font-mono text-xs text-gray-600">{c.rfc || '-'}</td>
-                        <td className="px-4 py-3">
-                          <div className="text-gray-700 text-xs">{c.email || '-'}</div>
-                          <div className="text-gray-400 text-xs">{c.telefono || ''}</div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center justify-center gap-2">
-                            <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                              <div
-                                className={`h-full rounded-full ${pct === 100 ? 'bg-emerald-500' : pct > 50 ? 'bg-amber-500' : 'bg-red-400'}`}
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                            <span className="text-xs text-gray-500">{pct}%</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <span className="text-xs text-gray-500">
-                            {c._count.cotizaciones}C / {c._count.contratos}K
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-gray-500 text-xs">{formatDate(c.createdAt)}</td>
-                        <td className="px-4 py-3">
-                          <Link to={`/clientes/${c.id}`} className="text-inyecta-600 hover:text-inyecta-800">
-                            <Eye size={16} />
-                          </Link>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {clients.map((c) => (
+                    <tr key={c.id} className="border-b border-gray-100 hover:bg-gray-50">
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded ${
+                          c.tipo === 'PM' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'
+                        }`}>
+                          {c.tipo === 'PM' ? <Building2 size={12} /> : <User size={12} />}
+                          {c.tipo}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-medium text-gray-900">{clientDisplayName(c)}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-gray-600">{c.rfc || '-'}</td>
+                      <td className="px-4 py-3">
+                        <div className="text-gray-700 text-xs">{c.email || '-'}</div>
+                        <div className="text-gray-400 text-xs">{c.telefono || ''}</div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="text-xs text-gray-500">
+                          {c._count?.cotizaciones ?? 0}C / {c._count?.contratos ?? 0}K
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 text-xs">{formatDate(c.createdAt)}</td>
+                      <td className="px-4 py-3">
+                        <Link to={`/clientes/${c.id}`} className="text-inyecta-600 hover:text-inyecta-800">
+                          <Eye size={16} />
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>

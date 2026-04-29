@@ -35,14 +35,13 @@ const baseInputs = {
   // del PMT coincida con el residual (cliente "compensa" el depósito).
   porcentajeDeposito: 0.16,
   valorResidual: 0.16,
-  valorResidualEsComision: false,
+  valorResidualEsDeposito: false,
   gpsMonto: 16_000,
   gpsEsContado: false,
   seguroAnual: 0,
   seguroPendiente: false,
   seguroEsContado: true,
   engancheMonto: 0,
-  engancheEsContado: true,
   nombreBien: 'Test',
   estadoBien: 'Nuevo',
   seguroEstado: 'Pendiente',
@@ -305,7 +304,6 @@ describe('calcularCotizacion PURO — enganche > 0 (§4.2 B17)', () => {
     ...baseInputs,
     producto: 'PURO',
     engancheMonto: 200_000,
-    engancheEsContado: true,
   });
 
   it('comisión apertura = baseBien × 5% = $81,317.24', () => {
@@ -358,29 +356,34 @@ describe('calcularCotizacion PURO — valorResidual como MONTO ABSOLUTO (§4.15)
   });
 });
 
-describe('calcularCotizacion PURO — valorResidualEsComision (§4.13)', () => {
-  // Checkbox UI: residual = comisión de apertura. El campo `valorResidual`
-  // capturado se ignora completamente cuando la flag está activa.
+describe('calcularCotizacion PURO — valorResidualEsDeposito (§4.13)', () => {
+  // Checkbox UI: residual = depósito en garantía. El campo `valorResidual`
+  // capturado se ignora completamente cuando la flag está activa. El
+  // cliente "pierde" el depósito a cambio del bien al final del contrato.
   const cot = calcularCotizacion({
     ...baseInputs,
     producto: 'PURO',
-    valorResidual: 0.16,                  // ignorado por la flag
-    valorResidualEsComision: true,
+    porcentajeDeposito: 0.16,             // depósito = 16% del baseBien
+    valorResidual: 0.20,                  // ignorado por la flag
+    valorResidualEsDeposito: true,
   });
 
-  it('residual.monto = comisión apertura, no 16% del baseBien', () => {
-    expect(cot.residual.monto).toBeCloseTo(91_317.24, 2);
-    expect(cot.monto.comisionAperturaFinanciada).toBeCloseTo(91_317.24, 2);
-    expect(cot.residual.monto).toBe(cot.monto.comisionAperturaFinanciada);
-  });
-
-  it('residual.porcentaje = tasaComisionApertura (5%) cuando aplica la flag', () => {
-    // Display: el porcentaje del residual es la tasa de comisión.
-    expect(cot.residual.porcentaje).toBe(0.05);
-  });
-
-  it('depósito sigue 16% × baseBien = $292,215.17 (la flag no lo toca)', () => {
+  it('residual.monto = depósito en garantía, no 20% del baseBien', () => {
+    // depósito = 16% × baseBien = $292,215.17 (mismo valor que el residual
+    // cuando la flag está activa). Si la flag no estuviera, el residual
+    // sería $365,268.97 (20% × baseBien).
+    expect(cot.residual.monto).toBeCloseTo(292_215.17, 2);
     expect(cot.pagoInicial.depositoGarantia).toBeCloseTo(292_215.17, 2);
+    expect(cot.residual.monto).toBe(cot.pagoInicial.depositoGarantia);
+  });
+
+  it('residual.porcentaje = porcentajeDeposito (16%) cuando aplica la flag', () => {
+    // Display: el porcentaje del residual refleja el del depósito.
+    expect(cot.residual.porcentaje).toBe(0.16);
+  });
+
+  it('comisión sigue 5% × baseBien = $91,317.24 (la flag no la toca)', () => {
+    expect(cot.monto.comisionAperturaFinanciada).toBeCloseTo(91_317.24, 2);
   });
 });
 
@@ -461,7 +464,7 @@ describe('calcularCotizacion FINANCIERO — residual fijo 2% (§4.5)', () => {
     producto: 'FINANCIERO',
     porcentajeDeposito: 0,
     valorResidual: 0.50,                   // ignorado en FIN
-    valorResidualEsComision: true,         // ignorado en FIN
+    valorResidualEsDeposito: true,         // ignorado en FIN
   });
 
   it('residual.monto = baseBien × 2% = $36,526.90 (ignora capturas y flags)', () => {

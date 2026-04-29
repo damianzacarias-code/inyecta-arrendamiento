@@ -143,11 +143,19 @@ export default function ReportesHub() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, year]);
 
+  // Título dinámico según la tab activa — antes h1 decía "Reportes" en
+  // cualquier sub-ruta del Hub, lo cual confundía al operador (parecía
+  // que /reportes/cobranza no resolvía). Ahora refleja el contenido.
+  const titulo =
+    tab === 'cobranza' ? 'Cobranza Mensual'
+      : tab === 'rentabilidad' ? 'Rentabilidad'
+      : 'Cartera Vencida';
+
   return (
     <div className="max-w-6xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-          <FileBarChart size={24} className="text-inyecta-600" /> Reportes
+          <FileBarChart size={24} className="text-inyecta-600" /> {titulo}
         </h1>
         <p className="text-gray-500 text-sm mt-1">Indicadores operativos y financieros del portafolio.</p>
       </div>

@@ -22,6 +22,9 @@ export interface CatalogConfig {
   gpsMontoDefault: number;
   gpsFinanciableDefault: boolean;
   tasaMoratoriaMultiplier: number;
+  /** Folios CONDUSEF del Registro de Contratos de Adhesión (uno por producto). */
+  folioCondusefPuro?: string | null;
+  folioCondusefFin?: string | null;
   updatedAt?: string;
   updatedById?: string | null;
 }
@@ -85,8 +88,22 @@ export function getCatalog(): CatalogPayload {
 /**
  * Carga el catálogo desde el backend. Idempotente; concurrentes comparten
  * la misma promesa en vuelo. Si falla, conserva el último valor válido.
+ *
+ * IMPORTANTE: el endpoint requiere auth. Si no hay token (caso típico:
+ * usuario en /login antes de autenticarse), NO disparamos la request —
+ * los defaults hardcoded mantienen el cotizador funcional hasta el
+ * primer login, y evitamos un loop con el interceptor de axios que
+ * redirige a /login en 401.
+ *
+ * Tras un login exitoso, llamar `reloadCatalog()` para hidratar con los
+ * valores de la BD (ver AuthContext.login).
  */
 export async function loadCatalog(): Promise<CatalogPayload> {
+  if (typeof window !== 'undefined' && !localStorage.getItem('token')) {
+    // Sin token → no podemos pedirlo. Devolvemos cache (defaults) sin
+    // marcar `loaded = true` para que un futuro login dispare la carga.
+    return cache;
+  }
   if (inflight) return inflight;
   inflight = api
     .get<CatalogPayload>('/config/catalog')

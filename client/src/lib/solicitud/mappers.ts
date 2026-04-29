@@ -254,14 +254,13 @@ export function solicitudToContractPayload(
     comisionAperturaEsContado: false,
     porcentajeDeposito,
     valorResidual,
-    valorResidualEsComision: false,
+    valorResidualEsDeposito: false,
     gpsMonto: 0,                     // no se conoce desde la solicitud
     gpsEsContado: false,
     seguroAnual: 0,
     seguroPendiente: true,           // §4.14: la solicitud no trae seguro
     seguroEsContado: false,
     engancheMonto: 0,
-    engancheEsContado: false,
     nombreBien: bien.descripcion ?? '',
     estadoBien: bien.nuevo === false ? 'Seminuevo' : 'Nuevo',
     seguroEstado: 'Pendiente',

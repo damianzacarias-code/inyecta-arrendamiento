@@ -117,7 +117,7 @@ export default function ContratoNuevo() {
     reValidateMode: 'onChange',
     defaultValues: {
       producto: 'PURO',
-      nivelRiesgo: 'A',
+      nivelRiesgo: 'B',  // Default Medio (política comercial estándar, 27-04-2026)
       plazo: 24,
       tasaAnual: 0.36,
       valorBien: 0,

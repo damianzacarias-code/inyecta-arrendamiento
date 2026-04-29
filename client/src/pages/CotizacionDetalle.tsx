@@ -47,8 +47,8 @@ interface QuotationDetail {
   seguroPendiente?: boolean;
   valorResidual: number;
   valorResidualPct: number;
-  /** §4.13: solo PURO — si true, residual = comisión apertura */
-  valorResidualEsComision?: boolean;
+  /** §4.13: solo PURO — si true, residual = depósito en garantía */
+  valorResidualEsDeposito?: boolean;
   montoFinanciar: number;
   rentaMensual: number;
   rentaMensualIVA: number;
@@ -243,17 +243,15 @@ export default function CotizacionDetalle() {
       // tal cual de la BD.
       porcentajeDeposito: Number(q.depositoGarantiaPct ?? q.valorResidualPct),
       valorResidual: Number(q.valorResidualPct),
-      valorResidualEsComision: Boolean(q.valorResidualEsComision),
+      valorResidualEsDeposito: Boolean(q.valorResidualEsDeposito),
       gpsMonto: Number(q.gpsInstalacion),
       gpsEsContado: !q.gpsFinanciado,
       seguroAnual: Number(q.seguroAnual),
       seguroPendiente: Boolean(q.seguroPendiente),
       seguroEsContado: !q.seguroFinanciado,
-      // El esquema actual no persiste si el enganche fue de contado;
-      // asumimos contado (default histórico) y sólo lo aplicamos si > 0.
-      // §4.2: enganche se resta de B17 sobre valorSinIVA (no conIVA).
+      // §4.2: el enganche siempre es de contado (entra al "Pago inicial"
+      // y reduce baseBien sobre valorSinIVA — no conIVA).
       engancheMonto: valorBien * enganchePct,
-      engancheEsContado: true,
       nombreBien,
       estadoBien: q.bienNuevo === false ? 'Seminuevo' : 'Nuevo',
       seguroEstado: q.seguroFinanciado ? 'Contratado' : 'Pendiente',

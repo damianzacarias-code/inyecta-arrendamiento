@@ -57,12 +57,28 @@ const createContractBaseSchema = z.object({
   clientId: z.string(),
   quotationId: z.string().optional(),
   categoriaId: z.string().optional(),
-  bienDescripcion: z.string().min(1),
+  // Damián 28-04-2026: relajado de min(1) a opcional para que el
+  // contrato pueda crearse desde una cotización rápida sin descripción.
+  // Si está vacío, persistimos un placeholder legible. El wizard de
+  // operaciones pedirá completarlo al avanzar de etapa SOLICITUD.
+  bienDescripcion: z.string().optional(),
   bienMarca: z.string().optional(),
   bienModelo: z.string().optional(),
   bienAnio: z.number().optional(),
   bienNumSerie: z.string().optional(),
   bienEstado: z.string().optional(),
+  // Campos de identificación del bien — exigidos por contrato
+  // (cláusula DÉCIMA SEXTA prohíbe alterar las "características de
+  // identificación" del bien arrendado).
+  bienColor: z.string().optional(),
+  bienPlacas: z.string().optional(),
+  bienNIV: z.string().optional(),
+  bienMotor: z.string().optional(),
+  // Lugar de entrega del bien (cláusula TERCERA). Puede diferir del
+  // domicilio fiscal del cliente.
+  lugarEntregaBien: z.string().optional(),
+  // Día del mes en que se paga la renta (cláusula OCTAVA FIN).
+  diaPagoMensual: z.number().int().min(1).max(31).optional(),
   /** Legacy string — si se envía, se copia a Contract.proveedor por
    *  compatibilidad. El wizard nuevo envía `proveedor` como objeto
    *  anidado (ver contractKycFieldsObject). */
@@ -71,12 +87,16 @@ const createContractBaseSchema = z.object({
   valorBien: z.number().min(150000),
   plazo: z.number().min(12).max(48),
   tasaAnual: z.number().default(0.36),
-  nivelRiesgo: z.enum(['A', 'B', 'C']).default('A'),
+  nivelRiesgo: z.enum(['A', 'B', 'C']).default('B'),
   enganche: z.number().default(0),
   depositoGarantia: z.number().default(0),
+  /** Snapshot del aporte inicial total (% sobre valorBien). Se copia
+   *  desde la quotation al convertir a contrato — auditable. */
+  aporteInicialPct: z.number().min(0).max(1).default(0.20),
   comisionApertura: z.number().default(0),
   rentaInicial: z.number().default(0),
   gpsInstalacion: z.number().default(0),
+  gpsProveedor: z.string().trim().max(40).optional().nullable(),
   seguroAnual: z.number().default(0),
   valorResidual: z.number().default(0),
   montoFinanciar: z.number(),
@@ -143,12 +163,18 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
           quotationId: data.quotationId || null,
           userId,
           categoriaId: data.categoriaId || null,
-          bienDescripcion: data.bienDescripcion,
+          bienDescripcion: data.bienDescripcion?.trim() || 'Sin descripción',
           bienMarca: data.bienMarca,
           bienModelo: data.bienModelo,
           bienAnio: data.bienAnio,
           bienNumSerie: data.bienNumSerie,
           bienEstado: data.bienEstado,
+          bienColor: data.bienColor,
+          bienPlacas: data.bienPlacas,
+          bienNIV: data.bienNIV,
+          bienMotor: data.bienMotor,
+          lugarEntregaBien: data.lugarEntregaBien,
+          diaPagoMensual: data.diaPagoMensual,
           proveedor: data.proveedorLegacy, // legacy string column
           producto: data.producto,
           valorBien: data.valorBien,
@@ -158,9 +184,11 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
           nivelRiesgo: data.nivelRiesgo,
           enganche: data.enganche,
           depositoGarantia: data.depositoGarantia,
+          aporteInicialPct: data.aporteInicialPct,
           comisionApertura: data.comisionApertura,
           rentaInicial: data.rentaInicial,
           gpsInstalacion: data.gpsInstalacion,
+          gpsProveedor: data.gpsProveedor ?? null,
           seguroAnual: data.seguroAnual,
           valorResidual: data.valorResidual,
           montoFinanciar: data.montoFinanciar,
@@ -307,7 +335,7 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
     const contract = await prisma.contract.findUnique({
       where: { id: req.params.id },
       include: {
-        client: true,
+        client: { include: { representanteLegalData: true } },
         user: { select: { nombre: true, apellidos: true, email: true } },
         categoria: { select: { nombre: true, requiereGPS: true } },
         stageHistory: { orderBy: { fecha: 'desc' } },
@@ -315,6 +343,9 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
         proveedorData: true,
         perfilTransaccional: true,
         declaracionesPEP: true,
+        // Avales y pagaré (necesarios para imprimir el contrato y el pagaré)
+        avales: { orderBy: { orden: 'asc' } },
+        pagare: true,
         // Expediente por actor (operación, solicitante, avales, etc.)
         // Solo metadatos básicos aquí — el detalle completo (catálogos +
         // documentos) se consulta vía GET /api/contracts/:id/expediente.

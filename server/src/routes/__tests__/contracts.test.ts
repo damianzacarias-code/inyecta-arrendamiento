@@ -186,15 +186,21 @@ describe('GET /api/contracts/:id', () => {
 
     const callArgs = mockPrisma.contract.findUnique.mock.calls[0][0];
     expect(callArgs.where).toEqual({ id: 'k-1' });
-    // Las 8 relaciones críticas que el detalle del contrato requiere
+    // Las 10 relaciones críticas que el detalle del contrato requiere.
+    // client se anida con representanteLegalData para que los PDFs de
+    // contrato puedan imprimir los datos del apoderado sin un round-trip
+    // adicional. avales y pagare se agregaron en abr-2026 para los PDFs
+    // firmables (ContratoPuroPDF / ContratoFinancieroPDF / PagarePDF).
     expect(callArgs.include).toMatchObject({
-      client: true,
+      client: expect.any(Object),
       user: expect.any(Object),
       categoria: expect.any(Object),
       stageHistory: expect.any(Object),
       proveedorData: true,
       perfilTransaccional: true,
       declaracionesPEP: true,
+      avales: expect.any(Object),
+      pagare: true,
       actores: expect.any(Object),
       notas: expect.any(Object),
     });

@@ -1,0 +1,38 @@
+# Configuración de Render para el backend Inyecta.
+# ----------------------------------------------------------------
+# Render permite definir el servicio en YAML para hacer "Blueprint
+# deploys" (Render lee este archivo del repo y crea el servicio
+# automáticamente). Documentación: https://render.com/docs/yaml-spec
+#
+# Plan: free (con sleep tras 15 min idle). Upgrade a Starter ($7/mes)
+# cuando se necesite no-sleep + recursos garantizados.
+#
+# Variables de entorno (DATABASE_URL, JWT_SECRET, etc.) NO van aquí —
+# se configuran desde el dashboard de Render para que cada deploy
+# (staging, prod) pueda tener valores distintos sin tocar el repo.
+
+services:
+  - type: web
+    name: inyecta-arrendamiento-api
+    runtime: node
+    plan: free
+    region: oregon                 # us-west; cambia a virginia (us-east) si tu BD Neon vive ahí
+    rootDir: server
+    buildCommand: |
+      npm ci
+      npx prisma generate
+      npm run build
+    startCommand: node dist/index.js
+    healthCheckPath: /api/health/live
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3001"
+      - key: LOG_LEVEL
+        value: info
+      # El resto de variables (DATABASE_URL, JWT_SECRET, BRAND_*, BANCO_*,
+      # EMAIL_*, BACKUP_PASSPHRASE, UPLOAD_MASTER_KEY, CORS_ALLOWED_ORIGINS)
+      # se setean manualmente en el dashboard la primera vez. Render NO
+      # acepta variables sin valor en el YAML (no soporta "fromEnvironment"
+      # en plan free), por eso van por dashboard.

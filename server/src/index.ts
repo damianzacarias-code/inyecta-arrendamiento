@@ -27,6 +27,8 @@ import extractRoutes from './routes/extract';
 import brandingRoutes from './routes/branding';
 import catalogConfigRoutes from './routes/catalog';
 import usersRoutes from './routes/users';
+import avalesRoutes from './routes/avales';
+import pagaresRoutes from './routes/pagares';
 import { bitacora } from './middleware/bitacora';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { requestId } from './middleware/requestId';
@@ -219,6 +221,10 @@ app.use('/api/config', catalogConfigRoutes);
 // Administración de usuarios (empleados Inyecta). Sólo ADMIN puede crear/
 // editar; DIRECTOR sólo lectura. Ver routes/users.ts para reglas anti-lockout.
 app.use('/api/users', usersRoutes);
+// Avales (deudores solidarios) y pagaré por contrato. Sub-rutas con
+// mergeParams para tomar :contractId del prefijo padre.
+app.use('/api/contracts/:contractId/avales', avalesRoutes);
+app.use('/api/contracts/:contractId/pagare', pagaresRoutes);
 
 // 404 para /api/* sin match — devuelve el mismo formato { error: {...} }
 app.use('/api', notFoundHandler);

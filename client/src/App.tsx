@@ -3,7 +3,6 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from '@/context/AuthContext';
 import { loadBranding } from '@/lib/branding';
-import { loadCatalog } from '@/lib/catalog';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import Layout from '@/components/Layout';
 import Login from '@/pages/Login';
@@ -45,16 +44,15 @@ const queryClient = new QueryClient({
 });
 
 export default function App() {
-  // Cargar branding al boot. Fire-and-forget: si falla, los componentes
-  // que lo consumen (PDFs, /portal) caen al default hardcoded —
-  // nunca rompe la UI. Ver lib/branding.ts para detalles.
+  // Branding al boot — endpoint público, fire-and-forget. Si falla, los
+  // componentes (PDFs, /portal) caen al default hardcoded, no rompe UI.
+  //
+  // El catálogo NO se carga aquí (antes sí, pero requiere auth y disparaba
+  // un loop "401 → redirect a /login → re-mount → 401 → ..."). Lo carga
+  // ahora AuthContext: al rehidratar sesión válida (useEffect con /auth/me)
+  // y tras un login exitoso. Ver lib/catalog.ts y context/AuthContext.tsx.
   useEffect(() => {
     void loadBranding();
-    // El catálogo (tasas, comisiones, GPS, presets de riesgo) requiere
-    // sesión. Si el usuario aún no ha hecho login, la fetch dará 401 y
-    // el cache mantiene los defaults — que coinciden con el seed de la
-    // BD, así que no hay drift visible.
-    void loadCatalog();
   }, []);
 
   return (

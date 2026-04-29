@@ -3,6 +3,7 @@ import { z } from 'zod';
 import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
 import { calcularArrendamiento, generarOpcionesRiesgoConBd } from '../services/leaseCalculator';
+import { validarDistribucion } from '../services/distribucion';
 import { sembrarActoresIniciales } from '../services/expedienteSeeder';
 import { notificar } from '../lib/notificar';
 import { childLogger } from '../lib/logger';
@@ -19,7 +20,12 @@ function fmt$(n: number | string | { toString(): string }): string {
 
 const quotationSchema = z.object({
   clientId: z.string().optional(),
-  nombreCliente: z.string().min(1),
+  // Damián 28-04-2026: cotizaciones rápidas (sin cliente identificado, sin
+  // descripción del bien, sin categoría). Los 3 campos son opcionales —
+  // si llegan vacíos, el server pone defaults legibles para listados/PDFs.
+  // Cuando se convierte la cotización en contrato, el wizard de
+  // operaciones obliga a completar estos datos antes de avanzar de etapa.
+  nombreCliente: z.string().trim().optional(),
   categoriaId: z.string().optional(),
   bienDescripcion: z.string().optional(),
   bienMarca: z.string().optional(),
@@ -30,17 +36,30 @@ const quotationSchema = z.object({
   valorBien: z.number().min(150000).max(3000000),
   plazo: z.number().min(12).max(48),
   tasaAnual: z.number().min(0).max(1).default(0.36),
-  nivelRiesgo: z.enum(['A', 'B', 'C']).default('A'),
-  enganchePct: z.number().min(0).max(1).default(0),
-  depositoGarantiaPct: z.number().min(0).max(1).default(0.16),
+  nivelRiesgo: z.enum(['A', 'B', 'C']).default('B'),
+  /** Aporte inicial total (% del valorBien) capturado por el operador.
+   *  El cliente lo envía después de la distribución automática (lib
+   *  distribucion.ts). Si edicionManual=true en cliente, este número
+   *  es la suma de enganche+DG capturados manualmente. */
+  aporteInicialPct: z.number().min(0).max(1).default(0.20),
+  /** Si true, el cliente capturó enganche y DG por separado saltándose
+   *  la regla del nivel. La validación cruzada server-side se relaja
+   *  (TODO R2: en fase Roles, sólo ADMIN/DIRECTOR podrán enviar este flag). */
+  edicionManual: z.boolean().default(false),
+  enganchePct: z.number().min(0).max(1).default(0.10),
+  depositoGarantiaPct: z.number().min(0).max(1).default(0.10),
   comisionAperturaPct: z.number().min(0).max(1).default(0.05),
   comisionAperturaFinanciada: z.boolean().default(true),
   valorResidualPct: z.number().min(0).max(1).default(0.16),
-  /** §4.13: solo PURO — si true, residual = comisión apertura */
-  valorResidualEsComision: z.boolean().default(false),
+  /** §4.13: solo PURO — si true, residual = depósito en garantía */
+  valorResidualEsDeposito: z.boolean().default(false),
   rentaInicial: z.number().default(0),
   gpsInstalacion: z.number().default(4200),
   gpsFinanciado: z.boolean().default(true),
+  /** Clave del GpsProveedor seleccionado (null si "Sin GPS"). El monto
+   *  se persiste en gpsInstalacion; aquí guardamos qué proveedor se
+   *  usó para auditoría / reportes. */
+  gpsProveedor: z.string().trim().max(40).optional().nullable(),
   seguroAnual: z.number().default(0),
   seguroFinanciado: z.boolean().default(true),
   /** §4.14: si true, el seguro está pendiente de cotizar */
@@ -55,6 +74,20 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     const data = quotationSchema.parse(req.body);
     const userId = req.user!.userId;
 
+    // Validación cruzada: la distribución (enganche/DG) debe ser
+    // coherente con el nivel y el aporte total — salvo que el cliente
+    // haya activado "edición manual" (override casos especiales).
+    const distError = validarDistribucion({
+      nivelRiesgo: data.nivelRiesgo,
+      aporteInicialPct: data.aporteInicialPct,
+      enganchePct: data.enganchePct,
+      depositoGarantiaPct: data.depositoGarantiaPct,
+      edicionManual: data.edicionManual,
+    });
+    if (distError) {
+      return res.status(400).json({ error: { code: 'INCOHERENT_DISTRIBUTION', message: distError } });
+    }
+
     // Calcular
     const resultado = calcularArrendamiento({
       producto: data.producto,
@@ -66,7 +99,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       comisionAperturaPct: data.comisionAperturaPct,
       comisionAperturaFinanciada: data.comisionAperturaFinanciada,
       valorResidualPct: data.valorResidualPct,
-      valorResidualEsComision: data.valorResidualEsComision,
+      valorResidualEsDeposito: data.valorResidualEsDeposito,
       rentaInicial: data.rentaInicial,
       gpsInstalacion: data.gpsInstalacion,
       gpsFinanciado: data.gpsFinanciado,
@@ -109,10 +142,13 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       data: {
         folio,
         clientId: data.clientId || null,
-        nombreCliente: data.nombreCliente,
+        // Defaults legibles cuando el operador hace una cotización
+        // rápida sin completar los campos descriptivos. Los listados
+        // y PDFs muestran el placeholder en lugar de string vacío.
+        nombreCliente: data.nombreCliente?.trim() || 'Sin nombre',
         userId,
         categoriaId: data.categoriaId || null,
-        bienDescripcion: data.bienDescripcion,
+        bienDescripcion: data.bienDescripcion?.trim() || null,
         bienMarca: data.bienMarca,
         bienModelo: data.bienModelo,
         bienAnio: data.bienAnio,
@@ -127,18 +163,22 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         enganchePorcentaje: data.enganchePct,
         depositoGarantia: resultado.depositoGarantia,
         depositoGarantiaPct: data.depositoGarantiaPct,
+        // Snapshot del aporte inicial total para auditoría / reproducir
+        // la distribución usada al cotizar.
+        aporteInicialPct: data.aporteInicialPct,
         comisionApertura: resultado.comisionApertura,
         comisionAperturaPct: data.comisionAperturaPct,
         comisionAperturaFinanciada: data.comisionAperturaFinanciada,
         rentaInicial: data.rentaInicial,
         gpsInstalacion: data.gpsInstalacion,
         gpsFinanciado: data.gpsFinanciado,
+        gpsProveedor: data.gpsProveedor ?? null,
         seguroAnual: data.seguroAnual,
         seguroFinanciado: data.seguroFinanciado,
         seguroPendiente: data.seguroPendiente,
         valorResidual: resultado.valorResidual,
         valorResidualPct: data.valorResidualPct,
-        valorResidualEsComision: data.valorResidualEsComision,
+        valorResidualEsDeposito: data.valorResidualEsDeposito,
         montoFinanciar: resultado.montoFinanciar,
         rentaMensual: resultado.rentaMensual,
         rentaMensualIVA: resultado.rentaMensualIVA,
@@ -264,7 +304,7 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
       comisionAperturaPct: Number(quotation.comisionAperturaPct),
       comisionAperturaFinanciada: quotation.comisionAperturaFinanciada,
       valorResidualPct: Number(quotation.valorResidualPct),
-      valorResidualEsComision: quotation.valorResidualEsComision,
+      valorResidualEsDeposito: quotation.valorResidualEsDeposito,
       rentaInicial: Number(quotation.rentaInicial),
       gpsInstalacion: Number(quotation.gpsInstalacion),
       gpsFinanciado: quotation.gpsFinanciado,
@@ -295,7 +335,7 @@ router.post('/simulate', requireAuth, async (req: Request, res: Response) => {
       comisionAperturaPct: data.comisionAperturaPct || 0.05,
       comisionAperturaFinanciada: data.comisionAperturaFinanciada ?? true,
       valorResidualPct: data.valorResidualPct || 0.16,
-      valorResidualEsComision: data.valorResidualEsComision ?? false,
+      valorResidualEsDeposito: data.valorResidualEsDeposito ?? false,
       rentaInicial: data.rentaInicial || 0,
       gpsInstalacion: data.gpsInstalacion || 4200,
       gpsFinanciado: data.gpsFinanciado ?? true,
@@ -417,7 +457,10 @@ router.post('/:id/convert', requireAuth, async (req: Request, res: Response) => 
           quotationId: quotation.id,
           userId,
           categoriaId: quotation.categoriaId || null,
-          bienDescripcion: quotation.bienDescripcion!,
+          // Si la cotización fue rápida (sin descripción), el contrato
+          // hereda placeholder. El wizard de operaciones obligará a
+          // completar antes de avanzar de etapa SOLICITUD.
+          bienDescripcion: quotation.bienDescripcion || 'Sin descripción',
           bienMarca: quotation.bienMarca,
           bienModelo: quotation.bienModelo,
           bienAnio: quotation.bienAnio,

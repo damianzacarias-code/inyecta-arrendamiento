@@ -6,6 +6,19 @@ import { formatCurrency } from '@/lib/utils';
 import { Calculator, Save, RotateCcw, ChevronDown, ChevronUp, FileText, Table, Plus, X, Sparkles } from 'lucide-react';
 import { calcularCotizacion } from '@/lib/cotizacion/calculos';
 import {
+  distribuirAporte,
+  lemaOpcionBajo,
+  APORTE_SUGERIDO,
+  type NivelRiesgo,
+} from '@/lib/cotizacion/distribucion';
+import { riskLabel, NIVELES_ORDENADOS } from '@/lib/cotizacion/riesgoLabels';
+import {
+  useGpsProveedores,
+  proveedorDefault,
+  precioGpsPorPlazo,
+  calcularPrecioGps,
+} from '@/lib/cotizacion/gpsPricing';
+import {
   calcAmortPuro,
   calcAmortFinanciero,
   aplicarPagoAdicionalPuro,
@@ -99,17 +112,33 @@ const defaultForm = {
   valorBien: 500000,
   plazo: 36,
   tasaAnual: 0.36,
-  nivelRiesgo: 'A' as 'A' | 'B' | 'C',
-  enganchePct: 0,
-  engancheEsContado: true,           // true = pago inicial / false = reduce monto a financiar
-  depositoGarantiaPct: 0.16,
+  // Nivel default: B (Medio) — política comercial estándar (Damián 27-04-2026).
+  // Nivel Bajo está disponible para todos hoy; en fase Roles se restringirá
+  // a ADMIN/DIRECTOR (TODO R1, ver server/CLAUDE.md).
+  nivelRiesgo: 'B' as 'A' | 'B' | 'C',
+  // Aporte inicial total (% sobre valorBien). El sistema lo distribuye
+  // entre enganche y DG según el nivel — ver lib/cotizacion/distribucion.ts.
+  aporteInicialPct: APORTE_SUGERIDO.B,  // 20% para nivel B (mínimo)
+  // edicionManual=true desbloquea los sliders separados de enganche y DG,
+  // saltándose la distribución automática. Para casos especiales.
+  edicionManual: false,
+  enganchePct: 0.10,                    // = MEDIO mín, calculado por distribuirAporte
+  depositoGarantiaPct: 0.10,            // = MEDIO mín, calculado por distribuirAporte
   comisionAperturaPct: 0.05,
   comisionAperturaFinanciada: true,
   valorResidualPct: 0.16,
-  /** §4.13: PURO — si true, el residual se iguala a la comisión apertura */
-  valorResidualEsComision: false,
+  /** §4.13: PURO — si true, el residual se iguala al depósito en garantía. */
+  valorResidualEsDeposito: false,
   rentaInicial: 0,
-  gpsInstalacion: 4200,
+  // gpsProveedor: clave del proveedor seleccionado o null para "Sin GPS".
+  // El default se reasigna en runtime según el valorBien (GBR < $500k,
+  // Tecno ≥ $500k) — ver effect en el cuerpo del componente. Inicializa
+  // en GBR como punto de partida razonable para el wizard.
+  gpsProveedor: 'GBR' as string | null,
+  // gpsProveedorTocado: cuando el operador cambia manualmente el dropdown,
+  // se enciende y el auto-default deja de aplicar. Se reinicia al "Reset".
+  gpsProveedorTocado: false,
+  gpsInstalacion: 6380,                   // GBR 24m, se recalcula al cambiar plazo
   gpsFinanciado: true,
   seguroAnual: 0,
   /** §4.14: si true, el seguro NO entra en B17 ni en la renta hasta
@@ -140,17 +169,17 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
   // — idénticos al seed de la BD, así que el usuario nunca ve un
   // valor "raro" en el primer render.
   const _catalog = getCatalog();
-  const _presetA = _catalog.riskPresets.find((p) => p.nivel === 'A');
   const [form, setForm] = useState({
     ...defaultForm,
     tasaAnual: _catalog.catalog.tasaAnualDefault,
     comisionAperturaPct: _catalog.catalog.comisionAperturaDefault,
     gpsInstalacion: _catalog.catalog.gpsMontoDefault,
     gpsFinanciado: _catalog.catalog.gpsFinanciableDefault,
-    depositoGarantiaPct: _presetA?.depositoPuroPct ?? defaultForm.depositoGarantiaPct,
     producto: productoInicial ?? defaultForm.producto,
-    // Defaults por producto: PURO → residual 16%, FIN → residual 2% (opción de compra)
-    valorResidualPct: productoInicial === 'FINANCIERO' ? 0.02 : (_presetA?.depositoPuroPct ?? 0.16),
+    // Defaults del residual por producto:
+    //   PURO: 16% (display de "Valor de rescate")
+    //   FIN:  2%  (opción de compra simbólica per Ley)
+    valorResidualPct: productoInicial === 'FINANCIERO' ? 0.02 : 0.16,
   });
   const [result, setResult] = useState<SimulationResult | null>(null);
   const [categories, setCategories] = useState<AssetCategory[]>([]);
@@ -193,10 +222,9 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
   }, [form]);
 
   const saveQuotation = async () => {
-    if (!form.nombreCliente.trim()) {
-      setError('Ingresa el nombre del cliente');
-      return;
-    }
+    // Damián 28-04-2026: cotizaciones rápidas — ya no se exige
+    // nombreCliente / bienDescripcion / categoriaId al guardar.
+    // El server pone defaults legibles ("Sin nombre", null, null).
     setSaving(true);
     setError('');
     try {
@@ -223,35 +251,105 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  // Presets de riesgo desde el catálogo (BD). Los valores históricos
-  // hardcoded ya viven como fallback en lib/catalog.ts y como seed de
-  // la migración, así que aquí leer del singleton es 100% seguro.
-  // Para la columna `enganchePct` del cotizador "general", usamos
-  // engancheFinPct (legacy: B=5%, C=10%) — es el que tradicionalmente
-  // pide el cotizador al cliente. PURO toma engachePuroPct (cero).
-  const riskDefaults: Record<string, { enganchePct: number; depositoGarantiaPct: number; valorResidualPct: number }> = (() => {
-    const cat = getCatalog();
-    const out: Record<string, { enganchePct: number; depositoGarantiaPct: number; valorResidualPct: number }> = {};
-    for (const p of cat.riskPresets) {
-      out[p.nivel] = {
-        enganchePct: p.engancheFinPct,
-        depositoGarantiaPct: p.depositoPuroPct,
-        valorResidualPct: p.depositoPuroPct,
-      };
-    }
-    // Fallback duro por si el catálogo está vacío de niveles esperados.
-    return out.A
-      ? out
-      : {
-          A: { enganchePct: 0,    depositoGarantiaPct: 0.16, valorResidualPct: 0.16 },
-          B: { enganchePct: 0.05, depositoGarantiaPct: 0.21, valorResidualPct: 0.21 },
-          C: { enganchePct: 0.10, depositoGarantiaPct: 0.26, valorResidualPct: 0.26 },
-        };
-  })();
+  // Distribución actual derivada del aporte inicial y el nivel.
+  // Cuando edicionManual=true, el cotizador IGNORA esto y usa los
+  // sliders separados de enganche y DG (override casos especiales).
+  const distribucion = distribuirAporte(
+    form.nivelRiesgo as NivelRiesgo,
+    form.aporteInicialPct,
+  );
 
+  /**
+   * Cambio de nivel de riesgo: resetea el aporte al mínimo del nivel
+   * y deja la distribución automática (sale de edición manual si estaba).
+   */
   const handleRiskChange = (level: 'A' | 'B' | 'C') => {
-    const defaults = riskDefaults[level];
-    setForm((prev) => ({ ...prev, nivelRiesgo: level, ...defaults }));
+    const aporte = APORTE_SUGERIDO[level as NivelRiesgo];
+    const dist = distribuirAporte(level as NivelRiesgo, aporte);
+    setForm((prev) => ({
+      ...prev,
+      nivelRiesgo: level,
+      aporteInicialPct: aporte,
+      enganchePct: dist.enganchePct,
+      depositoGarantiaPct: dist.depositoGarantiaPct,
+      edicionManual: false,
+    }));
+  };
+
+  /**
+   * Cambio del slider de aporte: re-distribuye automáticamente.
+   * Sólo se llama si edicionManual === false.
+   */
+  const handleAporteChange = (aporte: number) => {
+    const dist = distribuirAporte(form.nivelRiesgo as NivelRiesgo, aporte);
+    setForm((prev) => ({
+      ...prev,
+      aporteInicialPct: aporte,
+      enganchePct: dist.enganchePct,
+      depositoGarantiaPct: dist.depositoGarantiaPct,
+    }));
+  };
+
+  /**
+   * Toggle "Edición manual": cuando se activa, los sliders de enganche
+   * y DG se desbloquean. Cuando se desactiva, recalcula la distribución
+   * automática a partir del aporte total actual.
+   */
+  const toggleEdicionManual = (activa: boolean) => {
+    if (activa) {
+      setForm((prev) => ({ ...prev, edicionManual: true }));
+      return;
+    }
+    const dist = distribuirAporte(form.nivelRiesgo as NivelRiesgo, form.aporteInicialPct);
+    setForm((prev) => ({
+      ...prev,
+      edicionManual: false,
+      enganchePct: dist.enganchePct,
+      depositoGarantiaPct: dist.depositoGarantiaPct,
+    }));
+  };
+
+  // ── GPS: catálogo + auto-default por valorBien ───────────────────
+  const { proveedores: gpsProveedores } = useGpsProveedores();
+
+  /**
+   * Cuando cambia el valor del bien o el plazo, recalculamos:
+   *   1. el proveedor sugerido (si el operador NO ha tocado el dropdown)
+   *   2. el monto del GPS según plazo (siempre, salvo "Sin GPS")
+   *
+   * Si el operador ya cambió manualmente el proveedor (`gpsProveedorTocado`),
+   * respetamos su elección y solo recalculamos el monto al cambiar plazo.
+   */
+  useEffect(() => {
+    setForm((prev) => {
+      // 1. Determinar el proveedor objetivo
+      let nuevoProv = prev.gpsProveedor;
+      if (!prev.gpsProveedorTocado) {
+        nuevoProv = proveedorDefault(prev.valorBien);
+      }
+      // 2. Calcular monto. "Sin GPS" (null) → 0.
+      const nuevoMonto = calcularPrecioGps(nuevoProv, prev.plazo, gpsProveedores);
+      // Sólo actualizamos si hubo cambio real (evita re-renders innecesarios).
+      if (nuevoProv === prev.gpsProveedor && nuevoMonto === prev.gpsInstalacion) {
+        return prev;
+      }
+      return { ...prev, gpsProveedor: nuevoProv, gpsInstalacion: nuevoMonto };
+    });
+  }, [form.valorBien, form.plazo, gpsProveedores]);
+
+  /**
+   * Cambio manual del dropdown de proveedor. Activa el flag
+   * `gpsProveedorTocado` para que el auto-default deje de aplicar
+   * y recalcula el monto inmediatamente.
+   */
+  const handleGpsProveedorChange = (clave: string | null) => {
+    const monto = calcularPrecioGps(clave, form.plazo, gpsProveedores);
+    setForm((prev) => ({
+      ...prev,
+      gpsProveedor: clave,
+      gpsProveedorTocado: true,
+      gpsInstalacion: monto,
+    }));
   };
 
   // ── Datos para los PDFs (cliente, sin pasar por servidor) ─────────
@@ -282,15 +380,15 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
       // §4.12: depósito y residual separados (antes fusionados)
       porcentajeDeposito: form.depositoGarantiaPct,
       valorResidual: form.valorResidualPct,
-      valorResidualEsComision: form.valorResidualEsComision,
+      valorResidualEsDeposito: form.valorResidualEsDeposito,
       gpsMonto: form.gpsInstalacion,
       gpsEsContado: !form.gpsFinanciado,
       seguroAnual: form.seguroAnual,
       seguroPendiente: form.seguroPendiente,
       seguroEsContado: !form.seguroFinanciado,
-      // §4.2: enganche se resta de B17 sobre valorSinIVA (no conIVA)
+      // §4.2: enganche se resta de B17 sobre valorSinIVA (no conIVA).
+      // Siempre es de contado (entra al "Pago inicial" y reduce baseBien).
       engancheMonto: form.valorBien * form.enganchePct,
-      engancheEsContado: form.engancheEsContado,
       nombreBien,
       estadoBien: form.bienNuevo ? 'Nuevo' : 'Seminuevo',
       seguroEstado: form.seguroEstado,
@@ -325,14 +423,13 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
     form.comisionAperturaFinanciada,
     form.depositoGarantiaPct,
     form.valorResidualPct,
-    form.valorResidualEsComision,
+    form.valorResidualEsDeposito,
     form.gpsInstalacion,
     form.gpsFinanciado,
     form.seguroAnual,
     form.seguroPendiente,
     form.seguroFinanciado,
     form.enganchePct,
-    form.engancheEsContado,
     form.bienDescripcion,
     form.bienMarca,
     form.bienModelo,
@@ -494,35 +591,41 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
             <h3 className="font-semibold text-gray-900 mb-4">Datos Generales</h3>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-600 mb-1">Nombre del Cliente</label>
+                <label className="block text-sm font-medium text-gray-600 mb-1">
+                  Nombre del Cliente <span className="text-xs text-gray-400 font-normal">(opcional)</span>
+                </label>
                 <input
                   type="text"
                   value={form.nombreCliente}
                   onChange={(e) => updateField('nombreCliente', e.target.value)}
-                  placeholder="Nombre o razon social"
+                  placeholder="Nombre o razón social — vacío = 'Sin nombre'"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-600 mb-1">Categoria del Bien</label>
+                <label className="block text-sm font-medium text-gray-600 mb-1">
+                  Categoría del Bien <span className="text-xs text-gray-400 font-normal">(opcional)</span>
+                </label>
                 <select
                   value={form.categoriaId}
                   onChange={(e) => updateField('categoriaId', e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none"
                 >
-                  <option value="">Seleccionar...</option>
+                  <option value="">— Sin categoría —</option>
                   {categories.map((cat) => (
                     <option key={cat.id} value={cat.id}>{cat.nombre}</option>
                   ))}
                 </select>
               </div>
               <div className="lg:col-span-2">
-                <label className="block text-sm font-medium text-gray-600 mb-1">Descripción del Bien</label>
+                <label className="block text-sm font-medium text-gray-600 mb-1">
+                  Descripción del Bien <span className="text-xs text-gray-400 font-normal">(opcional)</span>
+                </label>
                 <input
                   type="text"
                   value={form.bienDescripcion}
                   onChange={(e) => updateField('bienDescripcion', e.target.value)}
-                  placeholder="Ej: Camioneta Toyota Hilux 4x4 2025"
+                  placeholder="Ej: Camioneta Toyota Hilux 4x4 2025 — vacío = 'Sin descripción'"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none"
                 />
               </div>
@@ -596,17 +699,17 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
               <div>
                 <label className="block text-sm font-medium text-gray-600 mb-1">Nivel de Riesgo</label>
                 <div className="flex gap-2">
-                  {(['A', 'B', 'C'] as const).map((r) => (
+                  {NIVELES_ORDENADOS.map(({ key, label }) => (
                     <button
-                      key={r}
-                      onClick={() => handleRiskChange(r)}
+                      key={key}
+                      onClick={() => handleRiskChange(key)}
                       className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-                        form.nivelRiesgo === r
+                        form.nivelRiesgo === key
                           ? 'bg-inyecta-700 text-white'
                           : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                       }`}
                     >
-                      {r}
+                      {label}
                     </button>
                   ))}
                 </div>
@@ -655,19 +758,84 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                   <span>12%</span><span>60%</span>
                 </div>
               </div>
-              <div>
+              <div className="lg:col-span-2">
                 <label className="block text-sm font-medium text-gray-600 mb-1">
-                  Deposito de Garantia: {(form.depositoGarantiaPct * 100).toFixed(0)}%
+                  Aporte inicial total:{' '}
+                  <span className="font-semibold">{(form.aporteInicialPct * 100).toFixed(0)}%</span>{' '}
+                  <span className="text-gray-400 text-xs font-normal">
+                    (${(form.valorBien * form.aporteInicialPct).toLocaleString('es-MX')})
+                  </span>
                 </label>
                 <input
                   type="range"
-                  min={0}
-                  max={0.40}
+                  min={0.10}
+                  max={0.50}
                   step={0.01}
-                  value={form.depositoGarantiaPct}
-                  onChange={(e) => updateField('depositoGarantiaPct', Number(e.target.value))}
-                  className="w-full accent-inyecta-600"
+                  value={form.aporteInicialPct}
+                  onChange={(e) => handleAporteChange(Number(e.target.value))}
+                  disabled={form.edicionManual}
+                  className="w-full accent-inyecta-600 disabled:opacity-40"
                 />
+                <div className="flex justify-between text-xs text-gray-400">
+                  <span>10%</span>
+                  <span className="text-gray-500">
+                    Mínimo riesgo {riskLabel(form.nivelRiesgo).toLowerCase()}:{' '}
+                    {form.nivelRiesgo === 'A' && '15%'}
+                    {form.nivelRiesgo === 'B' && '20%'}
+                    {form.nivelRiesgo === 'C' && '30%'}
+                  </span>
+                  <span>50%</span>
+                </div>
+
+                {/* Display de la distribución (read-only cuando NO hay edición manual) */}
+                <div className="mt-3 grid grid-cols-2 gap-3 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                  <div>
+                    <div className="text-xs text-gray-500 uppercase tracking-wide">Enganche</div>
+                    <div className="text-lg font-semibold text-gray-800">
+                      {(form.enganchePct * 100).toFixed(1)}%
+                      <span className="ml-2 text-xs text-gray-400 font-normal">
+                        ${(form.valorBien * form.enganchePct).toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500 uppercase tracking-wide">Depósito en garantía</div>
+                    <div className="text-lg font-semibold text-gray-800">
+                      {(form.depositoGarantiaPct * 100).toFixed(1)}%
+                      <span className="ml-2 text-xs text-gray-400 font-normal">
+                        ${(form.valorBien * form.depositoGarantiaPct).toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Chips informativos */}
+                {!form.edicionManual && distribucion.opcionBajo && (
+                  <p className="mt-2 text-xs text-inyecta-700 font-medium">
+                    Aplicando opción {distribucion.opcionBajo === 'A' ? '"Menor desembolso"' : '"Menor renta"'}{' '}
+                    — {lemaOpcionBajo(distribucion.opcionBajo)}
+                  </p>
+                )}
+                {!form.edicionManual && !distribucion.valido && distribucion.warning && (
+                  <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded">
+                    ⚠ {distribucion.warning}
+                    {' '}
+                    <span className="text-amber-600">
+                      (sigue cotizando con los mínimos para comparación; TODO R2 — bloquear en fase Roles)
+                    </span>
+                  </p>
+                )}
+
+                {/* Toggle edición manual */}
+                <label className="mt-3 flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.edicionManual}
+                    onChange={(e) => toggleEdicionManual(e.target.checked)}
+                    className="rounded accent-inyecta-600"
+                  />
+                  Edición manual (override para casos especiales — captura enganche y DG por separado)
+                </label>
               </div>
             </div>
           </div>
@@ -683,29 +851,42 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
             </button>
             {showAdvanced && (
               <div className="px-6 pb-6 grid grid-cols-1 lg:grid-cols-2 gap-4 border-t border-gray-100 pt-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1">
-                    Enganche: {(form.enganchePct * 100).toFixed(0)}%
-                  </label>
-                  <input
-                    type="range"
-                    min={0}
-                    max={0.30}
-                    step={0.01}
-                    value={form.enganchePct}
-                    onChange={(e) => updateField('enganchePct', Number(e.target.value))}
-                    className="w-full accent-inyecta-600"
-                  />
-                </div>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={form.engancheEsContado}
-                    onChange={(e) => updateField('engancheEsContado', e.target.checked)}
-                    className="rounded accent-inyecta-600"
-                  />
-                  <span className="text-sm text-gray-600">Enganche de contado (si no, descuenta del monto a financiar)</span>
-                </div>
+                {/* Enganche y DG: visibles aquí solo en edición manual.
+                    En modo automático los muestra el bloque del Aporte
+                    inicial arriba (read-only) y se actualizan via
+                    distribuirAporte(). */}
+                {form.edicionManual && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-1">
+                        Enganche (manual): {(form.enganchePct * 100).toFixed(1)}%
+                      </label>
+                      <input
+                        type="range"
+                        min={0}
+                        max={0.50}
+                        step={0.005}
+                        value={form.enganchePct}
+                        onChange={(e) => updateField('enganchePct', Number(e.target.value))}
+                        className="w-full accent-inyecta-600"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-1">
+                        Depósito en garantía (manual): {(form.depositoGarantiaPct * 100).toFixed(1)}%
+                      </label>
+                      <input
+                        type="range"
+                        min={0}
+                        max={0.40}
+                        step={0.005}
+                        value={form.depositoGarantiaPct}
+                        onChange={(e) => updateField('depositoGarantiaPct', Number(e.target.value))}
+                        className="w-full accent-inyecta-600"
+                      />
+                    </div>
+                  </>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-gray-600 mb-1">
                     Comision Apertura: {(form.comisionAperturaPct * 100).toFixed(0)}%
@@ -732,9 +913,9 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                 <div>
                   <label className="block text-sm font-medium text-gray-600 mb-1">
                     Valor Residual: {(form.valorResidualPct * 100).toFixed(0)}%
-                    {form.producto === 'PURO' && form.valorResidualEsComision && (
+                    {form.producto === 'PURO' && form.valorResidualEsDeposito && (
                       <span className="ml-2 text-xs text-inyecta-700 font-normal">
-                        (igualado a la comisión)
+                        (igualado al depósito en garantía)
                       </span>
                     )}
                   </label>
@@ -745,21 +926,21 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                     step={0.01}
                     value={form.valorResidualPct}
                     onChange={(e) => updateField('valorResidualPct', Number(e.target.value))}
-                    disabled={form.producto === 'PURO' && form.valorResidualEsComision}
+                    disabled={form.producto === 'PURO' && form.valorResidualEsDeposito}
                     className="w-full accent-inyecta-600 disabled:opacity-40"
                   />
                 </div>
                 {form.producto === 'PURO' && (
                   <div className="flex items-center gap-3">
                     <input
-                      id="cot-residual-es-comision"
+                      id="cot-residual-es-deposito"
                       type="checkbox"
-                      checked={form.valorResidualEsComision}
-                      onChange={(e) => updateField('valorResidualEsComision', e.target.checked)}
+                      checked={form.valorResidualEsDeposito}
+                      onChange={(e) => updateField('valorResidualEsDeposito', e.target.checked)}
                       className="rounded accent-inyecta-600"
                     />
-                    <label htmlFor="cot-residual-es-comision" className="text-sm text-gray-600 cursor-pointer">
-                      Valor residual = comisión de apertura (§4.13)
+                    <label htmlFor="cot-residual-es-deposito" className="text-sm text-gray-600 cursor-pointer">
+                      Valor residual = depósito en garantía (§4.13)
                     </label>
                   </div>
                 )}
@@ -772,23 +953,77 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1">GPS Instalacion</label>
-                  <input
-                    type="number"
-                    value={form.gpsInstalacion}
-                    onChange={(e) => updateField('gpsInstalacion', Number(e.target.value))}
+                <div className="lg:col-span-2">
+                  <label className="block text-sm font-medium text-gray-600 mb-1">
+                    Proveedor GPS
+                    {!form.gpsProveedorTocado && form.gpsProveedor && (
+                      <span className="ml-2 text-xs text-gray-400 font-normal">
+                        (default por valor del bien)
+                      </span>
+                    )}
+                    {form.gpsProveedorTocado && (
+                      <button
+                        type="button"
+                        onClick={() => setForm((p) => ({
+                          ...p,
+                          gpsProveedorTocado: false,
+                          gpsProveedor: proveedorDefault(p.valorBien),
+                          gpsInstalacion: calcularPrecioGps(proveedorDefault(p.valorBien), p.plazo, gpsProveedores),
+                        }))}
+                        className="ml-2 text-xs text-inyecta-600 hover:underline font-normal"
+                      >
+                        usar default
+                      </button>
+                    )}
+                  </label>
+                  <select
+                    value={form.gpsProveedor ?? ''}
+                    onChange={(e) => handleGpsProveedorChange(e.target.value || null)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none"
-                  />
-                </div>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={form.gpsFinanciado}
-                    onChange={(e) => updateField('gpsFinanciado', e.target.checked)}
-                    className="rounded accent-inyecta-600"
-                  />
-                  <span className="text-sm text-gray-600">GPS financiado</span>
+                  >
+                    <option value="">Sin GPS</option>
+                    {gpsProveedores.filter((p) => p.activo).map((p) => {
+                      const precio = precioGpsPorPlazo(p, form.plazo);
+                      return (
+                        <option key={p.clave} value={p.clave}>
+                          {p.nombre} — ${precio.toLocaleString('es-MX')} ({form.plazo}m)
+                          {p.descripcion ? ` · ${p.descripcion}` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+
+                  {/* Descripción del proveedor seleccionado (solo UI, no PDF). */}
+                  {form.gpsProveedor && (() => {
+                    const p = gpsProveedores.find((x) => x.clave === form.gpsProveedor);
+                    if (!p?.descripcion) return null;
+                    return (
+                      <p className="mt-1.5 text-xs text-gray-500">
+                        <span className="font-medium text-gray-700">{p.nombre}:</span> {p.descripcion}
+                      </p>
+                    );
+                  })()}
+
+                  {/* Advertencia "Sin GPS" — Damián 28-04-2026: no se bloquea, solo se avisa. */}
+                  {!form.gpsProveedor && (
+                    <div className="mt-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+                      ⚠ Operación <span className="font-bold">sin GPS</span>
+                      {form.valorBien >= 500_000 && ` para bien de $${form.valorBien.toLocaleString('es-MX')}`}
+                      . Confirmar con gerencia antes de proceder.
+                    </div>
+                  )}
+
+                  {/* Toggle GPS contado/financiado (efecto matemático real, sigue editable). */}
+                  <label className="mt-2 flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.gpsFinanciado}
+                      onChange={(e) => updateField('gpsFinanciado', e.target.checked)}
+                      className="rounded accent-inyecta-600"
+                      disabled={!form.gpsProveedor}
+                    />
+                    GPS financiado (si no, el cliente paga ${form.gpsInstalacion.toLocaleString('es-MX')} al inicio)
+                  </label>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-600 mb-1">

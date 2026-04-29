@@ -159,16 +159,24 @@ describe('calcularArrendamiento FINANCIERO — enganche 10% (§4.2 B17)', () => 
     valorResidualPct: 0,
   });
 
-  it('enganche = valorConIVA × 10% = $210,000.00', () => {
-    expect(r.enganche).toBeCloseTo(210_000.00, 2);
+  // Tras el cambio del 27-04-2026 (CLAUDE.md §4.2 fuente de verdad), el
+  // enganche se calcula sobre valorSinIVA en TODOS los productos.
+  // Antes era valorConIVA × pct sólo para FIN — discrepancia con el
+  // Excel oficial. Recalculados los esperados:
+  //   enganche      = 1,810,344.83 × 0.10 = $181,034.48
+  //   baseBien      = 1,810,344.83 - 181,034.48 + 16,000 = $1,645,310.35
+  //   comisión      = 1,645,310.35 × 0.05 = $82,265.52
+  //   montoFinanciar= baseBien + comisión = $1,727,575.86
+  it('enganche = valorSinIVA × 10% = $181,034.48 (§4.2)', () => {
+    expect(r.enganche).toBeCloseTo(181_034.48, 2);
   });
 
-  it('comisión = baseBien × 5% = $80,817.24 (B17 ya con enganche restado)', () => {
-    expect(r.comisionApertura).toBeCloseTo(80_817.24, 2);
+  it('comisión = baseBien × 5% = $82,265.52 (B17 con enganche restado)', () => {
+    expect(r.comisionApertura).toBeCloseTo(82_265.52, 2);
   });
 
-  it('montoFinanciar = baseBien + comisión = $1,697,162.07', () => {
-    expect(r.montoFinanciar).toBeCloseTo(1_697_162.07, 2);
+  it('montoFinanciar = baseBien + comisión = $1,727,575.87', () => {
+    expect(r.montoFinanciar).toBeCloseTo(1_727_575.87, 1);
   });
 
   it('renta neta < baseline FIN $75,896.80 (PV reducido por enganche)', () => {
@@ -182,22 +190,24 @@ describe('calcularArrendamiento FINANCIERO — enganche 10% (§4.2 B17)', () => 
   });
 });
 
-describe('calcularArrendamiento PURO — valorResidualEsComision (§4.13)', () => {
-  // Flag activa: valorResidual = comisionApertura, ignorando el pct
-  // capturado. Caso baseline sin enganche, sin seguro, gps financiado.
+describe('calcularArrendamiento PURO — valorResidualEsDeposito (§4.13)', () => {
+  // Flag activa: valorResidual = depósito en garantía, ignorando el pct
+  // capturado del residual. El cliente "pierde" el depósito a cambio del
+  // bien al final del contrato. Caso baseline sin enganche, sin seguro,
+  // gps financiado (depósito = 16% del baseBien).
   const r = calcularArrendamiento({
     ...baseParams,
-    valorResidualPct: 0.16,             // ignorado por la flag
-    valorResidualEsComision: true,
+    valorResidualPct: 0.20,             // ignorado por la flag
+    valorResidualEsDeposito: true,
   });
 
-  it('valorResidual = comisionApertura (no usa el pct capturado)', () => {
-    expect(r.valorResidual).toBeCloseTo(91_317.24, 2);
-    expect(r.valorResidual).toBe(r.comisionApertura);
+  it('valorResidual = depositoGarantia (no usa el pct capturado)', () => {
+    expect(r.valorResidual).toBeCloseTo(292_215.17, 2);
+    expect(r.valorResidual).toBe(r.depositoGarantia);
   });
 
-  it('depósito sigue siendo $292,215.17 (la flag no lo toca)', () => {
-    expect(r.depositoGarantia).toBeCloseTo(292_215.17, 2);
+  it('comisión sigue siendo $91,317.24 (la flag no la toca)', () => {
+    expect(r.comisionApertura).toBeCloseTo(91_317.24, 2);
   });
 
   it('renta neta = baseline $73,098.02 (FV del PMT = depósito, no residual)', () => {

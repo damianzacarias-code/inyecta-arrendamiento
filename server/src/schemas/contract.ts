@@ -44,6 +44,22 @@ export const proveedorSchema = z.object({
   nombreContacto: optionalString,
   telefono: optionalString,
   email: emailOpt,
+  // Identidad fiscal — exigida por cláusula SEGUNDA del FIN
+  // ("LA ARRENDADORA se obliga a adquirir el bien"). Sin estos
+  // datos no se puede emitir CFDI de compra ni dispersar.
+  rfc: optionalString,
+  calle: optionalString,
+  numExterior: optionalString,
+  numInterior: optionalString,
+  colonia: optionalString,
+  municipio: optionalString,
+  ciudad: optionalString,
+  estado: optionalString,
+  pais: optionalString,
+  cp: optionalString,
+  banco: optionalString,
+  clabe: optionalString,
+  numCuenta: optionalString,
 });
 
 export type ProveedorInput = z.infer<typeof proveedorSchema>;

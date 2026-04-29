@@ -13,7 +13,17 @@ import {
 } from 'lucide-react';
 import { pdf } from '@react-pdf/renderer';
 import { EstadoCuentaPDF, type EstadoCuentaProps } from '@/lib/pdf/EstadoCuentaPDF';
+import { ContratoPuroPDF } from '@/lib/pdf/ContratoPuroPDF';
+import { ContratoFinancieroPDF } from '@/lib/pdf/ContratoFinancieroPDF';
+import { CaratulaPDF } from '@/lib/pdf/CaratulaPDF';
+import { PagarePDF } from '@/lib/pdf/PagarePDF';
+import { ActaEntregaPDF } from '@/lib/pdf/ActaEntregaPDF';
+import type { ContractPdfProps } from '@/lib/pdf/contractTypes';
+import { getCatalog } from '@/lib/catalog';
 import ExpedienteTab from '@/components/ExpedienteTab';
+import AvalesTab from '@/components/AvalesTab';
+import PagareTab from '@/components/PagareTab';
+import { riskLabel } from '@/lib/cotizacion/riesgoLabels';
 
 interface StageHistoryEntry {
   id: string;
@@ -117,6 +127,8 @@ const ESTATUS_LABELS: Record<string, { label: string; color: string }> = {
 const tabs = [
   { id: 'pipeline', label: 'Pipeline', icon: History },
   { id: 'info', label: 'Informacion', icon: Info },
+  { id: 'avales', label: 'Avales', icon: Users },
+  { id: 'pagare', label: 'Pagaré', icon: PenTool },
   { id: 'documentos', label: 'Documentos', icon: ClipboardCheck },
   { id: 'solicitud-cnbv', label: 'Solicitud CNBV', icon: FileCheck2 },
   { id: 'amortizacion', label: 'Amortizacion', icon: Table2 },
@@ -337,6 +349,114 @@ export default function ContratoDetalle() {
     };
   }, [cnbvPdfUrl]);
 
+  // ── Descarga de documentos del expediente firmable ────────────────
+  // El detalle del contrato ya trae avales/pagare/proveedorData/client+repLegal
+  // (ver GET /api/contracts/:id include extendido). Para folio CONDUSEF
+  // consultamos el Catalog del cliente, que trae folioCondusefPuro/Fin.
+  const buildContractPdfProps = useCallback((): ContractPdfProps | null => {
+    if (!contract) return null;
+    const c = contract as unknown as Record<string, unknown>;
+    const catalog = getCatalog().catalog;
+    const folioCondusef =
+      contract.producto === 'PURO' ? catalog.folioCondusefPuro : catalog.folioCondusefFin;
+    return {
+      contract: contract as unknown as ContractPdfProps['contract'],
+      client: c.client as ContractPdfProps['client'],
+      avales: ((c.avales as ContractPdfProps['avales']) ?? []),
+      proveedor: (c.proveedorData as ContractPdfProps['proveedor']) ?? null,
+      pagare: (c.pagare as ContractPdfProps['pagare']) ?? null,
+      folioCondusef: folioCondusef ?? null,
+    };
+  }, [contract]);
+
+  // Helper genérico para descargar cualquier PDF generado por @react-pdf.
+  // El cast a `any` es necesario porque @react-pdf espera ReactElement<DocumentProps>
+  // pero los tipos de TS no infieren esa firma desde JSX en strict mode.
+  const triggerPdfDownload = async (
+    docElement: React.ReactElement,
+    filename: string,
+  ) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const blob = await pdf(docElement as any).toBlob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const [downloadingDoc, setDownloadingDoc] = useState<null | 'contrato' | 'caratula' | 'pagare' | 'acta'>(null);
+
+  const handleDownloadContrato = async () => {
+    const props = buildContractPdfProps();
+    if (!props) return;
+    setDownloadingDoc('contrato');
+    try {
+      const Doc = props.contract.producto === 'PURO'
+        ? <ContratoPuroPDF {...props} />
+        : <ContratoFinancieroPDF {...props} />;
+      await triggerPdfDownload(Doc, `Contrato_${props.contract.folio}.pdf`);
+    } catch (err) {
+      console.error('Error generando contrato:', err);
+      alert('No se pudo generar el contrato. Revisa que el cliente y los avales estén capturados.');
+    } finally {
+      setDownloadingDoc(null);
+    }
+  };
+
+  const handleDownloadCaratula = async () => {
+    const props = buildContractPdfProps();
+    if (!props) return;
+    setDownloadingDoc('caratula');
+    try {
+      await triggerPdfDownload(<CaratulaPDF {...props} />, `Caratula_${props.contract.folio}.pdf`);
+    } catch (err) {
+      console.error('Error generando carátula:', err);
+      alert('No se pudo generar la carátula.');
+    } finally {
+      setDownloadingDoc(null);
+    }
+  };
+
+  const handleDownloadPagare = async () => {
+    const props = buildContractPdfProps();
+    if (!props) return;
+    if (props.contract.producto !== 'FINANCIERO') {
+      alert('El pagaré solo aplica a contratos de Arrendamiento Financiero.');
+      return;
+    }
+    if (!props.pagare) {
+      alert('Captura primero los datos del pagaré (sección de Operación).');
+      return;
+    }
+    setDownloadingDoc('pagare');
+    try {
+      await triggerPdfDownload(<PagarePDF {...props} />, `Pagare_${props.contract.folio}.pdf`);
+    } catch (err) {
+      console.error('Error generando pagaré:', err);
+      alert('No se pudo generar el pagaré.');
+    } finally {
+      setDownloadingDoc(null);
+    }
+  };
+
+  const handleDownloadActaEntrega = async () => {
+    const props = buildContractPdfProps();
+    if (!props) return;
+    setDownloadingDoc('acta');
+    try {
+      await triggerPdfDownload(<ActaEntregaPDF {...props} />, `ActaEntrega_${props.contract.folio}.pdf`);
+    } catch (err) {
+      console.error('Error generando acta:', err);
+      alert('No se pudo generar el acta de entrega.');
+    } finally {
+      setDownloadingDoc(null);
+    }
+  };
+
   const [downloadingEdoCta, setDownloadingEdoCta] = useState(false);
   const handleDownloadEstadoCuenta = async () => {
     if (!id || !contract) return;
@@ -529,15 +649,51 @@ export default function ContratoDetalle() {
             {c.client.tipo === 'PM' ? <Building2 size={12} /> : <User size={12} />}
             {clientName(c.client)}
           </Link>
-          {c.estatus === 'VIGENTE' && (
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
             <button
-              onClick={handleDownloadEstadoCuenta}
-              disabled={downloadingEdoCta}
+              onClick={handleDownloadContrato}
+              disabled={downloadingDoc === 'contrato'}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-inyecta-600 hover:bg-inyecta-700 text-white rounded-lg text-xs font-medium shadow-sm disabled:opacity-50"
+              title="Descarga el contrato firmable con todas las cláusulas y datos del cliente/avales"
             >
-              <Download size={12} /> {downloadingEdoCta ? 'Generando…' : 'Estado de Cuenta PDF'}
+              <Download size={12} /> {downloadingDoc === 'contrato' ? 'Generando…' : 'Contrato'}
             </button>
-          )}
+            <button
+              onClick={handleDownloadCaratula}
+              disabled={downloadingDoc === 'caratula'}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-medium shadow-sm disabled:opacity-50"
+              title="Carátula con condiciones comerciales (anexo del contrato)"
+            >
+              <Download size={12} /> {downloadingDoc === 'caratula' ? 'Generando…' : 'Carátula'}
+            </button>
+            {c.producto === 'FINANCIERO' && (
+              <button
+                onClick={handleDownloadPagare}
+                disabled={downloadingDoc === 'pagare'}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-medium shadow-sm disabled:opacity-50"
+                title="Pagaré por la renta global (cláusula DÉCIMA TERCERA del FIN)"
+              >
+                <Download size={12} /> {downloadingDoc === 'pagare' ? 'Generando…' : 'Pagaré'}
+              </button>
+            )}
+            <button
+              onClick={handleDownloadActaEntrega}
+              disabled={downloadingDoc === 'acta'}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-medium shadow-sm disabled:opacity-50"
+              title="Acta de entrega-recepción del bien (anexo)"
+            >
+              <Download size={12} /> {downloadingDoc === 'acta' ? 'Generando…' : 'Acta entrega'}
+            </button>
+            {c.estatus === 'VIGENTE' && (
+              <button
+                onClick={handleDownloadEstadoCuenta}
+                disabled={downloadingEdoCta}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-medium shadow-sm disabled:opacity-50"
+              >
+                <Download size={12} /> {downloadingEdoCta ? 'Generando…' : 'Estado de cuenta'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -670,7 +826,7 @@ export default function ContratoDetalle() {
         <SummaryCard label="Valor del Bien" value={formatCurrency(Number(c.valorBien))} />
         <SummaryCard label="Monto a Financiar" value={formatCurrency(Number(c.montoFinanciar))} />
         <SummaryCard label="Renta + IVA" value={formatCurrency(Number(c.rentaMensualIVA))} highlight />
-        <SummaryCard label="Plazo" value={`${c.plazo} meses · Riesgo ${c.nivelRiesgo}`} />
+        <SummaryCard label="Plazo" value={`${c.plazo} meses · Riesgo ${riskLabel(c.nivelRiesgo)}`} />
       </div>
 
       {/* Tabs */}
@@ -754,7 +910,7 @@ export default function ContratoDetalle() {
               <InfoRow label="Valor del Bien" value={formatCurrency(Number(c.valorBien))} />
               <InfoRow label="Valor + IVA" value={formatCurrency(Number(c.valorBienIVA))} />
               <InfoRow label="Tasa Anual" value={`${(Number(c.tasaAnual) * 100).toFixed(0)}%`} />
-              <InfoRow label="Nivel de Riesgo" value={c.nivelRiesgo} />
+              <InfoRow label="Nivel de Riesgo" value={riskLabel(c.nivelRiesgo)} />
               <div className="border-t border-gray-100 pt-2.5">
                 <InfoRow label="Enganche" value={formatCurrency(Number(c.enganche))} />
                 <InfoRow label="Deposito Garantia" value={formatCurrency(Number(c.depositoGarantia))} />
@@ -807,6 +963,30 @@ export default function ContratoDetalle() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Tab: Avales / Deudores Solidarios */}
+      {tab === 'avales' && id && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <AvalesTab contractId={id} />
+        </div>
+      )}
+
+      {/* Tab: Pagaré (sólo FIN) */}
+      {tab === 'pagare' && id && contract && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <PagareTab
+            contractId={id}
+            contractFolio={contract.folio}
+            productoIsFinanciero={contract.producto === 'FINANCIERO'}
+            sugerencias={{
+              rentaMensualIVA: contract.rentaMensualIVA,
+              plazo: contract.plazo,
+              fechaFirma: contract.fechaFirma,
+              fechaVencimiento: contract.fechaVencimiento,
+            }}
+          />
         </div>
       )}
 

@@ -51,11 +51,11 @@ export interface LeaseParams {
    */
   valorResidualPct: number;
   /**
-   * §4.13: solo PURO — si true, valorResidual = comisionApertura
-   * (el cliente "compensa" su residual contra la comisión). En FIN se
-   * ignora.
+   * §4.13: solo PURO — si true, valorResidualResuelto = depositoGarantia
+   * (el cliente "pierde" el depósito a cambio del bien al final). En FIN
+   * se ignora. Reemplaza el campo legacy `valorResidualEsComision`.
    */
-  valorResidualEsComision?: boolean;
+  valorResidualEsDeposito?: boolean;
   rentaInicial: number;
   gpsInstalacion: number;
   gpsFinanciado: boolean;
@@ -153,7 +153,7 @@ export function calcularArrendamiento(params: LeaseParams): LeaseResult {
     producto, valorBien, plazo, tasaAnual,
     enganchePct, depositoGarantiaPct, comisionAperturaPct,
     comisionAperturaFinanciada,
-    valorResidualPct, valorResidualEsComision,
+    valorResidualPct, valorResidualEsDeposito,
     rentaInicial, gpsInstalacion, gpsFinanciado,
     seguroAnual, seguroFinanciado, seguroPendiente,
   } = params;
@@ -167,13 +167,13 @@ export function calcularArrendamiento(params: LeaseParams): LeaseResult {
   // ── Enganche (siempre reduce baseBien per Excel B17) ─────────────
   // CLAUDE.md §4.2: B17 = valorSinIVA - enganche + gpsFinanciado +
   // seguroAnual×plazo/12 (si financiado).
-  // El enganche en FIN sigue como `valorConIVA × pct` por compatibilidad
-  // histórica del backend (el cliente ahora usa valorSinIVA × pct);
-  // ambos motores convergen porque solo afecta a operaciones FIN con
-  // enganche > 0, donde el caso baseline tiene enganche = 0.
-  const enganche = producto === 'FINANCIERO'
-    ? valorConIVA.times(enganchePct)
-    : new Decimal(0);
+  // CLAUDE.md §4.2 + 27-04-2026: el enganche se aplica a TODOS los
+  // productos (PURO y FIN) sobre valorSinIVA, no sólo a FIN.
+  // Antes: PURO siempre 0 (regla legacy A=B=C=0% en presets viejos).
+  // Tras la regla "Bajo/Medio/Alto" todos los niveles pueden tener
+  // enganche según la distribución del aporte inicial — ver
+  // services/distribucion.ts.
+  const enganche = valorSinIVA.times(enganchePct);
 
   // ── Seguro (CLAUDE.md §4.14) ─────────────────────────────────────
   // - seguroPendiente: 0 en B17 y 0 en pago inicial (no entra hasta
@@ -204,13 +204,14 @@ export function calcularArrendamiento(params: LeaseParams): LeaseResult {
   const depositoGarantia = baseBien.times(depositoGarantiaPct);
 
   // ── Valor residual (CLAUDE.md §4.12 + §4.13 + §4.5) ──────────────
-  //   PURO  : si valorResidualEsComision ⇒ = comisión apertura,
+  //   PURO  : si valorResidualEsDeposito ⇒ = depósito en garantía
+  //             (cliente pierde el depósito a cambio del bien),
   //           si no ⇒ baseBien × valorResidualPct.
   //   FIN   : baseBien × 0.02 (precio simbólico — opción de compra).
   const valorResidual =
     producto === 'PURO'
-      ? (valorResidualEsComision
-          ? comisionApertura
+      ? (valorResidualEsDeposito
+          ? depositoGarantia
           : baseBien.times(valorResidualPct))
       : baseBien.times(0.02);
 
@@ -218,8 +219,16 @@ export function calcularArrendamiento(params: LeaseParams): LeaseResult {
   // B19 = B17 + comisiónFinanciada. El enganche YA está restado en B17.
   const montoFinanciado = baseBien.plus(comisionFinanciada);
 
-  // ── PMT: FV = depósito (PURO) o 0 (FINANCIERO) ───────────────────
-  const fvPMT = producto === 'PURO' ? depositoGarantia : new Decimal(0);
+  // ── PMT: FV = valor residual (PURO) o 0 (FINANCIERO) ─────────────
+  // BUG FIX 28-04-2026 (Damián): antes pasaba `depositoGarantia` como
+  // FV del PMT, ignorando el `valorResidual` ya calculado arriba. Eso
+  // inflaba la renta cuando residual ≠ depósito (16% vs 10%) y dejaba
+  // la amortización terminando en el depósito en lugar del residual
+  // mostrado al cliente. Verificado al centavo contra Excel oficial.
+  // `valorResidual` ya cubre los dos casos:
+  //   • valorResidualEsDeposito = true (§4.13) → vale `depositoGarantia`
+  //   • si no                                  → vale `baseBien × valorResidualPct`
+  const fvPMT = producto === 'PURO' ? valorResidual : new Decimal(0);
   const rentaNeta = calcPMT(montoFinanciado, tasaMensual, plazo, fvPMT);
 
   // ── IVA de la renta ──────────────────────────────────────────────

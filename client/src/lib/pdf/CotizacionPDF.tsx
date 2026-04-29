@@ -284,7 +284,6 @@ export function CotizacionPDF({
           <TableLine label="Comisión por apertura financiada (+)"  amount={data.monto.comisionAperturaFinanciada} alt />
           <TableLine label="Seguro del bien (+)"                   amount={data.monto.seguroFinanciado}       alt={false} />
           <TableLine label="Instalación del GPS financiada (+)"    amount={data.monto.gpsFinanciado}          alt />
-          <TableLine label="Pago anticipado (-)"                   amount={data.monto.descuentoEnganche}      alt={false} />
           <TotalLine amount={data.monto.total} />
         </View>
 
