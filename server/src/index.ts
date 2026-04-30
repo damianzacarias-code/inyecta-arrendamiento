@@ -27,6 +27,7 @@ import extractRoutes from './routes/extract';
 import brandingRoutes from './routes/branding';
 import catalogConfigRoutes from './routes/catalog';
 import usersRoutes from './routes/users';
+import documentsDashboardRoutes from './routes/documentsDashboard';
 import avalesRoutes from './routes/avales';
 import pagaresRoutes from './routes/pagares';
 import { bitacora } from './middleware/bitacora';
@@ -221,6 +222,9 @@ app.use('/api/config', catalogConfigRoutes);
 // Administración de usuarios (empleados Inyecta). Sólo ADMIN puede crear/
 // editar; DIRECTOR sólo lectura. Ver routes/users.ts para reglas anti-lockout.
 app.use('/api/users', usersRoutes);
+// Dashboard agregado de documentación cross-contratos. Reemplaza el
+// módulo /api/documents legacy (eliminado en migración expediente_por_actor).
+app.use('/api/documents', documentsDashboardRoutes);
 // Avales (deudores solidarios) y pagaré por contrato. Sub-rutas con
 // mergeParams para tomar :contractId del prefijo padre.
 app.use('/api/contracts/:contractId/avales', avalesRoutes);
