@@ -114,6 +114,11 @@ const EnvSchema = z
       .string()
       .min(1)
       .default('FSMP SOLUCIONES DE CAPITAL SA DE CV SOFOM ENR'),
+    /** Permite saltarse la validación de la clave en production cuando el
+     *  módulo de Círculo de Crédito no está en uso (ej. fase de pruebas
+     *  donde el sistema corre en producción pero no consulta al buró aún).
+     *  Quitar cuando se obtenga la clave real. */
+    CIRCULO_CREDITO_DISABLED: boolFromString.default(false),
 
     // ── Branding (datos públicos del emisor para PDFs y UI) ──
     // Estos valores se devuelven por GET /api/config/branding (sin
@@ -243,13 +248,18 @@ const EnvSchema = z
         message: 'EXTRACT_PROVIDER=CLAUDE requiere ANTHROPIC_API_KEY',
       });
     }
-    if (env.NODE_ENV === 'production' && env.CIRCULO_CREDITO_CLAVE_OTORGANTE === '0000000000') {
+    if (
+      env.NODE_ENV === 'production'
+      && env.CIRCULO_CREDITO_CLAVE_OTORGANTE === '0000000000'
+      && env.CIRCULO_CREDITO_DISABLED !== true
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['CIRCULO_CREDITO_CLAVE_OTORGANTE'],
         message:
           'En production no se permite la clave de pruebas "0000000000". ' +
-          'Solicita la clave real a Círculo de Crédito antes de desplegar.',
+          'Solicita la clave real a Círculo de Crédito antes de desplegar, ' +
+          'o setea CIRCULO_CREDITO_DISABLED=true si el módulo no está en uso.',
       });
     }
     // En production exigimos una CLABE real (18 dígitos exactos, sin
