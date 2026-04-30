@@ -18,9 +18,15 @@ services:
     plan: free
     region: oregon                 # us-west; cambia a virginia (us-east) si tu BD Neon vive ahí
     rootDir: server
+    # `prisma migrate deploy` se corre en el build para que cualquier
+    # migración nueva quede aplicada antes de que el servicio arranque.
+    # Es idempotente: si la BD ya está al día, no hace nada. Si falla
+    # (p.ej. drift entre schema y BD productiva), el deploy falla
+    # explícitamente — preferible a arrancar con BD incompatible.
     buildCommand: |
       npm ci
       npx prisma generate
+      npx prisma migrate deploy
       npm run build
     startCommand: node dist/index.js
     healthCheckPath: /api/health/live
