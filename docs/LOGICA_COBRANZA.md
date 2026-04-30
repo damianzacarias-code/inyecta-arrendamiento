@@ -275,3 +275,153 @@ credito_status_evento (
 - Implementación de `calcPMT` y "pagos adicionales" → `CLAUDE.md` ticket P3.
 - Estado de Cuenta PDF con desglose mora → `CLAUDE.md` ticket P4.
 - Recibo de Pago con folio consecutivo → `CLAUDE.md` ticket P5.
+
+---
+
+## Decisiones operativas — sprint 2026-04-30
+
+> Resueltas con Damián tras la auditoría de cobranza del cobranza-guardian
+> (ver `docs/cobranza_overview.md`). Esta sección documenta las decisiones
+> de NEGOCIO con sus motivaciones — el código las refleja, pero quien
+> audite manualmente o el jefe operativo lee aquí el "por qué".
+
+### D1 · Sobrante de pago
+
+**Pregunta:** si el cliente paga más de lo que debe del periodo actual,
+¿qué hacemos con el excedente?
+
+**Decisión (Damián):**
+- **Si tiene parcialidades atrasadas:** el sobrante se aplica
+  automáticamente al **siguiente periodo atrasado**, siguiendo la misma
+  prelación legal (moratorios → IVA mor → renta → IVA renta).
+- **Si está al corriente:** el sistema **pregunta al operador** qué quiere
+  hacer:
+  - PURO: "Aplicar a próxima renta" o "Prorratear en todas las rentas
+    futuras restantes" (ver §4.10).
+  - FINANCIERO: "Aplicar a próxima renta" o "Abonar a capital (recalcula
+    PMT, baja la renta futura)".
+
+Implementación: backend devuelve la información del sobrante en el
+response; frontend muestra un modal con las opciones según producto. Al
+operador no se le permite descartar el sobrante — siempre se aplica a
+algo.
+
+### D2 · Moratorio en pagos parciales (matemáticamente puro)
+
+**Pregunta:** cuando un pago parcial reduce la renta pendiente, ¿el
+moratorio recalculado debe usar la nueva base desde T=0, o tracking por
+tramos de tiempo (cada base correspondiente a su periodo de vigencia)?
+
+**Decisión (Damián):** **tramos de tiempo** — matemáticamente puro.
+
+```
+Ejemplo:
+  Periodo en mora con renta $10,000.
+  Día 5 de atraso: cliente paga $500.
+    → tramo 1: $10,000 × tasaDiaria × 5  (moratorio "congelado" a día 5)
+    → split del pago: ~$331 a renta + ~$53 a IVA renta + $100 mor + $16 IVA mor
+    → renta pendiente nueva: $9,669.
+  Día 10 de atraso (5 días después):
+    → tramo 2: $9,669 × tasaDiaria × 5  (5 días con la nueva base)
+    → moratorio TOTAL = tramo 1 + tramo 2  ≠  rentaPendiente × tasa × diasAtraso.
+```
+
+**Implementación pendiente** (sprint actual, paso #5): refactor de
+`calcConceptos` en `cobranza.ts` para iterar sobre los pagos del periodo
+en orden cronológico, acumulando moratorio por tramos.
+
+**Por qué:** si el jefe (o un auditor) calcula moratorio a mano, este
+método da el resultado matemáticamente correcto. El método "ingenuo"
+(rentaPendiente_actual × tasa × diasAtraso totales) subcobra ~$3-50
+dependiendo del caso. Aunque el error sea a favor del cliente, el sistema
+debe coincidir exactamente con el cálculo manual para no quemar
+credibilidad ante revisión.
+
+### D3 · Borrar pagos — soft delete
+
+**Pregunta:** ¿permitir borrado físico de pagos? ¿Qué auditoría se requiere?
+
+**Decisión (Damián):** **soft delete obligatorio**, sin restricción de
+rol por ahora (cuando se metan roles, se restringe a ADMIN).
+
+**Implementación (commit `cd84a76`):**
+- Schema: `Payment.deletedAt`, `deletedBy`, `motivoEliminacion`.
+- `DELETE /api/cobranza/payment/:id` ahora UPDATE-a en lugar de DELETE.
+- Todas las lecturas para cálculos filtran `deletedAt: null`.
+- El recibo de un pago cancelado SÍ se puede reimprimir (evidencia).
+- Un pago cancelado NO se puede facturar (CFDI bloqueado con 409).
+
+### D4 · Pago anticipado / liquidación parcial
+
+**Pregunta:** ¿permitir descuentos por pago adelantado?
+
+**Decisión (Damián):**
+- **Arrendamiento Financiero:** sí, pueden abonar a capital — la renta
+  futura baja porque hay menos saldo que amortizar (PMT recalculado).
+  Esto es una "liquidación parcial".
+- **Arrendamiento Puro:** no hay capital al cual abonar (es operativo,
+  no financiero). Las únicas opciones son:
+  1. Pagar la próxima renta.
+  2. Prorratear el pago entre todas las rentas futuras (cada una baja en
+     `abono / periodos_restantes`).
+
+Ya implementado en `POST /pay-extra` desde commits anteriores. Los
+descuentos aritméticos los aplica el motor (no se cobra "interés
+anticipado"); el cliente paga lo que debería pagar mes a mes pero
+distribuido distinto.
+
+### D5 · Prelación intra-balde — proporcional (no estricta)
+
+**Pregunta:** dentro de un balde (moratorio o renta), ¿el efectivo cubre
+primero el principal y luego el IVA (estricto), o se reparte
+proporcional?
+
+**Decisión (Damián):** **proporcional como hoy**.
+
+```
+Ejemplo:
+  Balde MORATORIO: $100 mor + $16 IVA mor (total $116).
+  Cliente paga $58 (la mitad del balde).
+  Aplicación PROPORCIONAL (lo que hace el sistema):
+    $50 a moratorio principal, $8 a IVA moratorio.
+  Aplicación ESTRICTA (alternativa rechazada):
+    $58 a moratorio principal, $0 al IVA.
+```
+
+**Por qué proporcional (decisión consciente):**
+- El SAT acepta ambos métodos.
+- Proporcional refleja mejor "el IVA se causa con cada peso recibido"
+  (el IVA es una traslación, no un retraso).
+- Cambiar a estricto requeriría refactor del CFDI emitido en pagos
+  parciales.
+
+La prelación de **buckets** sigue siendo estricta: moratorio (mor + IVA
+mor) ANTES que renta (renta + IVA renta). Lo único proporcional es
+DENTRO de cada balde.
+
+### D6 · Race conditions — fix con TX serializable + advisory lock
+
+Tres endpoints tenían el bug "lee → calcula → escribe" sin transacción
+suficientemente fuerte. Cerrados con el helper
+`server/src/lib/serializableTransaction.ts`:
+
+- `POST /pay` — commit `a0aefcd` (advisory lock por (contractId, periodo)).
+- `POST /pay-advance` — commit `c56ddac` (advisory lock por contractId).
+- `POST /pay-extra` — commit `090479a` (advisory lock por contractId,
+  TODAS las lecturas dentro de la TX).
+- `DELETE /payment/:id` — commit `cd84a76` (advisory lock por contractId
+  para evitar conflicto con un /pay simultáneo).
+
+El advisory lock se toma con `pg_advisory_xact_lock(hashtext(contractId)::int4, X)`
+donde X es 0 para operaciones que tocan todo el contrato y `periodo` para
+operaciones que tocan un solo periodo. Colisiones de hash entre contratos
+son inocuas (sólo costo de performance, no de correctness).
+
+### Deuda técnica conocida (no bloquea operaciones)
+
+- **`number` vs `Decimal` en cobranza.ts:** todo el módulo usa `number`
+  con `Math.round(x*100)/100`. Funciona en montos pequeños pero acumula
+  imprecisión en pagos parciales con división proporcional. Pendiente
+  de migración cuando se sistematicen los CFDIs.
+- **Validación de monto del pago:** Zod ya rechaza negativos/cero pero no
+  hay test explícito de límites máximos.
