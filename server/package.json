@@ -22,7 +22,8 @@
     "verify:passwords": "tsx src/__verify__/passwordPolicy.verify.ts",
     "verify:jwtRevocation": "tsx src/__verify__/jwtRevocation.verify.ts",
     "verify:mfa": "tsx src/__verify__/mfa.verify.ts",
-    "verify:uploadCipher": "tsx src/__verify__/uploadCipher.verify.ts"
+    "verify:uploadCipher": "tsx src/__verify__/uploadCipher.verify.ts",
+    "verify:cobranzaConcurrency": "tsx src/__verify__/cobranzaConcurrency.verify.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",

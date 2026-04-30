@@ -4,6 +4,7 @@ import prisma from '../config/db';
 import { requireAuth } from '../middleware/auth';
 import { notificar, notificarPorRol } from '../lib/notificar';
 import { childLogger } from '../lib/logger';
+import { serializableTransaction } from '../lib/serializableTransaction';
 
 const log = childLogger('cobranza');
 
@@ -373,129 +374,223 @@ const paySchema = z.object({
   observaciones: z.string().optional(),
 });
 
+/**
+ * Reparte `cash` entre (principal, iva) en proporción a sus saldos pendientes.
+ * Hoisted al top-level (antes vivía dentro del handler) porque la lógica del
+ * handler ahora corre dentro de un transaction callback y prefiero no
+ * recrear la función por request.
+ */
+function splitProporcional(cash: number, principalPendiente: number, ivaPendiente: number) {
+  const totalBucket = principalPendiente + ivaPendiente;
+  if (totalBucket <= 0.005 || cash <= 0) return { aPrincipal: 0, aIva: 0, used: 0 };
+  const aplica = Math.min(cash, totalBucket);
+  // Si no hay IVA pendiente, todo va a principal (evita división y deja saldo limpio).
+  if (ivaPendiente <= 0.005) return { aPrincipal: round2(aplica), aIva: 0, used: round2(aplica) };
+  if (principalPendiente <= 0.005) return { aPrincipal: 0, aIva: round2(aplica), used: round2(aplica) };
+  // Split proporcional
+  const aPrincipalRaw = aplica * (principalPendiente / totalBucket);
+  const aPrincipal = round2(aPrincipalRaw);
+  const aIva       = round2(aplica - aPrincipal); // residuo de redondeo cae en IVA
+  return { aPrincipal, aIva, used: round2(aPrincipal + aIva) };
+}
+
+/**
+ * Resultado del cálculo + creación de un pago dentro de la transacción
+ * serializable. Discriminated union para que el handler enrute la respuesta
+ * sin tener que usar throws como control de flujo.
+ */
+type PayTxResult =
+  | {
+      ok: true;
+      payment: Awaited<ReturnType<typeof prisma.payment.create>>;
+      entry: NonNullable<Awaited<ReturnType<typeof prisma.amortizationEntry.findFirst>>> & {
+        contract: {
+          tasaAnual: any;
+          tasaMoratoria: any;
+          folio: string;
+          userId: string;
+          client: { tipo: string; nombre: string | null; apellidoPaterno: string | null; razonSocial: string | null } | null;
+        };
+      };
+      prevPayments: Awaited<ReturnType<typeof prisma.payment.findMany>>;
+      tasaAnual: number;
+      now: Date;
+      aplicado: { moratorio: number; ivaMoratorio: number; renta: number; ivaRenta: number; total: number };
+      esParcial: boolean;
+      restante: number;
+    }
+  | { ok: false; status: number; error: string };
+
 router.post('/pay', requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.userId;
     const data = paySchema.parse(req.body);
 
-    // Obtener el periodo de amortización
-    const entry = await prisma.amortizationEntry.findFirst({
-      where: { contractId: data.contractId, periodo: data.periodo },
-      include: {
-        contract: {
-          select: {
-            tasaAnual: true,
-            tasaMoratoria: true,
-            folio: true,
-            userId: true,
-            client: { select: { tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true } },
+    // ──────────────────────────────────────────────────────────────────
+    // Sección crítica: lectura del estado + cálculo de distribución +
+    // creación del Payment se ejecutan en la MISMA transacción con
+    // isolation level Serializable. Esto cierra la race condition
+    // identificada en docs/cobranza_overview.md (§4 BUG #1):
+    //
+    //   ANTES (bug):
+    //     T1 lee prevPayments=[]   T2 lee prevPayments=[]
+    //     T1 calcula split sobre []     T2 idem
+    //     T1 INSERT Payment              T2 INSERT Payment   ← doble cobro
+    //
+    //   AHORA:
+    //     Postgres detecta read-write skew entre T1 y T2 y aborta a la
+    //     perdedora con 40001 (P2034). serializableTransaction reintenta
+    //     hasta 3× con backoff; el reintento ya ve el Payment de T1 y
+    //     calcula sobre el estado correcto.
+    //
+    // Las notificaciones (notificar/notificarPorRol) y el res.json
+    // viven FUERA del bloque. Llamadas a side-effects (email, SMTP)
+    // dentro de una TX que reintenta se duplicarían; siempre fuera.
+    // ──────────────────────────────────────────────────────────────────
+    const result: PayTxResult = await serializableTransaction(
+      async (tx) => {
+        // Advisory lock por (contractId, periodo): serializa accesos a este
+        // periodo específico. Sin esto, Postgres SSI no detecta conflicto
+        // cuando ambas TXs leen prevPayments=[] (set vacío → no hay
+        // predicate lock efectivo) y ambas insertan un Payment nuevo.
+        // Con el lock, la 2da TX ESPERA a que la 1ra commit-ee, lo que la
+        // hace ver el Payment recién creado y devolver "ya pagado".
+        // pg_advisory_xact_lock se libera automáticamente al fin de la TX.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${data.contractId})::int4, ${data.periodo}::int4)`;
+
+        // Obtener el periodo de amortización
+        const entry = await tx.amortizationEntry.findFirst({
+          where: { contractId: data.contractId, periodo: data.periodo },
+          include: {
+            contract: {
+              select: {
+                tasaAnual: true,
+                tasaMoratoria: true,
+                folio: true,
+                userId: true,
+                client: { select: { tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true } },
+              },
+            },
           },
-        },
+        });
+        if (!entry) {
+          return { ok: false, status: 404, error: 'Periodo no encontrado' } as const;
+        }
+
+        // Obtener pagos previos DENTRO de la TX para que el snapshot quede
+        // sujeto al control de Serializable (sin esto, dos TXs leerían los
+        // mismos prevPayments y la detección de conflicto no se dispararía).
+        const prevPayments = await tx.payment.findMany({
+          where: { contractId: data.contractId, periodo: data.periodo },
+        });
+
+        const now = new Date();
+        const tasaAnual = Number(entry.contract.tasaAnual);
+
+        const conceptos = calcConceptos(entry, tasaAnual, prevPayments, now);
+
+        if (conceptos.estatus === 'PAGADO') {
+          return { ok: false, status: 400, error: 'Este periodo ya está completamente pagado' } as const;
+        }
+
+        // Aplicar pago: prelación legal (moratorio → renta), pero DENTRO de
+        // cada bucket el efectivo se reparte PROPORCIONAL entre principal
+        // e IVA. Si el bucket no tiene IVA pendiente, todo va al principal.
+        let restante = data.monto;
+
+        // 1. Bucket MORATORIO
+        const splitMor = splitProporcional(
+          restante,
+          conceptos.desglose.moratorioPendiente,
+          conceptos.desglose.ivaMoratorioPendiente,
+        );
+        const aplicadoMoratorio    = splitMor.aPrincipal;
+        const aplicadoIVAMoratorio = splitMor.aIva;
+        restante = round2(restante - splitMor.used);
+
+        // 2. Bucket RENTA
+        const splitRenta = splitProporcional(
+          restante,
+          conceptos.desglose.rentaPendiente,
+          conceptos.desglose.ivaPendiente,
+        );
+        const aplicadoRenta    = splitRenta.aPrincipal;
+        const aplicadoIVARenta = splitRenta.aIva;
+        restante = round2(restante - splitRenta.used);
+
+        const montoTotal = aplicadoMoratorio + aplicadoIVAMoratorio + aplicadoRenta + aplicadoIVARenta;
+
+        if (montoTotal <= 0) {
+          return { ok: false, status: 400, error: 'El monto no alcanza para cubrir ningún concepto' } as const;
+        }
+
+        // Calcular días de atraso al momento del pago
+        const vencimiento = new Date(entry.fechaPago);
+        const diasAtraso = vencimiento < now
+          ? Math.floor((now.getTime() - vencimiento.getTime()) / (1000 * 60 * 60 * 24))
+          : 0;
+
+        // Determinar tipo de pago
+        const rentaTotalDespuesDePago = conceptos.desglose.rentaPendiente - aplicadoRenta;
+        const esParcial = rentaTotalDespuesDePago > 0.01;
+
+        const payment = await tx.payment.create({
+          data: {
+            contractId: data.contractId,
+            userId,
+            periodo: data.periodo,
+            tipo: esParcial ? 'RENTA_ORDINARIA' : 'RENTA_ORDINARIA',
+            fechaPago: data.fechaPago ? new Date(data.fechaPago) : now,
+            fechaVencimiento: vencimiento,
+            montoRenta: Math.round(aplicadoRenta * 100) / 100,
+            montoIVA: Math.round(aplicadoIVARenta * 100) / 100,
+            montoMoratorio: Math.round(aplicadoMoratorio * 100) / 100,
+            montoIVAMoratorio: Math.round(aplicadoIVAMoratorio * 100) / 100,
+            montoTotal: Math.round(montoTotal * 100) / 100,
+            diasAtraso,
+            referencia: data.referencia || null,
+            observaciones: data.observaciones || (esParcial ? 'Pago parcial' : restante > 0.01 ? `Sobrante: $${restante.toFixed(2)}` : null),
+          },
+        });
+
+        return {
+          ok: true as const,
+          payment,
+          entry,
+          prevPayments,
+          tasaAnual,
+          now,
+          aplicado: {
+            moratorio: aplicadoMoratorio,
+            ivaMoratorio: aplicadoIVAMoratorio,
+            renta: aplicadoRenta,
+            ivaRenta: aplicadoIVARenta,
+            total: montoTotal,
+          },
+          esParcial,
+          restante,
+        };
       },
-    });
-    if (!entry) return res.status(404).json({ error: 'Periodo no encontrado' });
-
-    // Obtener pagos previos del periodo
-    const prevPayments = await prisma.payment.findMany({
-      where: { contractId: data.contractId, periodo: data.periodo },
-    });
-
-    const now = new Date();
-    const tasaAnual = Number(entry.contract.tasaAnual);
-
-    // Calcular estado actual del periodo
-    const conceptos = calcConceptos(entry, tasaAnual, prevPayments, now);
-
-    if (conceptos.estatus === 'PAGADO') {
-      return res.status(400).json({ error: 'Este periodo ya está completamente pagado' });
-    }
-
-    // Aplicar pago: prelación legal (moratorio → renta), pero DENTRO de cada
-    // bucket el efectivo se reparte PROPORCIONAL entre principal e IVA
-    // (regla 86.21% / 13.79% — el IVA no se paga "antes", se causa con cada
-    //  peso de ingreso reconocido). Si el bucket no tiene IVA pendiente
-    //  (p. ej. ya se cubrió en pagos previos), todo va al principal.
-    let restante = data.monto;
-
-    /** Reparte `cash` entre (principal, iva) en proporción a sus saldos pendientes. */
-    function splitProporcional(cash: number, principalPendiente: number, ivaPendiente: number) {
-      const totalBucket = principalPendiente + ivaPendiente;
-      if (totalBucket <= 0.005 || cash <= 0) return { aPrincipal: 0, aIva: 0, used: 0 };
-      const aplica = Math.min(cash, totalBucket);
-      // Si no hay IVA pendiente, todo va a principal (evita división y deja saldo limpio).
-      if (ivaPendiente <= 0.005) return { aPrincipal: round2(aplica), aIva: 0, used: round2(aplica) };
-      if (principalPendiente <= 0.005) return { aPrincipal: 0, aIva: round2(aplica), used: round2(aplica) };
-      // Split proporcional
-      const aPrincipalRaw = aplica * (principalPendiente / totalBucket);
-      const aPrincipal = round2(aPrincipalRaw);
-      const aIva       = round2(aplica - aPrincipal); // residuo de redondeo cae en IVA
-      return { aPrincipal, aIva, used: round2(aPrincipal + aIva) };
-    }
-
-    // 1. Bucket MORATORIO (interés moratorio + su IVA, repartidos proporcional)
-    const splitMor = splitProporcional(
-      restante,
-      conceptos.desglose.moratorioPendiente,
-      conceptos.desglose.ivaMoratorioPendiente,
+      { route: '/api/cobranza/pay', reqId: req.id ? String(req.id) : undefined },
     );
-    const aplicadoMoratorio    = splitMor.aPrincipal;
-    const aplicadoIVAMoratorio = splitMor.aIva;
-    restante = round2(restante - splitMor.used);
 
-    // 2. Bucket RENTA (renta + IVA renta, repartidos proporcional)
-    const splitRenta = splitProporcional(
-      restante,
-      conceptos.desglose.rentaPendiente,
-      conceptos.desglose.ivaPendiente,
-    );
-    const aplicadoRenta    = splitRenta.aPrincipal;
-    const aplicadoIVARenta = splitRenta.aIva;
-    restante = round2(restante - splitRenta.used);
-
-    const montoTotal = aplicadoMoratorio + aplicadoIVAMoratorio + aplicadoRenta + aplicadoIVARenta;
-
-    if (montoTotal <= 0) {
-      return res.status(400).json({ error: 'El monto no alcanza para cubrir ningún concepto' });
+    if (!result.ok) {
+      return res.status(result.status).json({ error: result.error });
     }
 
-    // Calcular días de atraso al momento del pago
-    const vencimiento = new Date(entry.fechaPago);
-    const diasAtraso = vencimiento < now
-      ? Math.floor((now.getTime() - vencimiento.getTime()) / (1000 * 60 * 60 * 24))
-      : 0;
+    const { payment, entry, prevPayments, tasaAnual, now, aplicado, esParcial, restante } = result;
 
-    // Determinar tipo de pago
-    const rentaTotalDespuesDePago = conceptos.desglose.rentaPendiente - aplicadoRenta;
-    const esParcial = rentaTotalDespuesDePago > 0.01;
-
-    const payment = await prisma.payment.create({
-      data: {
-        contractId: data.contractId,
-        userId,
-        periodo: data.periodo,
-        tipo: esParcial ? 'RENTA_ORDINARIA' : 'RENTA_ORDINARIA',
-        fechaPago: data.fechaPago ? new Date(data.fechaPago) : now,
-        fechaVencimiento: vencimiento,
-        montoRenta: Math.round(aplicadoRenta * 100) / 100,
-        montoIVA: Math.round(aplicadoIVARenta * 100) / 100,
-        montoMoratorio: Math.round(aplicadoMoratorio * 100) / 100,
-        montoIVAMoratorio: Math.round(aplicadoIVAMoratorio * 100) / 100,
-        montoTotal: Math.round(montoTotal * 100) / 100,
-        diasAtraso,
-        referencia: data.referencia || null,
-        observaciones: data.observaciones || (esParcial ? 'Pago parcial' : restante > 0.01 ? `Sobrante: $${restante.toFixed(2)}` : null),
-      },
-    });
-
-    // Responder con el desglose actualizado
+    // Recalcular conceptos POST-INSERT para devolver el estado actualizado.
+    // Lo hacemos fuera de la TX (es solo lectura, no compite por concurrencia).
     const updatedPayments = [...prevPayments, payment];
     const updatedConceptos = calcConceptos(entry, tasaAnual, updatedPayments, now);
 
-    // Notificación: PAGO_REGISTRADO (siempre) + alerta a COBRANZA si es parcial
+    // Notificaciones — fire-and-forget, fuera de la TX para que un email lento
+    // no expanda el window de la TX y para no duplicarse en caso de retry.
     notificar({
       tipo: 'PAGO_REGISTRADO',
       titulo: `Pago periodo ${data.periodo} · ${entry.contract.folio}`,
-      mensaje: `${nombreCliente(entry.contract.client)} pagó ${fmt$(montoTotal)}${esParcial ? ' (parcial)' : ''}`,
+      mensaje: `${nombreCliente(entry.contract.client)} pagó ${fmt$(aplicado.total)}${esParcial ? ' (parcial)' : ''}`,
       entidad: 'Payment',
       entidadId: payment.id,
       url: `/cobranza/contrato/${data.contractId}`,
@@ -515,11 +610,11 @@ router.post('/pay', requireAuth, async (req: Request, res: Response) => {
     res.json({
       payment,
       aplicacion: {
-        moratorio: aplicadoMoratorio,
-        ivaMoratorio: aplicadoIVAMoratorio,
-        renta: aplicadoRenta,
-        ivaRenta: aplicadoIVARenta,
-        total: montoTotal,
+        moratorio: aplicado.moratorio,
+        ivaMoratorio: aplicado.ivaMoratorio,
+        renta: aplicado.renta,
+        ivaRenta: aplicado.ivaRenta,
+        total: aplicado.total,
         sobrante: Math.round(restante * 100) / 100,
       },
       estadoPeriodo: updatedConceptos,
