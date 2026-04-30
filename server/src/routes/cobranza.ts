@@ -884,164 +884,239 @@ const payExtraSchema = z.object({
   observaciones: z.string().optional(),
 });
 
+type PayExtraTxResult =
+  | {
+      ok: true;
+      payment: Awaited<ReturnType<typeof prisma.payment.create>>;
+      contract: {
+        folio: string;
+        userId: string;
+        producto: string;
+        client: { tipo: string; nombre: string | null; apellidoPaterno: string | null; razonSocial: string | null } | null;
+      };
+      recalculo: {
+        producto: string;
+        primerPeriodoAfectado: number;
+        periodosRestantes: number;
+        saldoAnterior: number;
+        saldoNuevo: number;
+        rentaAnterior: number;
+        rentaNueva: number;
+        ahorroPorPeriodo: number;
+      };
+    }
+  | { ok: false; status: number; error: string };
+
 router.post('/pay-extra', requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.userId;
     const data = payExtraSchema.parse(req.body);
 
-    const contract = await prisma.contract.findUnique({
-      where: { id: data.contractId },
-      include: {
-        amortizacion: { orderBy: { periodo: 'asc' } },
-        pagos: { orderBy: [{ periodo: 'asc' }, { createdAt: 'asc' }] },
-        client: { select: { tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true } },
+    // Sección crítica: lectura del contrato + amortización + pagos +
+    // cálculo de nueva renta + escritura (delete+createMany+payment.create+
+    // contract.update) DEBEN correr en la misma transacción Serializable.
+    //
+    // Bug ANTES (cobranza-guardian audit, abril 2026):
+    //   El handler leía contract.amortizacion + contract.pagos FUERA de la
+    //   TX, calculaba `nuevasFilas`, y SOLO entonces abría la TX para
+    //   escribir. Dos pay-extra concurrentes sobre el mismo contrato
+    //   leían el MISMO saldoActual, calculaban filas distintas (cada uno
+    //   contando solo SU abono), y al hacer deleteMany+createMany se
+    //   pisaban: la 2da TX borraba lo que la 1ra acabó de escribir. La
+    //   tabla de amortización quedaba con sólo el efecto de uno de los
+    //   abonos, el otro se perdía silenciosamente — pero el Payment SÍ
+    //   se registraba para ambos, dejando contabilidad inconsistente.
+    //
+    // Fix:
+    //   • serializableTransaction (mismo helper que /pay y /pay-advance).
+    //   • Advisory lock contractId-only (segundo arg = 0): coordina pay/
+    //     pay-advance/pay-extra entre sí sobre el mismo contrato.
+    //   • TODAS las lecturas (contract, amortizacion, pagos) dentro de la TX.
+    //   • Notificación notificar('ABONO_CAPITAL') FUERA (no se duplica en retry).
+    const result: PayExtraTxResult = await serializableTransaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${data.contractId})::int4, 0::int4)`;
+
+        const contract = await tx.contract.findUnique({
+          where: { id: data.contractId },
+          include: {
+            amortizacion: { orderBy: { periodo: 'asc' } },
+            pagos: { orderBy: [{ periodo: 'asc' }, { createdAt: 'asc' }] },
+            client: { select: { tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true } },
+          },
+        });
+        if (!contract) return { ok: false, status: 404, error: 'Contrato no encontrado' } as const;
+        if (contract.amortizacion.length === 0) {
+          return { ok: false, status: 400, error: 'El contrato no tiene tabla de amortización' } as const;
+        }
+
+        const now = new Date();
+        const tasaAnualNum = Number(contract.tasaAnual);
+        const tasaMensual = tasaAnualNum / 12;
+
+        const paymentsByPeriodo = new Map<number, typeof contract.pagos>();
+        contract.pagos.forEach((p) => {
+          if (p.periodo === null) return;
+          if (!paymentsByPeriodo.has(p.periodo)) paymentsByPeriodo.set(p.periodo, []);
+          paymentsByPeriodo.get(p.periodo)!.push(p);
+        });
+
+        let primerPeriodoAbono: number | null = null;
+        for (const entry of contract.amortizacion) {
+          const periodPayments = paymentsByPeriodo.get(entry.periodo) || [];
+          const conceptos = calcConceptos(entry, tasaAnualNum, periodPayments, now);
+          if (conceptos.estatus !== 'PAGADO') {
+            primerPeriodoAbono = entry.periodo;
+            break;
+          }
+        }
+        if (primerPeriodoAbono === null) {
+          return {
+            ok: false,
+            status: 400,
+            error: 'Todos los periodos están pagados; no hay saldo al cual aplicar el abono',
+          } as const;
+        }
+
+        const periodosFuturos = contract.amortizacion.filter((e) => e.periodo >= primerPeriodoAbono!);
+        const primerEntry = periodosFuturos[0];
+        const saldoActual = Number(primerEntry.saldoInicial);
+
+        if (data.monto >= saldoActual + 0.01) {
+          return {
+            ok: false,
+            status: 400,
+            error: `El abono ($${data.monto.toFixed(2)}) excede el saldo insoluto ($${saldoActual.toFixed(2)}). Si quieres liquidar, usa la opción de Liquidación Anticipada.`,
+          } as const;
+        }
+
+        const isPuro = contract.producto === 'PURO';
+        const periodosRestantes = periodosFuturos.length;
+        const saldoNuevo = round2(saldoActual - data.monto);
+
+        let nuevaRenta: number;
+        if (isPuro) {
+          const rentaActual = Number(primerEntry.renta);
+          nuevaRenta = round2(rentaActual - data.monto / periodosRestantes);
+          if (nuevaRenta < 0) {
+            return { ok: false, status: 400, error: 'El abono prorrateado deja la renta en negativo. Reduce el monto.' } as const;
+          }
+        } else {
+          if (tasaMensual === 0) {
+            nuevaRenta = round2(saldoNuevo / periodosRestantes);
+          } else {
+            const factor = Math.pow(1 + tasaMensual, periodosRestantes);
+            nuevaRenta = round2((saldoNuevo * tasaMensual * factor) / (factor - 1));
+          }
+        }
+
+        const seguroOriginal = Number(primerEntry.seguro || 0);
+        const nuevasFilas: Array<{
+          periodo: number;
+          fechaPago: Date;
+          saldoInicial: number;
+          intereses: number;
+          pagoCapital: number;
+          renta: number;
+          iva: number;
+          seguro: number;
+          pagoTotal: number;
+          saldoFinal: number;
+        }> = [];
+        let saldo = saldoNuevo;
+        for (let i = 0; i < periodosFuturos.length; i++) {
+          const orig = periodosFuturos[i];
+          const intereses = round2(saldo * tasaMensual);
+          const pagoCapital = isPuro ? 0 : round2(nuevaRenta - intereses);
+          const ivaRow = round2(nuevaRenta * IVA);
+          const saldoFinalRow = isPuro ? saldo : Math.max(0, round2(saldo - pagoCapital));
+          nuevasFilas.push({
+            periodo: orig.periodo,
+            fechaPago: orig.fechaPago,
+            saldoInicial: round2(saldo),
+            intereses,
+            pagoCapital,
+            renta: nuevaRenta,
+            iva: ivaRow,
+            seguro: round2(seguroOriginal),
+            pagoTotal: round2(nuevaRenta + ivaRow + seguroOriginal),
+            saldoFinal: saldoFinalRow,
+          });
+          saldo = saldoFinalRow;
+        }
+
+        // Escrituras (todas dentro de la misma TX serializable):
+        await tx.amortizationEntry.deleteMany({
+          where: { contractId: data.contractId, periodo: { gte: primerPeriodoAbono! } },
+        });
+        await tx.amortizationEntry.createMany({
+          data: nuevasFilas.map((f) => ({ ...f, contractId: data.contractId })),
+        });
+
+        const payment = await tx.payment.create({
+          data: {
+            contractId: data.contractId,
+            userId,
+            periodo: primerPeriodoAbono,
+            tipo: 'ABONO_CAPITAL',
+            fechaPago: data.fechaPago ? new Date(data.fechaPago) : now,
+            fechaVencimiento: primerEntry.fechaPago,
+            montoRenta: 0,
+            montoIVA: 0,
+            montoMoratorio: 0,
+            montoIVAMoratorio: 0,
+            montoCapitalExtra: round2(data.monto),
+            montoTotal: round2(data.monto),
+            diasAtraso: 0,
+            referencia: data.referencia || null,
+            observaciones:
+              data.observaciones ||
+              `Abono a capital · ${isPuro ? 'PURO prorrateado' : 'FINANCIERO PMT recalculado'}`,
+          },
+        });
+
+        await tx.contract.update({
+          where: { id: data.contractId },
+          data: {
+            rentaMensual: nuevaRenta,
+            rentaMensualIVA: round2(nuevaRenta * (1 + IVA)),
+          },
+        });
+
+        return {
+          ok: true as const,
+          payment,
+          contract: {
+            folio: contract.folio,
+            userId: contract.userId,
+            producto: contract.producto,
+            client: contract.client,
+          },
+          recalculo: {
+            producto: contract.producto,
+            primerPeriodoAfectado: primerPeriodoAbono,
+            periodosRestantes,
+            saldoAnterior: round2(saldoActual),
+            saldoNuevo,
+            rentaAnterior: Number(primerEntry.renta),
+            rentaNueva: nuevaRenta,
+            ahorroPorPeriodo: round2(Number(primerEntry.renta) - nuevaRenta),
+          },
+        };
       },
-    });
-    if (!contract) return res.status(404).json({ error: 'Contrato no encontrado' });
-    if (contract.amortizacion.length === 0) {
-      return res.status(400).json({ error: 'El contrato no tiene tabla de amortización' });
+      { route: '/api/cobranza/pay-extra', reqId: req.id ? String(req.id) : undefined },
+    );
+
+    if (!result.ok) {
+      return res.status(result.status).json({ error: result.error });
     }
 
-    const now = new Date();
-    const tasaAnualNum = Number(contract.tasaAnual);
-    const tasaMensual = tasaAnualNum / 12;
-
-    // Identificar primer periodo NO completamente pagado
-    const paymentsByPeriodo = new Map<number, typeof contract.pagos>();
-    contract.pagos.forEach(p => {
-      if (p.periodo === null) return;
-      if (!paymentsByPeriodo.has(p.periodo)) paymentsByPeriodo.set(p.periodo, []);
-      paymentsByPeriodo.get(p.periodo)!.push(p);
-    });
-
-    // Primer periodo cuya renta no esté cubierta — ahí aplica el abono
-    let primerPeriodoAbono: number | null = null;
-    for (const entry of contract.amortizacion) {
-      const periodPayments = paymentsByPeriodo.get(entry.periodo) || [];
-      const conceptos = calcConceptos(entry, tasaAnualNum, periodPayments, now);
-      if (conceptos.estatus !== 'PAGADO') {
-        primerPeriodoAbono = entry.periodo;
-        break;
-      }
-    }
-    if (primerPeriodoAbono === null) {
-      return res.status(400).json({ error: 'Todos los periodos están pagados; no hay saldo al cual aplicar el abono' });
-    }
-
-    const periodosFuturos = contract.amortizacion.filter(e => e.periodo >= primerPeriodoAbono!);
-    const primerEntry = periodosFuturos[0];
-    const saldoActual = Number(primerEntry.saldoInicial);
-
-    if (data.monto >= saldoActual + 0.01) {
-      return res.status(400).json({
-        error: `El abono ($${data.monto.toFixed(2)}) excede el saldo insoluto ($${saldoActual.toFixed(2)}). Si quieres liquidar, usa la opción de Liquidación Anticipada.`,
-      });
-    }
-
-    const isPuro = contract.producto === 'PURO';
-    const periodosRestantes = periodosFuturos.length;
-    const saldoNuevo = round2(saldoActual - data.monto);
-
-    // Calcular nueva renta
-    let nuevaRenta: number;
-    if (isPuro) {
-      // Prorrateo: reducir cada renta futura por (abono / periodos_restantes)
-      const rentaActual = Number(primerEntry.renta);
-      nuevaRenta = round2(rentaActual - data.monto / periodosRestantes);
-      if (nuevaRenta < 0) {
-        return res.status(400).json({ error: 'El abono prorrateado deja la renta en negativo. Reduce el monto.' });
-      }
-    } else {
-      // FINANCIERO: PMT con saldo nuevo y plazo restante
-      if (tasaMensual === 0) {
-        nuevaRenta = round2(saldoNuevo / periodosRestantes);
-      } else {
-        const factor = Math.pow(1 + tasaMensual, periodosRestantes);
-        nuevaRenta = round2((saldoNuevo * tasaMensual * factor) / (factor - 1));
-      }
-    }
-
-    // Generar nuevas filas de amortización (mantener fechas originales)
-    const seguroOriginal = Number(primerEntry.seguro || 0);
-    const nuevasFilas: Array<{
-      periodo: number;
-      fechaPago: Date;
-      saldoInicial: number;
-      intereses: number;
-      pagoCapital: number;
-      renta: number;
-      iva: number;
-      seguro: number;
-      pagoTotal: number;
-      saldoFinal: number;
-    }> = [];
-    let saldo = saldoNuevo;
-    for (let i = 0; i < periodosFuturos.length; i++) {
-      const orig = periodosFuturos[i];
-      const intereses = round2(saldo * tasaMensual);
-      const pagoCapital = isPuro ? 0 : round2(nuevaRenta - intereses);
-      const ivaRow = round2(nuevaRenta * IVA);
-      const saldoFinalRow = isPuro ? saldo : Math.max(0, round2(saldo - pagoCapital));
-      nuevasFilas.push({
-        periodo: orig.periodo,
-        fechaPago: orig.fechaPago,
-        saldoInicial: round2(saldo),
-        intereses,
-        pagoCapital,
-        renta: nuevaRenta,
-        iva: ivaRow,
-        seguro: round2(seguroOriginal),
-        pagoTotal: round2(nuevaRenta + ivaRow + seguroOriginal),
-        saldoFinal: saldoFinalRow,
-      });
-      saldo = saldoFinalRow;
-    }
-
-    // Transacción: borrar filas futuras, recrearlas, registrar Payment, actualizar contrato
-    const result = await prisma.$transaction(async (tx) => {
-      await tx.amortizationEntry.deleteMany({
-        where: { contractId: data.contractId, periodo: { gte: primerPeriodoAbono! } },
-      });
-      await tx.amortizationEntry.createMany({
-        data: nuevasFilas.map(f => ({ ...f, contractId: data.contractId })),
-      });
-
-      const payment = await tx.payment.create({
-        data: {
-          contractId: data.contractId,
-          userId,
-          periodo: primerPeriodoAbono,
-          tipo: 'ABONO_CAPITAL',
-          fechaPago: data.fechaPago ? new Date(data.fechaPago) : now,
-          fechaVencimiento: primerEntry.fechaPago,
-          montoRenta: 0,
-          montoIVA: 0,
-          montoMoratorio: 0,
-          montoIVAMoratorio: 0,
-          montoCapitalExtra: round2(data.monto),
-          montoTotal: round2(data.monto),
-          diasAtraso: 0,
-          referencia: data.referencia || null,
-          observaciones: data.observaciones || `Abono a capital · ${isPuro ? 'PURO prorrateado' : 'FINANCIERO PMT recalculado'}`,
-        },
-      });
-
-      // Actualizar la renta del contrato (siguiente cobro reflejará la nueva renta)
-      await tx.contract.update({
-        where: { id: data.contractId },
-        data: {
-          rentaMensual: nuevaRenta,
-          rentaMensualIVA: round2(nuevaRenta * (1 + IVA)),
-        },
-      });
-
-      return payment;
-    });
+    const { payment, contract, recalculo } = result;
 
     notificar({
       tipo: 'ABONO_CAPITAL',
       titulo: `Abono a capital ${contract.folio} (${fmt$(data.monto)})`,
-      mensaje: `${nombreCliente(contract.client)} — nueva renta ${fmt$(nuevaRenta)} (ahorro ${fmt$(Number(primerEntry.renta) - nuevaRenta)}/periodo)`,
+      mensaje: `${nombreCliente(contract.client)} — nueva renta ${fmt$(recalculo.rentaNueva)} (ahorro ${fmt$(recalculo.ahorroPorPeriodo)}/periodo)`,
       entidad: 'Contract',
       entidadId: data.contractId,
       url: `/cobranza/contrato/${data.contractId}`,
@@ -1049,17 +1124,8 @@ router.post('/pay-extra', requireAuth, async (req: Request, res: Response) => {
     });
 
     res.json({
-      payment: result,
-      recalculo: {
-        producto: contract.producto,
-        primerPeriodoAfectado: primerPeriodoAbono,
-        periodosRestantes,
-        saldoAnterior: round2(saldoActual),
-        saldoNuevo,
-        rentaAnterior: Number(primerEntry.renta),
-        rentaNueva: nuevaRenta,
-        ahorroPorPeriodo: round2(Number(primerEntry.renta) - nuevaRenta),
-      },
+      payment,
+      recalculo,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
