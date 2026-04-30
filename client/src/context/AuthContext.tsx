@@ -9,12 +9,20 @@ interface User {
   nombre: string;
   apellidos: string;
   rol: string;
+  mfaEnabled?: boolean;
+  mustChangePassword?: boolean;
+}
+
+interface LoginResult {
+  ok: boolean;
+  mfaRequired?: boolean;
 }
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, mfaToken?: string) => Promise<LoginResult>;
+  refreshUser: () => Promise<void>;
   logout: () => void;
 }
 
@@ -42,14 +50,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const login = async (email: string, password: string) => {
-    const res = await api.post('/auth/login', { email, password });
+  const login = async (email: string, password: string, mfaToken?: string): Promise<LoginResult> => {
+    const body: { email: string; password: string; mfaToken?: string } = { email, password };
+    if (mfaToken) body.mfaToken = mfaToken;
+    const res = await api.post('/auth/login', body);
+
+    // El backend (S5) responde 200 con { mfaRequired: true } cuando el
+    // user tiene MFA habilitado y el request no incluyó token TOTP.
+    // En ese caso NO guardamos token ni hidratamos sesión — devolvemos
+    // la señal a Login.tsx para que pida el código TOTP y reintente.
+    if (res.data.mfaRequired) {
+      return { ok: false, mfaRequired: true };
+    }
+
     localStorage.setItem('token', res.data.token);
     setUser(res.data.user);
     // Hidrata el catálogo apenas se autentica. Antes lo hacía App.tsx
     // al boot, pero sin token la fetch da 401 y el cache se queda en
     // defaults — refrescamos aquí para tener los valores de BD.
     void loadCatalog();
+    return { ok: true };
+  };
+
+  const refreshUser = async () => {
+    const res = await api.get('/auth/me');
+    setUser(res.data);
   };
 
   const logout = () => {
@@ -58,7 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, refreshUser, logout }}>
       {children}
     </AuthContext.Provider>
   );

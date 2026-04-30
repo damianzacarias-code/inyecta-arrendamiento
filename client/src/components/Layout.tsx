@@ -373,7 +373,20 @@ export default function Layout() {
           >
             <Menu size={18} />
           </button>
-          <span>{user?.nombre} {user?.apellidos} <span style={{ opacity: 0.6 }}>· {user?.rol}</span></span>
+          <Link
+            to="/perfil"
+            style={{
+              color: TEXT_MUTED,
+              textDecoration: 'none',
+              fontSize: 12,
+              transition: 'color 0.15s',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = ACCENT_ORANGE)}
+            onMouseLeave={(e) => (e.currentTarget.style.color = TEXT_MUTED)}
+            title="Mi perfil"
+          >
+            {user?.nombre} {user?.apellidos} <span style={{ opacity: 0.6 }}>· {user?.rol}</span>
+          </Link>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <NotificationBell />
             <button
