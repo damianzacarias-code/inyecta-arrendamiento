@@ -28,24 +28,141 @@ function fmt$(n: number | string | { toString(): string }): string {
 // ─── Helpers ────────────────────────────────────────────────
 
 /**
- * Calcula moratorio del periodo en mora (CLAUDE.md §4.9).
+ * Calcula moratorio del periodo en mora — fórmula PURA, sin tramos
+ * (CLAUDE.md §4.9). Base: renta pendiente SIN IVA al momento del cálculo,
+ * tasa 2× la ordinaria, lineal en días. Útil cuando NO hay pagos parciales
+ * que cambien la base; con pagos parciales usar `calcMoratorioPorTramos`.
  *
- * Base: **renta pendiente SIN IVA** del periodo en mora (NO saldo
- * insoluto general). Tasa: 2× la tasa ordinaria del contrato.
- *
- *   tasaMoratoriaAnual  = tasaAnual × 2
- *   tasaMoratoriaDiaria = tasaMoratoriaAnual / 360
- *   moratorio           = rentaPendienteSinIVA × tasaMoratoriaDiaria × diasAtraso
+ * Mantenida exportada por compatibilidad con otros módulos (reports,
+ * conciliation) que sólo necesitan una estimación rápida.
  */
-function calcMoratorio(rentaPendienteSinIVA: number, tasaAnual: number, diasAtraso: number) {
+export function calcMoratorio(rentaPendienteSinIVA: number, tasaAnual: number, diasAtraso: number) {
   if (diasAtraso <= 0) return 0;
   const tasaMoratoria = Number(tasaAnual) * 2;
   const tasaDiaria = tasaMoratoria / 360;
   return Math.round(rentaPendienteSinIVA * tasaDiaria * diasAtraso * 100) / 100;
 }
 
-/** Calcula el desglose de conceptos para un periodo considerando pagos parciales */
-function calcConceptos(
+/**
+ * Tipo mínimo de un Payment relevante para el cálculo de tramos. Se acepta
+ * cualquier shape (Prisma Payment, mock de test, etc.) siempre que tenga
+ * los 3 campos.
+ */
+interface PaymentForTranches {
+  fechaPago: Date;
+  montoRenta: any;       // Decimal | number — sólo se usa Number(p.montoRenta)
+  montoMoratorio: any;
+  montoIVAMoratorio?: any;
+  montoIVA?: any;
+  montoTotal?: any;
+  referencia?: string | null;
+  id?: string;
+  diasAtraso?: number;
+}
+
+/**
+ * Calcula el moratorio acumulado del periodo MATEMÁTICAMENTE PURO,
+ * dividiendo el tiempo en TRAMOS según los pagos parciales que afectan
+ * la base (CLAUDE.md / docs/LOGICA_COBRANZA.md §D2).
+ *
+ * Algoritmo:
+ *   - Pagos PRE-vencimiento: reducen la base inicial (no generan mor —
+ *     no hubo atraso aún).
+ *   - Pagos POST-vencimiento: cada uno cierra un tramo "[t_anterior →
+ *     fechaPago) × baseEnTramo" y abre uno nuevo con la base reducida.
+ *   - Tramo final: "[último_t → fechaCorte) × baseFinal".
+ *
+ * Sólo los pagos cuyo `montoRenta > 0` reducen la base — un pago que
+ * cubre sólo moratorio NO cambia la base, así que el tramo "siguiente"
+ * tiene la misma base.
+ *
+ * Devuelve el moratorio TOTAL GENERADO en el periodo (no el pendiente).
+ * Para obtener el pendiente, restar `sum(payments.montoMoratorio)` ya
+ * pagado.
+ */
+export function calcMoratorioPorTramos(
+  rentaOriginalSinIVA: number,
+  tasaAnual: number,
+  vencimiento: Date,
+  fechaCorte: Date,
+  payments: PaymentForTranches[],
+): number {
+  if (fechaCorte <= vencimiento) return 0;
+
+  const tasaDiaria = (Number(tasaAnual) * 2) / 360;
+
+  // Sort defensivo: el caller ya ordena por (periodo, createdAt) pero la
+  // semántica que importa aquí es fechaPago — re-ordenamos para no
+  // depender del ordering externo.
+  const sorted = [...payments].sort((a, b) => {
+    const ta = new Date(a.fechaPago).getTime();
+    const tb = new Date(b.fechaPago).getTime();
+    return ta - tb;
+  });
+
+  // Reducir base por pagos pre-vencimiento (sin generar moratorio).
+  let runningRenta = Number(rentaOriginalSinIVA);
+  const postVencimiento: PaymentForTranches[] = [];
+  for (const p of sorted) {
+    const fp = new Date(p.fechaPago);
+    if (fp < vencimiento) {
+      runningRenta -= Number(p.montoRenta);
+    } else {
+      postVencimiento.push(p);
+    }
+  }
+  if (runningRenta <= 0) return 0;
+
+  // Walk de tramos.
+  let mor = 0;
+  let tStart = vencimiento.getTime();
+  const tCorte = fechaCorte.getTime();
+
+  for (const p of postVencimiento) {
+    const tPago = new Date(p.fechaPago).getTime();
+    if (tPago > tCorte) break; // pagos en el futuro respecto a fechaCorte: no afectan
+    if (tPago > tStart) {
+      const days = Math.floor((tPago - tStart) / (1000 * 60 * 60 * 24));
+      if (days > 0 && runningRenta > 0) {
+        mor += runningRenta * tasaDiaria * days;
+      }
+    }
+    // tStart SIEMPRE avanza al timestamp del pago — incluso para pagos
+    // que sólo cubrieron moratorio (montoRenta=0). Si no avanzáramos,
+    // el tramo previo se contaría doble en el "tramo final" siguiente.
+    // La base sólo se reduce cuando el pago toca renta: los pagos
+    // solo-mor dejan la base intacta y el tramo siguiente continúa con
+    // la misma base (correcto por D2: si el cliente sólo cubrió mor,
+    // la mora diaria sigue corriendo igual).
+    const montoRenta = Number(p.montoRenta);
+    if (montoRenta > 0) {
+      runningRenta = Math.max(0, runningRenta - montoRenta);
+    }
+    tStart = tPago;
+  }
+
+  // Tramo final: del último breakpoint a fechaCorte.
+  if (tCorte > tStart && runningRenta > 0) {
+    const days = Math.floor((tCorte - tStart) / (1000 * 60 * 60 * 24));
+    if (days > 0) {
+      mor += runningRenta * tasaDiaria * days;
+    }
+  }
+
+  return Math.round(mor * 100) / 100;
+}
+
+/**
+ * Calcula el desglose de conceptos para un periodo considerando pagos
+ * parciales. El moratorio generado se computa POR TRAMOS (decisión D2 en
+ * docs/LOGICA_COBRANZA.md): cuando un pago parcial reduce la renta
+ * pendiente, el tramo siguiente usa la NUEVA base, no la actual con todos
+ * los días.
+ *
+ * Exportado para que tests unitarios validen al centavo cada caso
+ * (sin pagos / pago completo / parcial mixto / dos parciales).
+ */
+export function calcConceptos(
   entry: {
     periodo: number;
     fechaPago: Date;
@@ -97,10 +214,24 @@ function calcConceptos(
     ? Math.floor((fechaCorte.getTime() - vencimiento.getTime()) / (1000 * 60 * 60 * 24))
     : 0;
 
-  // Moratorio sobre la renta pendiente SIN IVA del periodo en mora
-  // (CLAUDE.md §4.9). Base = `rentaPendiente`, NO `rentaTotalPendiente`.
+  // Moratorio TOTAL GENERADO del periodo, computado por TRAMOS de tiempo
+  // (decisión operativa D2 — docs/LOGICA_COBRANZA.md). Cada vez que un
+  // pago parcial reduce la base, el tramo siguiente usa la NUEVA base —
+  // matemáticamente igual al cálculo manual que un auditor o el jefe
+  // operativo haría línea por línea.
+  //
+  // Patrón viejo (calcMoratorio simple): mor = rentaPendiente_actual ×
+  // tasaDiaria × diasAtraso_total. Subcobraba ~$3-50 cuando un pago
+  // parcial tocaba ambos buckets. Reemplazado por calcMoratorioPorTramos
+  // que cierra el residuo correctamente.
   const moratorioGenerado = isOverdue
-    ? calcMoratorio(rentaPendiente, tasaAnual, diasAtraso)
+    ? calcMoratorioPorTramos(
+        Number(entry.renta),
+        tasaAnual,
+        new Date(entry.fechaPago),
+        fechaCorte,
+        payments,
+      )
     : 0;
   const ivaMoratorioGenerado = Math.round(moratorioGenerado * IVA * 100) / 100;
 
