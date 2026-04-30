@@ -638,88 +638,132 @@ const payAdvanceSchema = z.object({
   observaciones: z.string().optional(),
 });
 
+/**
+ * Resultado de la TX de pay-advance: o lista de pagos creados, o un error
+ * de negocio reportable al cliente. Igual que en /pay, evita usar throws
+ * como control de flujo.
+ */
+/** Subset del Contract que devolvemos desde la TX (con el select de abajo). */
+type ContractForAdvance = {
+  tasaAnual: any;
+  folio: string;
+  userId: string;
+  client: { tipo: string; nombre: string | null; apellidoPaterno: string | null; razonSocial: string | null } | null;
+};
+
+type PayAdvanceTxResult =
+  | {
+      ok: true;
+      contract: ContractForAdvance;
+      results: Array<{ periodo: number; payment: Awaited<ReturnType<typeof prisma.payment.create>> }>;
+    }
+  | { ok: false; status: number; error: string };
+
 router.post('/pay-advance', requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.userId;
     const data = payAdvanceSchema.parse(req.body);
 
-    // Obtener los periodos
-    const entries = await prisma.amortizationEntry.findMany({
-      where: { contractId: data.contractId, periodo: { in: data.periodos } },
-      orderBy: { periodo: 'asc' },
-    });
+    // Sección crítica: lectura del estado actual de cada periodo + creación
+    // de Payments en la MISMA transacción Serializable. Sin esto, dos
+    // requests de pay-advance concurrentes para los mismos periodos del
+    // mismo contrato podrían crear pagos duplicados (mismo bug que /pay,
+    // multiplicado por N periodos).
+    //
+    // El advisory lock se toma sobre el contractId (sin periodo, segundo
+    // arg = 0): pay-advance toca múltiples periodos del MISMO contrato y
+    // queremos serializarlos como un solo bloque para que no choque
+    // tampoco con un /pay simultáneo del mismo contrato.
+    const result: PayAdvanceTxResult = await serializableTransaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${data.contractId})::int4, 0::int4)`;
 
-    if (entries.length !== data.periodos.length) {
-      return res.status(400).json({ error: 'Algunos periodos no existen' });
-    }
+        const entries = await tx.amortizationEntry.findMany({
+          where: { contractId: data.contractId, periodo: { in: data.periodos } },
+          orderBy: { periodo: 'asc' },
+        });
 
-    // Verificar que no estén ya pagados
-    const existingPayments = await prisma.payment.findMany({
-      where: { contractId: data.contractId, periodo: { in: data.periodos } },
-    });
+        if (entries.length !== data.periodos.length) {
+          return { ok: false, status: 400, error: 'Algunos periodos no existen' } as const;
+        }
 
-    // Agrupar pagos por periodo
-    const paymentsByPeriodo = new Map<number, typeof existingPayments>();
-    existingPayments.forEach(p => {
-      if (p.periodo === null) return;
-      if (!paymentsByPeriodo.has(p.periodo)) paymentsByPeriodo.set(p.periodo, []);
-      paymentsByPeriodo.get(p.periodo)!.push(p);
-    });
+        // Pagos previos DENTRO de la TX (snapshot consistente bajo Serializable).
+        const existingPayments = await tx.payment.findMany({
+          where: { contractId: data.contractId, periodo: { in: data.periodos } },
+        });
 
-    const contract = await prisma.contract.findUnique({
-      where: { id: data.contractId },
-      select: {
-        tasaAnual: true,
-        folio: true,
-        userId: true,
-        client: { select: { tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true } },
+        const paymentsByPeriodo = new Map<number, typeof existingPayments>();
+        existingPayments.forEach((p) => {
+          if (p.periodo === null) return;
+          if (!paymentsByPeriodo.has(p.periodo)) paymentsByPeriodo.set(p.periodo, []);
+          paymentsByPeriodo.get(p.periodo)!.push(p);
+        });
+
+        const contract = await tx.contract.findUnique({
+          where: { id: data.contractId },
+          select: {
+            tasaAnual: true,
+            folio: true,
+            userId: true,
+            client: { select: { tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true } },
+          },
+        });
+        if (!contract) return { ok: false, status: 404, error: 'Contrato no encontrado' } as const;
+
+        const now = new Date();
+        const tasaAnual = Number(contract.tasaAnual);
+
+        const results: Array<{ periodo: number; payment: Awaited<ReturnType<typeof tx.payment.create>> }> = [];
+        for (const entry of entries) {
+          const periodPayments = paymentsByPeriodo.get(entry.periodo) || [];
+          const conceptos = calcConceptos(entry, tasaAnual, periodPayments, now);
+
+          if (conceptos.estatus === 'PAGADO') continue;
+
+          const montoRenta = conceptos.desglose.rentaPendiente;
+          const montoIVA = conceptos.desglose.ivaPendiente;
+          const montoMoratorio = conceptos.desglose.moratorioPendiente;
+          const montoIVAMoratorio = conceptos.desglose.ivaMoratorioPendiente;
+          const montoTotal = conceptos.desglose.totalAdeudado;
+
+          const payment = await tx.payment.create({
+            data: {
+              contractId: data.contractId,
+              userId,
+              periodo: entry.periodo,
+              tipo: 'RENTA_ADELANTADA',
+              fechaPago: data.fechaPago ? new Date(data.fechaPago) : now,
+              fechaVencimiento: entry.fechaPago,
+              montoRenta: Math.round(montoRenta * 100) / 100,
+              montoIVA: Math.round(montoIVA * 100) / 100,
+              montoMoratorio: Math.round(montoMoratorio * 100) / 100,
+              montoIVAMoratorio: Math.round(montoIVAMoratorio * 100) / 100,
+              montoTotal: Math.round(montoTotal * 100) / 100,
+              diasAtraso: conceptos.diasAtraso,
+              referencia: data.referencia || null,
+              observaciones: data.observaciones || 'Pago adelantado',
+            },
+          });
+
+          results.push({ periodo: entry.periodo, payment });
+        }
+
+        return { ok: true as const, contract, results };
       },
-    });
-    if (!contract) return res.status(404).json({ error: 'Contrato no encontrado' });
+      { route: '/api/cobranza/pay-advance', reqId: req.id ? String(req.id) : undefined },
+    );
 
-    const now = new Date();
-    const tasaAnual = Number(contract.tasaAnual);
-
-    const results = [];
-    for (const entry of entries) {
-      const periodPayments = paymentsByPeriodo.get(entry.periodo) || [];
-      const conceptos = calcConceptos(entry, tasaAnual, periodPayments, now);
-
-      if (conceptos.estatus === 'PAGADO') continue;
-
-      // Pago adelantado cubre el total adeudado
-      const montoRenta = conceptos.desglose.rentaPendiente;
-      const montoIVA = conceptos.desglose.ivaPendiente;
-      const montoMoratorio = conceptos.desglose.moratorioPendiente;
-      const montoIVAMoratorio = conceptos.desglose.ivaMoratorioPendiente;
-      const montoTotal = conceptos.desglose.totalAdeudado;
-
-      const payment = await prisma.payment.create({
-        data: {
-          contractId: data.contractId,
-          userId,
-          periodo: entry.periodo,
-          tipo: 'RENTA_ADELANTADA',
-          fechaPago: data.fechaPago ? new Date(data.fechaPago) : now,
-          fechaVencimiento: entry.fechaPago,
-          montoRenta: Math.round(montoRenta * 100) / 100,
-          montoIVA: Math.round(montoIVA * 100) / 100,
-          montoMoratorio: Math.round(montoMoratorio * 100) / 100,
-          montoIVAMoratorio: Math.round(montoIVAMoratorio * 100) / 100,
-          montoTotal: Math.round(montoTotal * 100) / 100,
-          diasAtraso: conceptos.diasAtraso,
-          referencia: data.referencia || null,
-          observaciones: data.observaciones || 'Pago adelantado',
-        },
-      });
-
-      results.push({ periodo: entry.periodo, payment });
+    if (!result.ok) {
+      return res.status(result.status).json({ error: result.error });
     }
 
-    const totalPagado = Math.round(results.reduce((s, r) => s + Number(r.payment.montoTotal), 0) * 100) / 100;
+    const { contract, results } = result;
+    const totalPagado =
+      Math.round(results.reduce((s, r) => s + Number(r.payment.montoTotal), 0) * 100) / 100;
 
+    // Notificación FUERA de la TX para no duplicarse en retries.
     if (results.length > 0) {
-      const periodos = results.map(r => r.periodo).join(', ');
+      const periodos = results.map((r) => r.periodo).join(', ');
       notificar({
         tipo: 'PAGO_ADELANTADO',
         titulo: `Pago adelantado ${contract.folio} (${results.length} periodos)`,
