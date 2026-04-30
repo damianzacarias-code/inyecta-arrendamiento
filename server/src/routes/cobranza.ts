@@ -544,6 +544,7 @@ type PayTxResult =
           tasaMoratoria: any;
           folio: string;
           userId: string;
+          producto: string;
           client: { tipo: string; nombre: string | null; apellidoPaterno: string | null; razonSocial: string | null } | null;
         };
       };
@@ -553,6 +554,19 @@ type PayTxResult =
       aplicado: { moratorio: number; ivaMoratorio: number; renta: number; ivaRenta: number; total: number };
       esParcial: boolean;
       restante: number;
+      // Cascada D1: pagos secundarios creados al aplicar el sobrante a
+      // periodos atrasados del mismo contrato. Vacío si no hubo cascada
+      // (sin sobrante o sin atrasados).
+      cascada: Array<{
+        periodo: number;
+        payment: Awaited<ReturnType<typeof prisma.payment.create>>;
+        aplicado: { moratorio: number; ivaMoratorio: number; renta: number; ivaRenta: number; total: number };
+      }>;
+      // Sobrante final tras aplicar la cascada. Si > 0, no había
+      // suficientes periodos atrasados — el operador deberá decidir
+      // (frontend muestra modal con opciones según producto).
+      sobranteFinal: number;
+      productoContrato: string;
     }
   | { ok: false; status: number; error: string };
 
@@ -603,6 +617,7 @@ router.post('/pay', requireAuth, async (req: Request, res: Response) => {
                 tasaMoratoria: true,
                 folio: true,
                 userId: true,
+                producto: true, // necesario para D1: el modal del frontend muestra opciones distintas según PURO vs FINANCIERO
                 client: { select: { tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true } },
               },
             },
@@ -684,9 +699,103 @@ router.post('/pay', requireAuth, async (req: Request, res: Response) => {
             montoTotal: Math.round(montoTotal * 100) / 100,
             diasAtraso,
             referencia: data.referencia || null,
-            observaciones: data.observaciones || (esParcial ? 'Pago parcial' : restante > 0.01 ? `Sobrante: $${restante.toFixed(2)}` : null),
+            observaciones: data.observaciones || (esParcial ? 'Pago parcial' : null),
           },
         });
+
+        // ──────────────────────────────────────────────────────────────
+        // Cascada D1 (LOGICA_COBRANZA.md): si después de aplicar el pago
+        // al periodo solicitado quedó sobrante, intenta aplicarlo
+        // automáticamente a los SIGUIENTES periodos atrasados (VENCIDO o
+        // PARCIAL) del mismo contrato, en orden ascendente. Misma
+        // prelación: moratorio + IVA mor → renta + IVA renta.
+        //
+        // Si todos los atrasados se cubren y aún sobra dinero, no se
+        // crea más cascada — el sobrante final se devuelve al frontend
+        // para que el operador decida (próxima renta vs abono a capital).
+        // ──────────────────────────────────────────────────────────────
+        const cascada: Array<{
+          periodo: number;
+          payment: Awaited<ReturnType<typeof tx.payment.create>>;
+          aplicado: { moratorio: number; ivaMoratorio: number; renta: number; ivaRenta: number; total: number };
+        }> = [];
+
+        if (restante > 0.01) {
+          // Periodos del mismo contrato que ESTÁN atrasados (vencimiento <
+          // hoy) y NO son el que acabamos de pagar. Se procesan en orden
+          // ascendente porque la mora se acumula desde el más viejo.
+          const overdueEntries = await tx.amortizationEntry.findMany({
+            where: {
+              contractId: data.contractId,
+              periodo: { not: data.periodo },
+              fechaPago: { lt: now },
+            },
+            orderBy: { periodo: 'asc' },
+          });
+
+          for (const overdue of overdueEntries) {
+            if (restante <= 0.01) break;
+
+            const overduePrev = await tx.payment.findMany({
+              where: { contractId: data.contractId, periodo: overdue.periodo, deletedAt: null },
+            });
+            const overdueConceptos = calcConceptos(overdue, tasaAnual, overduePrev, now);
+            if (overdueConceptos.estatus === 'PAGADO') continue;
+
+            // Misma prelación que el pago principal.
+            const splitMor2 = splitProporcional(
+              restante,
+              overdueConceptos.desglose.moratorioPendiente,
+              overdueConceptos.desglose.ivaMoratorioPendiente,
+            );
+            restante = round2(restante - splitMor2.used);
+            const splitRenta2 = splitProporcional(
+              restante,
+              overdueConceptos.desglose.rentaPendiente,
+              overdueConceptos.desglose.ivaPendiente,
+            );
+            restante = round2(restante - splitRenta2.used);
+
+            const totalCasc = splitMor2.used + splitRenta2.used;
+            if (totalCasc <= 0.01) continue; // nada útil que aplicar a este
+
+            const overdueVenc = new Date(overdue.fechaPago);
+            const overdueDias =
+              overdueVenc < now
+                ? Math.floor((now.getTime() - overdueVenc.getTime()) / (1000 * 60 * 60 * 24))
+                : 0;
+            const cascadaPayment = await tx.payment.create({
+              data: {
+                contractId: data.contractId,
+                userId,
+                periodo: overdue.periodo,
+                tipo: 'RENTA_ORDINARIA',
+                fechaPago: data.fechaPago ? new Date(data.fechaPago) : now,
+                fechaVencimiento: overdueVenc,
+                montoRenta: Math.round(splitRenta2.aPrincipal * 100) / 100,
+                montoIVA: Math.round(splitRenta2.aIva * 100) / 100,
+                montoMoratorio: Math.round(splitMor2.aPrincipal * 100) / 100,
+                montoIVAMoratorio: Math.round(splitMor2.aIva * 100) / 100,
+                montoTotal: Math.round(totalCasc * 100) / 100,
+                diasAtraso: overdueDias,
+                referencia: data.referencia || null,
+                observaciones: `Sobrante aplicado del periodo ${data.periodo} (cascada D1)`,
+              },
+            });
+
+            cascada.push({
+              periodo: overdue.periodo,
+              payment: cascadaPayment,
+              aplicado: {
+                moratorio: splitMor2.aPrincipal,
+                ivaMoratorio: splitMor2.aIva,
+                renta: splitRenta2.aPrincipal,
+                ivaRenta: splitRenta2.aIva,
+                total: totalCasc,
+              },
+            });
+          }
+        }
 
         return {
           ok: true as const,
@@ -704,6 +813,9 @@ router.post('/pay', requireAuth, async (req: Request, res: Response) => {
           },
           esParcial,
           restante,
+          cascada,
+          sobranteFinal: round2(restante),
+          productoContrato: entry.contract.producto || 'PURO',
         };
       },
       { route: '/api/cobranza/pay', reqId: req.id ? String(req.id) : undefined },
@@ -713,7 +825,7 @@ router.post('/pay', requireAuth, async (req: Request, res: Response) => {
       return res.status(result.status).json({ error: result.error });
     }
 
-    const { payment, entry, prevPayments, tasaAnual, now, aplicado, esParcial, restante } = result;
+    const { payment, entry, prevPayments, tasaAnual, now, aplicado, esParcial, restante, cascada, sobranteFinal, productoContrato } = result;
 
     // Recalcular conceptos POST-INSERT para devolver el estado actualizado.
     // Lo hacemos fuera de la TX (es solo lectura, no compite por concurrencia).
@@ -725,7 +837,7 @@ router.post('/pay', requireAuth, async (req: Request, res: Response) => {
     notificar({
       tipo: 'PAGO_REGISTRADO',
       titulo: `Pago periodo ${data.periodo} · ${entry.contract.folio}`,
-      mensaje: `${nombreCliente(entry.contract.client)} pagó ${fmt$(aplicado.total)}${esParcial ? ' (parcial)' : ''}`,
+      mensaje: `${nombreCliente(entry.contract.client)} pagó ${fmt$(aplicado.total)}${esParcial ? ' (parcial)' : ''}${cascada.length > 0 ? ` + ${cascada.length} periodo(s) en cascada` : ''}`,
       entidad: 'Payment',
       entidadId: payment.id,
       url: `/cobranza/contrato/${data.contractId}`,
@@ -742,6 +854,22 @@ router.post('/pay', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
+    // sobranteFinal > 0 indica que NO había suficientes periodos atrasados
+    // para consumir el excedente — el operador debe decidir manualmente
+    // si aplicarlo a la próxima renta o (en FIN) abonarlo a capital.
+    // El frontend mostrará un modal con las opciones (D1).
+    const requiereAccionOperador = sobranteFinal > 0.01 && cascada.length === 0
+      ? false // sin cascada = no había atrasados, sobrante es del periodo actual
+      : sobranteFinal > 0.01;
+    // Nota: si la cascada agotó todos los atrasados y AÚN sobra dinero,
+    // requiereAccionOperador = true. Si no había atrasados desde el
+    // principio (cascada vacía), también requiereAccionOperador (cliente
+    // está al corriente y pagó de más).
+    // El modal del frontend usa `productoContrato` para mostrar opciones
+    // distintas: PURO ofrece "próxima renta" o "prorratear todas las
+    // rentas futuras"; FINANCIERO ofrece "próxima renta" o "abono a
+    // capital (recalcula PMT)".
+
     res.json({
       payment,
       aplicacion: {
@@ -750,9 +878,22 @@ router.post('/pay', requireAuth, async (req: Request, res: Response) => {
         renta: aplicado.renta,
         ivaRenta: aplicado.ivaRenta,
         total: aplicado.total,
-        sobrante: Math.round(restante * 100) / 100,
+        sobrante: round2(restante),
       },
       estadoPeriodo: updatedConceptos,
+      cascada: cascada.map(c => ({
+        periodo: c.periodo,
+        paymentId: c.payment.id,
+        aplicado: c.aplicado,
+      })),
+      sobranteFinal: round2(sobranteFinal),
+      sobranteOpciones: sobranteFinal > 0.01 ? {
+        producto: productoContrato,
+        monto: round2(sobranteFinal),
+        opciones: productoContrato === 'PURO'
+          ? ['proxima_renta', 'prorratear_rentas']
+          : ['proxima_renta', 'abono_capital'],
+      } : null,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

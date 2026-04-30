@@ -168,6 +168,17 @@ export default function Cobranza() {
   const [advanceModal, setAdvanceModal] = useState<CalendarEntry | null>(null);
   const [advancePeriodos, setAdvancePeriodos] = useState<number[]>([]);
 
+  // Sobrante modal (D1: cuando un pago deja excedente y NO había atrasados,
+  // operador decide si aplicar a próxima renta o capital/prorratear).
+  const [sobranteModal, setSobranteModal] = useState<{
+    contractId: string;
+    monto: number;
+    producto: string;
+    opciones: string[];
+    cascada: Array<{ periodo: number; aplicado: { total: number } }>;
+  } | null>(null);
+  const [sobranteAccion, setSobranteAccion] = useState<string>('');
+
   const fetchCalendar = useCallback(() => {
     setLoading(true);
     setLoadError(null);
@@ -212,17 +223,86 @@ export default function Cobranza() {
     if (isNaN(monto) || monto <= 0) return;
     setProcessing(true);
     try {
-      await api.post('/cobranza/pay', {
+      const res = await api.post('/cobranza/pay', {
         contractId: payModal.entry.contractId,
         periodo: payModal.entry.periodo,
         monto,
         referencia: payRef || undefined,
         observaciones: payObs || undefined,
       });
-      setPayModal(null);
-      fetchCalendar();
+
+      const data = res.data || {};
+      const cascada = (data.cascada || []) as Array<{ periodo: number; aplicado: { total: number } }>;
+
+      // D1: si el backend reporta sobranteOpciones, mostrar modal para que
+      // el operador decida qué hacer con el excedente. Si no, refetch normal.
+      if (data.sobranteOpciones) {
+        setSobranteModal({
+          contractId: payModal.entry.contractId,
+          monto: data.sobranteOpciones.monto,
+          producto: data.sobranteOpciones.producto,
+          opciones: data.sobranteOpciones.opciones,
+          cascada,
+        });
+        setSobranteAccion(data.sobranteOpciones.opciones[0]);
+        setPayModal(null);
+        fetchCalendar();
+      } else {
+        setPayModal(null);
+        if (cascada.length > 0) {
+          alert(
+            `Pago registrado. El sobrante se aplicó automáticamente a ${cascada.length} ` +
+            `periodo(s) atrasado(s) del mismo contrato.`,
+          );
+        }
+        fetchCalendar();
+      }
     } catch (err) {
       alert(apiErrorMessage(err, 'Error al registrar pago'));
+    }
+    setProcessing(false);
+  };
+
+  // Maneja la decisión del operador sobre el sobrante (D1).
+  // Llama al endpoint correspondiente según `sobranteAccion`:
+  //   - proxima_renta:    /pay-advance al siguiente periodo NO pagado.
+  //   - prorratear_rentas (PURO): /pay-extra (prorratea entre rentas futuras).
+  //   - abono_capital (FIN):     /pay-extra (recalcula PMT).
+  const handleSobranteDecision = async () => {
+    if (!sobranteModal) return;
+    setProcessing(true);
+    try {
+      if (sobranteAccion === 'proxima_renta') {
+        // Buscar el siguiente periodo NO pagado del mismo contrato
+        const future = entries
+          .filter((e) => e.contractId === sobranteModal.contractId && e.estatus !== 'PAGADO')
+          .sort((a, b) => a.periodo - b.periodo);
+        if (future.length === 0) {
+          alert('No hay periodos futuros disponibles para aplicar el sobrante.');
+          setProcessing(false);
+          return;
+        }
+        await api.post('/cobranza/pay-advance', {
+          contractId: sobranteModal.contractId,
+          periodos: [future[0].periodo],
+          observaciones: `Sobrante aplicado a la próxima renta`,
+        });
+      } else {
+        // prorratear_rentas (PURO) o abono_capital (FIN) → ambos van por /pay-extra
+        await api.post('/cobranza/pay-extra', {
+          contractId: sobranteModal.contractId,
+          monto: sobranteModal.monto,
+          observaciones:
+            sobranteAccion === 'abono_capital'
+              ? 'Sobrante aplicado a capital (recalcula PMT)'
+              : 'Sobrante prorrateado entre rentas futuras',
+        });
+      }
+      setSobranteModal(null);
+      setSobranteAccion('');
+      fetchCalendar();
+    } catch (err) {
+      alert(apiErrorMessage(err, 'Error al aplicar sobrante'));
     }
     setProcessing(false);
   };
@@ -912,6 +992,110 @@ export default function Cobranza() {
                   <FastForward size={14} />
                 )}
                 Pagar Adelantado
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Sobrante modal (D1) ──────────────────────────────────────── */}
+      {sobranteModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <DollarSign size={22} className="text-emerald-600" />
+              <h3 className="text-lg font-semibold text-gray-900">
+                Sobrante de pago: {formatCurrency(sobranteModal.monto)}
+              </h3>
+            </div>
+
+            {sobranteModal.cascada.length > 0 && (
+              <div className="bg-blue-50 border border-blue-200 text-blue-900 rounded-lg p-3 mb-4 text-sm">
+                <strong>Aplicación automática realizada:</strong> el sobrante
+                inicial se aplicó a {sobranteModal.cascada.length} periodo(s)
+                atrasado(s) del mismo contrato. Lo que ves arriba es lo que aún
+                resta por aplicar.
+              </div>
+            )}
+
+            <p className="text-sm text-gray-600 mb-4">
+              El cliente está al corriente y pagó más de lo que debía. ¿Cómo
+              quieres aplicar el excedente?
+            </p>
+
+            <div className="space-y-2 mb-5">
+              {sobranteModal.opciones.includes('proxima_renta') && (
+                <label className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 hover:border-gray-300 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="sobrante-accion"
+                    value="proxima_renta"
+                    checked={sobranteAccion === 'proxima_renta'}
+                    onChange={(e) => setSobranteAccion(e.target.value)}
+                    className="mt-1"
+                  />
+                  <div>
+                    <div className="font-medium text-sm text-gray-900">Aplicar a la próxima renta</div>
+                    <div className="text-xs text-gray-500">
+                      Se registra como pago adelantado del siguiente periodo no pagado.
+                    </div>
+                  </div>
+                </label>
+              )}
+              {sobranteModal.opciones.includes('prorratear_rentas') && (
+                <label className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 hover:border-gray-300 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="sobrante-accion"
+                    value="prorratear_rentas"
+                    checked={sobranteAccion === 'prorratear_rentas'}
+                    onChange={(e) => setSobranteAccion(e.target.value)}
+                    className="mt-1"
+                  />
+                  <div>
+                    <div className="font-medium text-sm text-gray-900">
+                      Prorratear entre todas las rentas futuras
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Reduce cada renta restante en {formatCurrency(sobranteModal.monto)} ÷ N periodos restantes (PURO).
+                    </div>
+                  </div>
+                </label>
+              )}
+              {sobranteModal.opciones.includes('abono_capital') && (
+                <label className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 hover:border-gray-300 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="sobrante-accion"
+                    value="abono_capital"
+                    checked={sobranteAccion === 'abono_capital'}
+                    onChange={(e) => setSobranteAccion(e.target.value)}
+                    className="mt-1"
+                  />
+                  <div>
+                    <div className="font-medium text-sm text-gray-900">Abonar a capital (recalcula renta)</div>
+                    <div className="text-xs text-gray-500">
+                      Reduce el saldo y recalcula la PMT — la renta futura baja (FINANCIERO).
+                    </div>
+                  </div>
+                </label>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setSobranteModal(null); setSobranteAccion(''); }}
+                disabled={processing}
+                className="px-4 py-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 text-sm rounded-lg font-medium"
+              >
+                Posponer
+              </button>
+              <button
+                onClick={handleSobranteDecision}
+                disabled={processing || !sobranteAccion}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white text-sm rounded-lg font-medium"
+              >
+                {processing ? 'Aplicando...' : 'Aplicar'}
               </button>
             </div>
           </div>
