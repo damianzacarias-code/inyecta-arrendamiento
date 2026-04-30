@@ -20,7 +20,7 @@ router.get('/cartera', requireAuth, async (_req: Request, res: Response) => {
           select: { id: true, tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true, rfc: true },
         },
         amortizacion: { orderBy: { periodo: 'asc' } },
-        pagos: true,
+        pagos: { where: { deletedAt: null } },
       },
     });
 
@@ -115,7 +115,7 @@ router.get('/cobranza-mensual', requireAuth, async (req: Request, res: Response)
         select: { fechaPago: true, pagoTotal: true },
       }),
       prisma.payment.findMany({
-        where: { fechaPago: { gte: yearStart, lt: yearEnd } },
+        where: { fechaPago: { gte: yearStart, lt: yearEnd }, deletedAt: null },
         select: { fechaPago: true, montoTotal: true, montoMoratorio: true, montoIVAMoratorio: true },
       }),
     ]);
@@ -224,7 +224,7 @@ router.get('/portafolio', requireAuth, async (_req: Request, res: Response) => {
       where: { estatus: 'VIGENTE' },
       include: {
         amortizacion: { select: { saldoInicial: true, periodo: true } },
-        pagos:        { select: { montoTotal: true } },
+        pagos:        { where: { deletedAt: null }, select: { montoTotal: true } },
         client:       { select: { tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true } },
       },
     });
@@ -440,7 +440,7 @@ router.get('/metricas', requireAuth, async (_req: Request, res: Response) => {
         where: { estatus: 'VIGENTE' },
         include: {
           amortizacion: { select: { saldoInicial: true, pagoTotal: true, intereses: true, fechaPago: true } },
-          pagos: { select: { montoTotal: true, montoMoratorio: true, montoIVAMoratorio: true } },
+          pagos: { where: { deletedAt: null }, select: { montoTotal: true, montoMoratorio: true, montoIVAMoratorio: true } },
         },
       }),
       prisma.contract.count({ where: { estatus: 'TERMINADO' } }),
@@ -466,11 +466,11 @@ router.get('/metricas', requireAuth, async (_req: Request, res: Response) => {
         select: { montoFinanciar: true, comisionApertura: true },
       }),
       prisma.payment.aggregate({
-        where: { fechaPago: { gte: monthStart, lt: monthEnd } },
+        where: { fechaPago: { gte: monthStart, lt: monthEnd }, deletedAt: null },
         _sum: { montoTotal: true, montoMoratorio: true, montoIVAMoratorio: true },
       }),
       prisma.payment.aggregate({
-        where: { fechaPago: { gte: yearStart, lt: yearEnd } },
+        where: { fechaPago: { gte: yearStart, lt: yearEnd }, deletedAt: null },
         _sum: { montoTotal: true, montoMoratorio: true, montoIVAMoratorio: true },
       }),
       prisma.invoice.count({

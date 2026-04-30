@@ -75,7 +75,7 @@ router.get('/', requireAuth, async (_req: Request, res: Response) => {
     // Buscar pagos para esos periodos
     const contractIds = [...new Set(overdueEntries.map(e => e.contractId))];
     const payments = await prisma.payment.findMany({
-      where: { contractId: { in: contractIds } },
+      where: { contractId: { in: contractIds }, deletedAt: null },
     });
     const paidByKey = new Map<string, number>();
     payments.forEach(p => {

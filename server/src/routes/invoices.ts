@@ -88,6 +88,13 @@ router.post('/facturar', requireAuth, async (req: Request, res: Response) => {
 
     if (data.paymentId) {
       if (!paymentWithCtx) return res.status(404).json({ error: 'Pago no encontrado' });
+      // Soft delete (cobranza § DELETE /payment/:id 2026-04-30): un pago borrado
+      // NO debe generar factura — el operador habría borrado el pago precisamente
+      // porque está cancelando el cobro original. Si necesita re-facturar, primero
+      // que reaplique un Payment nuevo.
+      if (paymentWithCtx.deletedAt) {
+        return res.status(409).json({ error: 'Este pago fue cancelado y no puede facturarse' });
+      }
       contractId = paymentWithCtx.contractId;
       clientId = paymentWithCtx.contract.clientId;
 

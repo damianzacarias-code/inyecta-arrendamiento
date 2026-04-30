@@ -27,8 +27,8 @@ model User {
   //   PLD y para invalidar tokens emitidos antes (S4 — JWT revocation).
   // mustChangePassword: ADMIN reset → user debe cambiar al próximo login;
   //   también lo seteamos en true para usuarios recién creados.
-  passwordChangedAt   DateTime  @default(now())
-  mustChangePassword  Boolean   @default(false)
+  passwordChangedAt  DateTime @default(now())
+  mustChangePassword Boolean  @default(false)
 
   // ── MFA / 2FA TOTP (CLAUDE.md §10 — Hardening S5) ─────────────────
   // mfaSecret: base32 del secret TOTP. Cifrado en reposo si MFA_KEK
@@ -37,19 +37,20 @@ model User {
   // mfaEnabled: solo true después de que el usuario verifica un
   //   primer código TOTP correcto (enrollment confirmado).
   // mfaEnrolledAt: timestamp del enrollment confirmado.
-  mfaSecret           String?
-  mfaEnabled          Boolean   @default(false)
-  mfaEnrolledAt       DateTime?
+  mfaSecret     String?
+  mfaEnabled    Boolean   @default(false)
+  mfaEnrolledAt DateTime?
 
-  cotizaciones  Quotation[]
-  contratos     Contract[]
-  pagosRegistrados Payment[]
-  notas         Note[]
+  cotizaciones      Quotation[]
+  contratos         Contract[]
+  pagosRegistrados  Payment[]             @relation("PaymentsRegistered")
+  pagosBorrados     Payment[]             @relation("PaymentsDeletedBy")
+  notas             Note[]
   documentosSubidos ExpedienteDocumento[]
-  notificaciones Notificacion[]
-  passwordHistory  PasswordHistory[]
-  revokedTokens    RevokedToken[]
-  mfaBackupCodes   MfaBackupCode[]
+  notificaciones    Notificacion[]
+  passwordHistory   PasswordHistory[]
+  revokedTokens     RevokedToken[]
+  mfaBackupCodes    MfaBackupCode[]
 
   @@map("users")
 }
@@ -59,11 +60,11 @@ model User {
 // vez (consumedAt) si el usuario pierde su autenticador. Hash bcrypt 12
 // — el código en claro NUNCA queda persistido (se muestra una sola vez).
 model MfaBackupCode {
-  id          String    @id @default(cuid())
-  userId      String
-  hashedCode  String
-  consumedAt  DateTime?
-  createdAt   DateTime  @default(now())
+  id         String    @id @default(cuid())
+  userId     String
+  hashedCode String
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -77,7 +78,7 @@ enum UserRole {
   ANALISTA
   COBRANZA
   OPERACIONES
-  LEGAL          // CLAUDE.md §2 — recibe notificaciones de SOLICITUD_*
+  LEGAL // CLAUDE.md §2 — recibe notificaciones de SOLICITUD_*
 }
 
 // ── Historial de contraseñas ─────────────────────────────────────────
@@ -106,11 +107,11 @@ model PasswordHistory {
 // registros vencidos (no hace falta retener jtis ya inválidos por
 // expiración natural — el verify de jsonwebtoken los rechaza primero).
 model RevokedToken {
-  jti        String   @id
-  userId     String
-  expiresAt  DateTime
-  revokedAt  DateTime @default(now())
-  reason     String?  // 'logout', 'logout_all', 'password_change', etc.
+  jti       String   @id
+  userId    String
+  expiresAt DateTime
+  revokedAt DateTime @default(now())
+  reason    String? // 'logout', 'logout_all', 'password_change', etc.
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -124,73 +125,73 @@ model RevokedToken {
 // ============================================================
 
 model Client {
-  id              String     @id @default(cuid())
-  tipo            ClientType
+  id                      String     @id @default(cuid())
+  tipo                    ClientType
   // Persona Física
-  nombre          String?
-  apellidoPaterno String?
-  apellidoMaterno String?
-  curp            String?
+  nombre                  String?
+  apellidoPaterno         String?
+  apellidoMaterno         String?
+  curp                    String?
   // Persona Moral
-  razonSocial     String?
+  razonSocial             String?
   // Compartidos
-  rfc             String?    @unique
-  email           String?
-  telefono        String?      // celular primario (mantenido por compatibilidad)
-  telefonoOficina String?
+  rfc                     String?    @unique
+  email                   String?
+  telefono                String? // celular primario (mantenido por compatibilidad)
+  telefonoOficina         String?
   // Identidad fiscal y actividad (campos de solicitud CNBV/KYC)
-  regimenFiscal   String?      // catálogo SAT: 601, 603, 606, 612, 621, 625, 626...
-  fiel            String?      // FIEL/e.firma. Obligatorio en PM, opcional PFAE.
+  regimenFiscal           String? // catálogo SAT: 601, 603, 606, 612, 621, 625, 626...
+  fiel                    String? // FIEL/e.firma. Obligatorio en PM, opcional PFAE.
   anosAntiguedadActividad Int?
-  registroIMSS    String?      // registro patronal (PFAE con empleados)
+  registroIMSS            String? // registro patronal (PFAE con empleados)
   // Domicilio fiscal
-  calle           String?
-  numExterior     String?
-  numInterior     String?
-  colonia         String?
-  municipio       String?
-  ciudad          String?
-  estado          String?
-  pais            String?    @default("México")
-  cp              String?
+  calle                   String?
+  numExterior             String?
+  numInterior             String?
+  colonia                 String?
+  municipio               String?
+  ciudad                  String?
+  estado                  String?
+  pais                    String?    @default("México")
+  cp                      String?
   // Domicilio de operación (puede diferir del fiscal)
-  calleOp         String?
-  numExteriorOp   String?
-  numInteriorOp   String?
-  coloniaOp       String?
-  municipioOp     String?
-  ciudadOp        String?
-  estadoOp        String?
-  cpOp            String?
+  calleOp                 String?
+  numExteriorOp           String?
+  numInteriorOp           String?
+  coloniaOp               String?
+  municipioOp             String?
+  ciudadOp                String?
+  estadoOp                String?
+  cpOp                    String?
   // PM específicos
-  actaConstitutiva     String?
-  registroPublico      String?
-  representanteLegal   String?       // DEPRECATED — usar modelo RepresentanteLegal (1:1)
-  fechaConstitucion    DateTime?
-  capitalSocial        Decimal?
-  folioMercantil       String?       // folio del Registro Público de Comercio
-  fechaInscripcionRPC  DateTime?     // fecha de inscripción de la escritura constitutiva
+  actaConstitutiva        String?
+  registroPublico         String?
+  representanteLegal      String? // DEPRECATED — usar modelo RepresentanteLegal (1:1)
+  fechaConstitucion       DateTime?
+  capitalSocial           Decimal?
+  folioMercantil          String? // folio del Registro Público de Comercio
+  fechaInscripcionRPC     DateTime? // fecha de inscripción de la escritura constitutiva
   // Notario de la escritura constitutiva (PM) — exigido por declaración II-A
   // de los contratos PURO/FIN. Antes solo guardábamos el número de escritura
   // como string libre; ahora desglosado.
-  notarioConstNombre   String?
-  notarioConstNumero   String?
-  notarioConstLugar    String?
+  notarioConstNombre      String?
+  notarioConstNumero      String?
+  notarioConstLugar       String?
   // Metadata
-  sector          String?
-  actividadEconomica String?
-  activo          Boolean  @default(true)
+  sector                  String?
+  actividadEconomica      String?
+  activo                  Boolean    @default(true)
   // Portal del Arrendatario (acceso vía token único)
-  portalToken     String?  @unique
-  portalUltimoAcceso DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  portalToken             String?    @unique
+  portalUltimoAcceso      DateTime?
+  createdAt               DateTime   @default(now())
+  updatedAt               DateTime   @updatedAt
 
-  socios             Shareholder[]
-  cotizaciones       Quotation[]
-  contratos          Contract[]
-  notas              Note[]
-  facturas           Invoice[]
+  socios                 Shareholder[]
+  cotizaciones           Quotation[]
+  contratos              Contract[]
+  notas                  Note[]
+  facturas               Invoice[]
   representanteLegalData RepresentanteLegal?
 
   @@map("clients")
@@ -239,9 +240,9 @@ enum Genero {
 // Ver migración: 20260422_expediente_por_actor.
 
 model Shareholder {
-  id              String  @id @default(cuid())
-  clientId        String
-  client          Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  id       String @id @default(cuid())
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
   // Identidad (persona física)
   nombre          String
@@ -258,8 +259,8 @@ model Shareholder {
   folioInscripcionEscrituraConst String?
 
   // Participación
-  porcentaje      Decimal   // porcentaje de participación accionaria
-  esRepLegal      Boolean   @default(false)
+  porcentaje      Decimal // porcentaje de participación accionaria
+  esRepLegal      Boolean @default(false)
   anosExperiencia Int?
 
   // Nacimiento / nacionalidad
@@ -273,15 +274,15 @@ model Shareholder {
   nombreConyuge      String?
 
   // Domicilio particular
-  calle           String?
-  numExterior     String?
-  numInterior     String?
-  colonia         String?
-  municipio       String?
-  ciudad          String?
-  estado          String?
-  pais            String?    @default("México")
-  cp              String?
+  calle                  String?
+  numExterior            String?
+  numInterior            String?
+  colonia                String?
+  municipio              String?
+  ciudad                 String?
+  estado                 String?
+  pais                   String?                 @default("México")
+  cp                     String?
   situacionInstalaciones SituacionInstalaciones?
   tiempoResidenciaAnos   Int?
 
@@ -290,8 +291,8 @@ model Shareholder {
   telefonoCelular String?
   email           String?
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("shareholders")
 }
@@ -303,9 +304,9 @@ model Shareholder {
 // LEGAL O PERSONA FÍSICA CON ACTIVIDAD EMPRESARIAL" del PDF.
 // ────────────────────────────────────────────────────────────
 model RepresentanteLegal {
-  id              String   @id @default(cuid())
-  clientId        String   @unique
-  client          Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  id       String @id @default(cuid())
+  clientId String @unique
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
   // Identidad
   nombre          String
@@ -331,15 +332,15 @@ model RepresentanteLegal {
   nombreConyuge      String?
 
   // Domicilio particular
-  calle           String?
-  numExterior     String?
-  numInterior     String?
-  colonia         String?
-  municipio       String?
-  ciudad          String?
-  estado          String?
-  pais            String?    @default("México")
-  cp              String?
+  calle                  String?
+  numExterior            String?
+  numInterior            String?
+  colonia                String?
+  municipio              String?
+  ciudad                 String?
+  estado                 String?
+  pais                   String?                 @default("México")
+  cp                     String?
   situacionInstalaciones SituacionInstalaciones?
   tiempoResidenciaAnos   Int?
 
@@ -355,14 +356,14 @@ model RepresentanteLegal {
   // representante legal en el contrato (declaración II-B PURO/FIN).
   // El poder a veces es la misma escritura constitutiva, pero suele ser
   // posterior — por eso se captura aparte.
-  poderEscrituraNumero String?
-  poderEscrituraFecha  DateTime?
-  poderNotarioNombre   String?
-  poderNotarioNumero   String?
-  poderNotarioLugar    String?
+  poderEscrituraNumero    String?
+  poderEscrituraFecha     DateTime?
+  poderNotarioNombre      String?
+  poderNotarioNumero      String?
+  poderNotarioLugar       String?
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("representantes_legales")
 }
@@ -375,8 +376,8 @@ model AssetCategory {
   id          String   @id @default(cuid())
   nombre      String   @unique
   descripcion String?
-  productos   String?  // ejemplos de productos (texto)
-  tipoSeguro  String?  // tipo de cobertura requerida
+  productos   String? // ejemplos de productos (texto)
+  tipoSeguro  String? // tipo de cobertura requerida
   requiereGPS Boolean  @default(false)
   activo      Boolean  @default(true)
   orden       Int      @default(0)
@@ -393,71 +394,71 @@ model AssetCategory {
 // ============================================================
 
 model Quotation {
-  id              String         @id @default(cuid())
-  folio           String         @unique
-  clientId        String?
-  client          Client?        @relation(fields: [clientId], references: [id])
-  nombreCliente   String         // puede ser prospecto sin client registrado
-  userId          String
-  user            User           @relation(fields: [userId], references: [id])
-  categoriaId     String?
-  categoria       AssetCategory? @relation(fields: [categoriaId], references: [id])
+  id            String         @id @default(cuid())
+  folio         String         @unique
+  clientId      String?
+  client        Client?        @relation(fields: [clientId], references: [id])
+  nombreCliente String // puede ser prospecto sin client registrado
+  userId        String
+  user          User           @relation(fields: [userId], references: [id])
+  categoriaId   String?
+  categoria     AssetCategory? @relation(fields: [categoriaId], references: [id])
 
   // Datos del bien
   bienDescripcion String?
   bienMarca       String?
   bienModelo      String?
   bienAnio        Int?
-  bienNuevo       Boolean        @default(true)
+  bienNuevo       Boolean @default(true)
   bienNumSerie    String?
 
   // Parámetros financieros
-  producto        LeaseType
-  valorBien       Decimal        // sin IVA
-  valorBienIVA    Decimal?       // con IVA (calculado)
-  plazo           Int            // meses (12-48)
-  tasaAnual       Decimal        // e.g. 0.36
-  nivelRiesgo     RiskLevel      @default(A)
+  producto     LeaseType
+  valorBien    Decimal // sin IVA
+  valorBienIVA Decimal? // con IVA (calculado)
+  plazo        Int // meses (12-48)
+  tasaAnual    Decimal // e.g. 0.36
+  nivelRiesgo  RiskLevel @default(A)
 
   // Montos calculados
-  enganche           Decimal   @default(0)
-  enganchePorcentaje  Decimal   @default(0)
-  depositoGarantia       Decimal   @default(0)
-  depositoGarantiaPct    Decimal   @default(0)
+  enganche                   Decimal @default(0)
+  enganchePorcentaje         Decimal @default(0)
+  depositoGarantia           Decimal @default(0)
+  depositoGarantiaPct        Decimal @default(0)
   /// Aporte inicial total que el cliente entrega (% de valorBien). El
   /// cotizador lo distribuye automáticamente en `enganche` y
   /// `depositoGarantia` según el nivel de riesgo (lib distribucion.ts).
   /// Default 0 para retro-compat con cotizaciones antes del cambio.
-  aporteInicialPct       Decimal   @default(0)
-  comisionApertura       Decimal   @default(0)
-  comisionAperturaPct    Decimal   @default(0.05)
+  aporteInicialPct           Decimal @default(0)
+  comisionApertura           Decimal @default(0)
+  comisionAperturaPct        Decimal @default(0.05)
   comisionAperturaFinanciada Boolean @default(true)
-  rentaInicial           Decimal   @default(0)
-  gpsInstalacion         Decimal   @default(0)
-  gpsFinanciado          Boolean   @default(true)
+  rentaInicial               Decimal @default(0)
+  gpsInstalacion             Decimal @default(0)
+  gpsFinanciado              Boolean @default(true)
   /// Clave del GpsProveedor seleccionado al cotizar. null si "Sin GPS".
   /// Se persiste para auditar qué proveedor se usó (los precios pueden
   /// cambiar después en el catálogo).
-  gpsProveedor           String?
-  seguroAnual            Decimal   @default(0)
-  seguroFinanciado       Boolean   @default(true)
-  seguroPendiente        Boolean   @default(false)  // CLAUDE.md §4.14: si true, no entra en cálculos
-  valorResidual          Decimal   @default(0)
-  valorResidualPct       Decimal   @default(0)
+  gpsProveedor               String?
+  seguroAnual                Decimal @default(0)
+  seguroFinanciado           Boolean @default(true)
+  seguroPendiente            Boolean @default(false) // CLAUDE.md §4.14: si true, no entra en cálculos
+  valorResidual              Decimal @default(0)
+  valorResidualPct           Decimal @default(0)
   // CLAUDE.md §4.13 — PURO checkbox "Valor residual = depósito en garantía".
   // Cuando es true, valorResidualResuelto = depositoGarantia (el cliente
   // "pierde" el depósito a cambio del bien al final del contrato). El nombre
   // legacy del campo era valorResidualEsComision; renombrado por el operador
   // que clarificó la regla de negocio el 27-04-2026.
-  valorResidualEsDeposito Boolean  @default(false)
+  valorResidualEsDeposito    Boolean @default(false)
 
   // Resultados
-  montoFinanciar    Decimal?
-  rentaMensual      Decimal?
-  rentaMensualIVA   Decimal?
-  totalRentas       Decimal?
-  totalPagar        Decimal?
-  ganancia          Decimal?
+  montoFinanciar  Decimal?
+  rentaMensual    Decimal?
+  rentaMensualIVA Decimal?
+  totalRentas     Decimal?
+  totalPagar      Decimal?
+  ganancia        Decimal?
 
   // Estado
   estado          QuotationStatus @default(VIGENTE)
@@ -465,11 +466,11 @@ model Quotation {
   vigenciaHasta   DateTime?
   observaciones   String?
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  opciones  QuotationOption[]
-  contrato  Contract?
+  opciones QuotationOption[]
+  contrato Contract?
 
   @@map("quotations")
 }
@@ -480,9 +481,9 @@ enum LeaseType {
 }
 
 enum RiskLevel {
-  A  // bajo - 16%
-  B  // medio - 21%
-  C  // alto - 26%
+  A // bajo - 16%
+  B // medio - 21%
+  C // alto - 26%
 }
 
 enum QuotationStatus {
@@ -490,24 +491,24 @@ enum QuotationStatus {
   VENCIDA
   APROBADA
   RECHAZADA
-  CONVERTIDA  // se convirtió en contrato
+  CONVERTIDA // se convirtió en contrato
 }
 
 model QuotationOption {
-  id            String    @id @default(cuid())
-  quotationId   String
-  quotation     Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
-  nombre        String    // "Opción A - Riesgo bajo", etc.
-  producto      LeaseType
-  nivelRiesgo   RiskLevel
-  enganche      Decimal
-  rentaInicial  Decimal
-  depositoGarantia  Decimal
-  rentaMensualIVA   Decimal
-  valorResidual     Decimal
-  totalPagar        Decimal
-  ganancia          Decimal
-  descripcion   String?   // descripción de la estructura
+  id               String    @id @default(cuid())
+  quotationId      String
+  quotation        Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  nombre           String // "Opción A - Riesgo bajo", etc.
+  producto         LeaseType
+  nivelRiesgo      RiskLevel
+  enganche         Decimal
+  rentaInicial     Decimal
+  depositoGarantia Decimal
+  rentaMensualIVA  Decimal
+  valorResidual    Decimal
+  totalPagar       Decimal
+  ganancia         Decimal
+  descripcion      String? // descripción de la estructura
 
   @@map("quotation_options")
 }
@@ -517,27 +518,27 @@ model QuotationOption {
 // ============================================================
 
 model Contract {
-  id              String          @id @default(cuid())
-  folio           String          @unique  // e.g. ARR-001-2026
-  quotationId     String?         @unique
-  quotation       Quotation?      @relation(fields: [quotationId], references: [id])
-  clientId        String
-  client          Client          @relation(fields: [clientId], references: [id])
-  userId          String          // analista que registró
-  user            User            @relation(fields: [userId], references: [id])
-  categoriaId     String?
-  categoria       AssetCategory?  @relation(fields: [categoriaId], references: [id])
+  id          String         @id @default(cuid())
+  folio       String         @unique // e.g. ARR-001-2026
+  quotationId String?        @unique
+  quotation   Quotation?     @relation(fields: [quotationId], references: [id])
+  clientId    String
+  client      Client         @relation(fields: [clientId], references: [id])
+  userId      String // analista que registró
+  user        User           @relation(fields: [userId], references: [id])
+  categoriaId String?
+  categoria   AssetCategory? @relation(fields: [categoriaId], references: [id])
 
   // Pipeline
-  etapa           ContractStage   @default(SOLICITUD)
-  etapaFecha      DateTime        @default(now())
-  comiteResolucion String?        // APROBADO, APROBADO_CONDICIONES, RECHAZADO
+  etapa            ContractStage @default(SOLICITUD)
+  etapaFecha       DateTime      @default(now())
+  comiteResolucion String? // APROBADO, APROBADO_CONDICIONES, RECHAZADO
 
   // Datos de la solicitud (página 1 del formato KYC → Nueva Operación)
   lugarSolicitud       String?
   fechaSolicitud       DateTime?
   promotor             String?
-  montoSolicitado      Decimal?   // monto originalmente solicitado; puede diferir del aprobado
+  montoSolicitado      Decimal? // monto originalmente solicitado; puede diferir del aprobado
   destinoArrendamiento String?
 
   // Terceros (del bloque "DATOS COMPLEMENTARIOS" del PDF)
@@ -547,106 +548,106 @@ model Contract {
   tercerAportanteInfo      String?
 
   // Datos del bien
-  bienDescripcion String
-  bienMarca       String?
-  bienModelo      String?
-  bienAnio        Int?
-  bienNumSerie    String?         // serie de maquinaria/equipo
-  bienEstado      String?         // nuevo/seminuevo
+  bienDescripcion  String
+  bienMarca        String?
+  bienModelo       String?
+  bienAnio         Int?
+  bienNumSerie     String? // serie de maquinaria/equipo
+  bienEstado       String? // nuevo/seminuevo
   // Identificación de vehículo (cláusula DÉCIMA SEXTA prohíbe alterar
   // las "características esenciales o de identificación" — son éstas).
-  bienColor       String?
-  bienPlacas      String?
-  bienNIV         String?         // VIN/NIV vehicular (17 chars)
-  bienMotor       String?         // número de motor
+  bienColor        String?
+  bienPlacas       String?
+  bienNIV          String? // VIN/NIV vehicular (17 chars)
+  bienMotor        String? // número de motor
   // Lugar de entrega del bien (cláusula TERCERA PURO/FIN). Puede diferir
   // del domicilio fiscal del cliente (entrega directa del proveedor a
   // sucursal, obra, planta, etc.).
   lugarEntregaBien String?
-  proveedor       String?         // DEPRECATED — usar modelo Proveedor (1:1)
+  proveedor        String? // DEPRECATED — usar modelo Proveedor (1:1)
 
   // Parámetros financieros
-  producto        LeaseType
-  valorBien       Decimal
-  valorBienIVA    Decimal
-  plazo           Int
-  tasaAnual       Decimal
-  tasaMoratoria   Decimal?        // default: 2x tasa ordinaria
-  nivelRiesgo     RiskLevel
+  producto      LeaseType
+  valorBien     Decimal
+  valorBienIVA  Decimal
+  plazo         Int
+  tasaAnual     Decimal
+  tasaMoratoria Decimal? // default: 2x tasa ordinaria
+  nivelRiesgo   RiskLevel
 
   // Montos
-  enganche              Decimal  @default(0)
-  depositoGarantia      Decimal  @default(0)
+  enganche                Decimal @default(0)
+  depositoGarantia        Decimal @default(0)
   /// Snapshot del aporte inicial total (% sobre valorBien) elegido al
   /// firmar el contrato. enganche y depositoGarantia se derivan de aquí
   /// vía lib distribucion.ts (cliente) o validación cruzada (server).
-  aporteInicialPct      Decimal  @default(0)
-  comisionApertura      Decimal  @default(0)
-  rentaInicial          Decimal  @default(0)
-  gpsInstalacion        Decimal  @default(0)
+  aporteInicialPct        Decimal @default(0)
+  comisionApertura        Decimal @default(0)
+  rentaInicial            Decimal @default(0)
+  gpsInstalacion          Decimal @default(0)
   /// Snapshot del proveedor GPS elegido. null si "Sin GPS".
-  gpsProveedor          String?
-  seguroAnual           Decimal  @default(0)
-  seguroPendiente       Boolean  @default(false)  // CLAUDE.md §4.14
-  valorResidual         Decimal  @default(0)
+  gpsProveedor            String?
+  seguroAnual             Decimal @default(0)
+  seguroPendiente         Boolean @default(false) // CLAUDE.md §4.14
+  valorResidual           Decimal @default(0)
   // §4.13 — PURO: residual = depósito en garantía (renombrado 27-04-2026).
   valorResidualEsDeposito Boolean @default(false)
-  montoFinanciar        Decimal
-  rentaMensual          Decimal
-  rentaMensualIVA       Decimal
+  montoFinanciar          Decimal
+  rentaMensual            Decimal
+  rentaMensualIVA         Decimal
 
   // Fechas
-  fechaFirma            DateTime?
-  fechaInicio           DateTime?    // fecha de primera renta
-  fechaEntregaBien      DateTime?
-  fechaVencimiento      DateTime?
-  fechaTerminacion      DateTime?
+  fechaFirma       DateTime?
+  fechaInicio      DateTime? // fecha de primera renta
+  fechaEntregaBien DateTime?
+  fechaVencimiento DateTime?
+  fechaTerminacion DateTime?
   // Día del mes en que se paga la renta (cláusula OCTAVA FIN: "cada día
   // XX de mes"). Si null, se infiere del día de fechaInicio.
-  diaPagoMensual        Int?
+  diaPagoMensual   Int?
 
   // Estado del contrato
-  estatus         ContractStatus   @default(EN_PROCESO)
+  estatus           ContractStatus @default(EN_PROCESO)
   motivoTerminacion String?
 
   // Opción al vencimiento
   opcionVencimiento EndOption?
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Tipo de titular del expediente (PFAE/PM). Determina qué actores y
   // catálogos de documentos aplican al expediente del contrato. Snapshot
   // del Client.tipo al momento de crear el contrato — un cliente PFAE
   // que se transforma a PM no rompe contratos previos.
-  tipoTitular     ClientType
+  tipoTitular ClientType
 
-  amortizacion    AmortizationEntry[]
-  pagos           Payment[]
-  seguros         InsurancePolicy[]
-  gps             GPSDevice[]
-  mantenimientos  MaintenanceRecord[]
-  notas           Note[]
-  stageHistory    StageHistory[]
-  facturas        Invoice[]
+  amortizacion   AmortizationEntry[]
+  pagos          Payment[]
+  seguros        InsurancePolicy[]
+  gps            GPSDevice[]
+  mantenimientos MaintenanceRecord[]
+  notas          Note[]
+  stageHistory   StageHistory[]
+  facturas       Invoice[]
 
   // Expediente documental por contrato (Operación, Solicitante,
   // Rep. Legal, Accionista, Avales 1..N, Bien, Formalización).
-  actores         ExpedienteActor[]
+  actores ExpedienteActor[]
 
   // Relaciones KYC / solicitud
-  perfilTransaccional  PerfilTransaccional?
-  proveedorData        Proveedor?
-  declaracionesPEP     DeclaracionPEP[]
+  perfilTransaccional PerfilTransaccional?
+  proveedorData       Proveedor?
+  declaracionesPEP    DeclaracionPEP[]
 
   // Avales (deudores solidarios). El expediente legacy guardaba el
   // aval como ExpedienteActor con datosAdicionales: Json no tipado.
   // El modelo Aval estructura los datos demográficos completos que
   // exigen los contratos (RFC, CURP, domicilio, estado civil + cónyuge).
-  avales               Aval[]
+  avales Aval[]
 
   // Pagaré (sólo FIN, cláusula DÉCIMA TERCERA). 1:1.
-  pagare               Pagare?
+  pagare Pagare?
 
   @@map("contracts")
 }
@@ -656,9 +657,9 @@ model Contract {
 // 1:1 con Contract.
 // ────────────────────────────────────────────────────────────
 model PerfilTransaccional {
-  id                    String   @id @default(cuid())
-  contractId            String   @unique
-  contract              Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  id         String   @id @default(cuid())
+  contractId String   @unique
+  contract   Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
 
   productosQueAdquirira String?
   origenRecursos        String?
@@ -667,11 +668,11 @@ model PerfilTransaccional {
   frecuencia            FrecuenciaTrans?
   numOperacionesRango   NumOpsRango?
   realizaPagosEfectivo  Boolean?
-  efectivoMotivos       String?    // condicional: solo si realizaPagosEfectivo=true
-  efectivoMontoMensual  Decimal?   // condicional: solo si realizaPagosEfectivo=true
+  efectivoMotivos       String? // condicional: solo si realizaPagosEfectivo=true
+  efectivoMontoMensual  Decimal? // condicional: solo si realizaPagosEfectivo=true
 
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("perfil_transaccional")
 }
@@ -700,9 +701,9 @@ enum NumOpsRango {
 // 1:1 con Contract.
 // ────────────────────────────────────────────────────────────
 model Proveedor {
-  id             String   @id @default(cuid())
-  contractId     String   @unique
-  contract       Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  id         String   @id @default(cuid())
+  contractId String   @unique
+  contract   Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
 
   nombre         String
   nombreContacto String?
@@ -711,24 +712,24 @@ model Proveedor {
 
   // Identidad fiscal (cláusula SEGUNDA FIN: "LA ARRENDADORA se obliga a
   // adquirir el bien"). Sin RFC no se puede emitir CFDI de compra.
-  rfc            String?
+  rfc         String?
   // Domicilio fiscal (para CFDI y cláusula de notificaciones)
-  calle          String?
-  numExterior    String?
-  numInterior    String?
-  colonia        String?
-  municipio      String?
-  ciudad         String?
-  estado         String?
-  pais           String?  @default("México")
-  cp             String?
+  calle       String?
+  numExterior String?
+  numInterior String?
+  colonia     String?
+  municipio   String?
+  ciudad      String?
+  estado      String?
+  pais        String? @default("México")
+  cp          String?
   // Datos bancarios para dispersión del monto de adquisición
-  banco          String?
-  clabe          String?
-  numCuenta      String?
+  banco       String?
+  clabe       String?
+  numCuenta   String?
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("proveedores")
 }
@@ -740,23 +741,23 @@ model Proveedor {
 // Todos los campos de detalle son condicionales a esPep=true.
 // ────────────────────────────────────────────────────────────
 model DeclaracionPEP {
-  id                   String   @id @default(cuid())
-  contractId           String
-  contract             Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  id         String   @id @default(cuid())
+  contractId String
+  contract   Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
 
-  tipo                 PepTipo
-  esPep                Boolean   // Sí/No
+  tipo  PepTipo
+  esPep Boolean // Sí/No
 
   // Condicionales a esPep=true:
-  nombre               String?   // para PARIENTE (nombre del pariente PEP)
-  parentesco           String?   // para PARIENTE (relación con el titular)
+  nombre               String? // para PARIENTE (nombre del pariente PEP)
+  parentesco           String? // para PARIENTE (relación con el titular)
   dependencia          String?
   puesto               String?
   periodoEjercicio     String?
   principalesFunciones String?
 
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([contractId, tipo])
   @@map("declaraciones_pep")
@@ -779,19 +780,19 @@ enum ContractStage {
 }
 
 enum ContractStatus {
-  EN_PROCESO    // aún en pipeline
-  VIGENTE       // contrato activo
-  VENCIDO       // pasó fecha de vencimiento sin formalizar cierre
-  TERMINADO     // terminación normal
-  RESCINDIDO    // rescisión por incumplimiento
+  EN_PROCESO // aún en pipeline
+  VIGENTE // contrato activo
+  VENCIDO // pasó fecha de vencimiento sin formalizar cierre
+  TERMINADO // terminación normal
+  RESCINDIDO // rescisión por incumplimiento
   REESTRUCTURADO
 }
 
 enum EndOption {
   DEVOLUCION
   RENOVACION
-  RESCATE        // Puro: paga valor residual
-  OPCION_COMPRA  // Financiero: paga 2% simbólico
+  RESCATE // Puro: paga valor residual
+  OPCION_COMPRA // Financiero: paga 2% simbólico
 }
 
 model StageHistory {
@@ -811,19 +812,19 @@ model StageHistory {
 // ============================================================
 
 model AmortizationEntry {
-  id            String   @id @default(cuid())
-  contractId    String
-  contract      Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  periodo       Int
-  fechaPago     DateTime
-  saldoInicial  Decimal
-  intereses     Decimal  @default(0)  // solo financiero
-  pagoCapital   Decimal  @default(0)  // solo financiero
-  renta         Decimal
-  iva           Decimal
-  seguro        Decimal  @default(0)
-  pagoTotal     Decimal
-  saldoFinal    Decimal
+  id           String   @id @default(cuid())
+  contractId   String
+  contract     Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  periodo      Int
+  fechaPago    DateTime
+  saldoInicial Decimal
+  intereses    Decimal  @default(0) // solo financiero
+  pagoCapital  Decimal  @default(0) // solo financiero
+  renta        Decimal
+  iva          Decimal
+  seguro       Decimal  @default(0)
+  pagoTotal    Decimal
+  saldoFinal   Decimal
 
   @@unique([contractId, periodo])
   @@map("amortization_entries")
@@ -834,33 +835,43 @@ model AmortizationEntry {
 // ============================================================
 
 model Payment {
-  id              String        @id @default(cuid())
-  contractId      String
-  contract        Contract      @relation(fields: [contractId], references: [id])
-  userId          String?       // quien registró el pago
-  user            User?         @relation(fields: [userId], references: [id])
+  id         String   @id @default(cuid())
+  contractId String
+  contract   Contract @relation(fields: [contractId], references: [id])
+  userId     String? // quien registró el pago
+  user       User?    @relation("PaymentsRegistered", fields: [userId], references: [id])
 
-  periodo         Int?          // número de renta que cubre
-  tipo            PaymentType
-  fechaPago       DateTime
+  periodo          Int? // número de renta que cubre
+  tipo             PaymentType
+  fechaPago        DateTime
   fechaVencimiento DateTime?
 
-  montoRenta      Decimal       @default(0)
-  montoIVA        Decimal       @default(0)
-  montoSeguro     Decimal       @default(0)
-  montoMoratorio  Decimal       @default(0)
-  montoIVAMoratorio Decimal     @default(0)
-  montoCapitalExtra Decimal     @default(0) // abono a capital (financiero)
-  montoTotal      Decimal
+  montoRenta        Decimal @default(0)
+  montoIVA          Decimal @default(0)
+  montoSeguro       Decimal @default(0)
+  montoMoratorio    Decimal @default(0)
+  montoIVAMoratorio Decimal @default(0)
+  montoCapitalExtra Decimal @default(0) // abono a capital (financiero)
+  montoTotal        Decimal
 
-  diasAtraso      Int           @default(0)
-  referencia      String?       // referencia bancaria / comprobante
-  observaciones   String?
+  diasAtraso    Int     @default(0)
+  referencia    String? // referencia bancaria / comprobante
+  observaciones String?
 
-  factura         Invoice?
+  factura Invoice?
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  // Soft delete (auditoría PLD): un pago borrado NO se elimina físicamente,
+  // se marca con `deletedAt` y queda excluido de los cálculos de saldo.
+  // El registro persiste para evidencia ante CNBV/CONDUSEF y para reconstruir
+  // historial si la baja fue un error. `deletedBy` apunta al usuario que la
+  // ejecutó; `motivoEliminacion` es texto libre opcional (recomendable).
+  deletedAt         DateTime?
+  deletedBy         String?
+  deletedByUser     User?     @relation("PaymentsDeletedBy", fields: [deletedBy], references: [id])
+  motivoEliminacion String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Índices de performance:
   //   (contractId, periodo) — buscar el pago de un periodo concreto
@@ -868,9 +879,12 @@ model Payment {
   //   (contractId, fechaPago) — listar pagos cronológicos por contrato
   //     (estado de cuenta, portal del arrendatario).
   //   (fechaPago) — reportes de cobranza por rango de fechas.
+  //   (deletedAt) — filtros eficientes "WHERE deletedAt IS NULL" cuando
+  //     haya volumen significativo de pagos borrados (auditoría).
   @@index([contractId, periodo])
   @@index([contractId, fechaPago])
   @@index([fechaPago])
+  @@index([deletedAt])
   @@map("payments")
 }
 
@@ -879,16 +893,16 @@ model Payment {
 // ============================================================
 
 model BankStatement {
-  id           String            @id @default(cuid())
-  banco        String                                       // BBVA, Santander, Banamex, ...
-  cuenta       String?                                      // CLABE o nº cuenta
-  fileName     String
-  fechaInicio  DateTime?
-  fechaFin     DateTime?
-  totalAbonos  Decimal           @default(0)
-  totalCargos  Decimal           @default(0)
-  uploadedBy   String?
-  createdAt    DateTime          @default(now())
+  id          String    @id @default(cuid())
+  banco       String // BBVA, Santander, Banamex, ...
+  cuenta      String? // CLABE o nº cuenta
+  fileName    String
+  fechaInicio DateTime?
+  fechaFin    DateTime?
+  totalAbonos Decimal   @default(0)
+  totalCargos Decimal   @default(0)
+  uploadedBy  String?
+  createdAt   DateTime  @default(now())
 
   transacciones BankTransaction[]
 
@@ -896,24 +910,24 @@ model BankStatement {
 }
 
 model BankTransaction {
-  id            String         @id @default(cuid())
-  statementId   String
-  statement     BankStatement  @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  id          String        @id @default(cuid())
+  statementId String
+  statement   BankStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
 
-  fecha         DateTime
-  descripcion   String
-  referencia    String?
-  monto         Decimal                                    // positivo = abono (depósito a Inyecta)
-  tipo          String                                     // ABONO | CARGO
+  fecha       DateTime
+  descripcion String
+  referencia  String?
+  monto       Decimal // positivo = abono (depósito a Inyecta)
+  tipo        String // ABONO | CARGO
 
   // Conciliación
-  matched       Boolean        @default(false)
-  paymentId     String?                                    // referencia (sin FK estricto)
-  matchScore    Int?                                       // 0-100 (qué tan confiable fue el match)
-  matchedBy     String?                                    // userId o "AUTO"
-  matchedAt     DateTime?
+  matched    Boolean   @default(false)
+  paymentId  String? // referencia (sin FK estricto)
+  matchScore Int? // 0-100 (qué tan confiable fue el match)
+  matchedBy  String? // userId o "AUTO"
+  matchedAt  DateTime?
 
-  createdAt     DateTime       @default(now())
+  createdAt DateTime @default(now())
 
   @@index([statementId])
   @@index([matched])
@@ -925,50 +939,50 @@ model BankTransaction {
 // ============================================================
 
 model Invoice {
-  id             String        @id @default(cuid())
+  id         String   @id @default(cuid())
   // Vínculo
-  paymentId      String?       @unique
-  payment        Payment?      @relation(fields: [paymentId], references: [id])
-  contractId     String
-  contract       Contract      @relation(fields: [contractId], references: [id])
-  clientId       String
-  client         Client        @relation(fields: [clientId], references: [id])
+  paymentId  String?  @unique
+  payment    Payment? @relation(fields: [paymentId], references: [id])
+  contractId String
+  contract   Contract @relation(fields: [contractId], references: [id])
+  clientId   String
+  client     Client   @relation(fields: [clientId], references: [id])
 
   // CFDI
-  tipo           InvoiceType   @default(INGRESO)        // INGRESO / EGRESO / PAGO
-  serie          String        @default("A")
-  folio          Int
-  uuid           String?       @unique                  // SAT
-  fechaTimbrado  DateTime?
-  status         InvoiceStatus @default(BORRADOR)
+  tipo          InvoiceType   @default(INGRESO) // INGRESO / EGRESO / PAGO
+  serie         String        @default("A")
+  folio         Int
+  uuid          String?       @unique // SAT
+  fechaTimbrado DateTime?
+  status        InvoiceStatus @default(BORRADOR)
 
   // Importes
-  subtotal       Decimal
-  iva            Decimal       @default(0)
-  retenciones    Decimal       @default(0)
-  total          Decimal
+  subtotal    Decimal
+  iva         Decimal @default(0)
+  retenciones Decimal @default(0)
+  total       Decimal
 
   // Datos receptor (snapshot al momento de timbrado)
   rfcReceptor    String
   nombreReceptor String
-  usoCfdi        String        @default("G03")          // Gastos en general
-  metodoPago     String        @default("PUE")
-  formaPago      String        @default("03")           // Transferencia
-  regimenFiscal  String        @default("601")
+  usoCfdi        String @default("G03") // Gastos en general
+  metodoPago     String @default("PUE")
+  formaPago      String @default("03") // Transferencia
+  regimenFiscal  String @default("601")
 
   // Archivos
-  xmlUrl         String?
-  pdfUrl         String?
+  xmlUrl String?
+  pdfUrl String?
 
   // Cancelación
   motivoCancelacion String?
   fechaCancelacion  DateTime?
 
   // Provider
-  provider       String        @default("MOCK")         // MOCK | FACTURAMA | SW
+  provider String @default("MOCK") // MOCK | FACTURAMA | SW
 
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([contractId])
   @@index([clientId])
@@ -992,10 +1006,10 @@ enum InvoiceStatus {
 enum PaymentType {
   RENTA_ORDINARIA
   RENTA_ADELANTADA
-  ABONO_CAPITAL       // solo financiero
+  ABONO_CAPITAL // solo financiero
   LIQUIDACION_ANTICIPADA
   MORATORIO
-  RENTA_EXTRAORDINARIA  // post-vencimiento sin formalizar
+  RENTA_EXTRAORDINARIA // post-vencimiento sin formalizar
   ENGANCHE
   DEPOSITO_GARANTIA
   COMISION_APERTURA
@@ -1009,21 +1023,21 @@ enum PaymentType {
 // ============================================================
 
 model InsurancePolicy {
-  id              String   @id @default(cuid())
-  contractId      String
-  contract        Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  aseguradora     String?  // "Seguros El Potosí", etc.
-  numPoliza       String?
-  tipoCobertura   String?
-  montoAsegurado  Decimal?
-  primaAnual      Decimal?
-  fechaInicio     DateTime?
+  id               String    @id @default(cuid())
+  contractId       String
+  contract         Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  aseguradora      String? // "Seguros El Potosí", etc.
+  numPoliza        String?
+  tipoCobertura    String?
+  montoAsegurado   Decimal?
+  primaAnual       Decimal?
+  fechaInicio      DateTime?
   fechaVencimiento DateTime?
-  endosoPref      Boolean  @default(true)  // endoso preferente a Inyecta
-  vigente         Boolean  @default(true)
-  observaciones   String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  endosoPref       Boolean   @default(true) // endoso preferente a Inyecta
+  vigente          Boolean   @default(true)
+  observaciones    String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@map("insurance_policies")
 }
@@ -1033,19 +1047,19 @@ model InsurancePolicy {
 // ============================================================
 
 model GPSDevice {
-  id              String   @id @default(cuid())
-  contractId      String
-  contract        Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  marca           String?
-  modelo          String?
-  numSerie        String?
-  proveedor       String?
+  id               String    @id @default(cuid())
+  contractId       String
+  contract         Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  marca            String?
+  modelo           String?
+  numSerie         String?
+  proveedor        String?
   fechaInstalacion DateTime?
-  activo          Boolean  @default(true)
-  costoInstalacion Decimal? @default(0)
-  observaciones   String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  activo           Boolean   @default(true)
+  costoInstalacion Decimal?  @default(0)
+  observaciones    String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@map("gps_devices")
 }
@@ -1055,18 +1069,18 @@ model GPSDevice {
 // ============================================================
 
 model MaintenanceRecord {
-  id              String          @id @default(cuid())
-  contractId      String
-  contract        Contract        @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  tipo            MaintenanceType
-  fecha           DateTime
-  descripcion     String?
-  taller          String?         // agencia/taller
-  costo           Decimal?        @default(0)
-  comprobanteUrl  String?
-  observaciones   String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String          @id @default(cuid())
+  contractId     String
+  contract       Contract        @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  tipo           MaintenanceType
+  fecha          DateTime
+  descripcion    String?
+  taller         String? // agencia/taller
+  costo          Decimal?        @default(0)
+  comprobanteUrl String?
+  observaciones  String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
   @@map("maintenance_records")
 }
@@ -1075,7 +1089,7 @@ enum MaintenanceType {
   PREVENTIVO
   CORRECTIVO
   REVISION_ANUAL
-  REVISION_ATRASO   // revisión por atraso en pagos
+  REVISION_ATRASO // revisión por atraso en pagos
   SINIESTRO
 }
 
@@ -1084,16 +1098,16 @@ enum MaintenanceType {
 // ============================================================
 
 model Note {
-  id          String   @id @default(cuid())
-  contractId  String?
-  contract    Contract? @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  clientId    String?
-  client      Client?  @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  userId      String
-  user        User     @relation(fields: [userId], references: [id])
-  contenido   String
-  tipo        NoteType @default(GENERAL)
-  createdAt   DateTime @default(now())
+  id         String    @id @default(cuid())
+  contractId String?
+  contract   Contract? @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  clientId   String?
+  client     Client?   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User      @relation(fields: [userId], references: [id])
+  contenido  String
+  tipo       NoteType  @default(GENERAL)
+  createdAt  DateTime  @default(now())
 
   @@map("notes")
 }
@@ -1120,18 +1134,18 @@ enum NoteType {
 // ============================================================
 
 model Notificacion {
-  id          String   @id @default(cuid())
-  userId      String                          // destinatario
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tipo        String                          // ej: "SOLICITUD_CREADA", "PAGO_REGISTRADO", "CONTRATO_VENCIDO"
-  titulo      String                          // texto corto para listado
-  mensaje     String                          // descripción legible
-  entidad     String?                         // ej: "Contract", "Payment", "Quotation"
-  entidadId   String?                         // id del recurso relacionado
-  url         String?                         // deep-link al detalle (opcional)
-  leida       Boolean  @default(false)
-  leidaAt     DateTime?
-  createdAt   DateTime @default(now())
+  id        String    @id @default(cuid())
+  userId    String // destinatario
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tipo      String // ej: "SOLICITUD_CREADA", "PAGO_REGISTRADO", "CONTRATO_VENCIDO"
+  titulo    String // texto corto para listado
+  mensaje   String // descripción legible
+  entidad   String? // ej: "Contract", "Payment", "Quotation"
+  entidadId String? // id del recurso relacionado
+  url       String? // deep-link al detalle (opcional)
+  leida     Boolean   @default(false)
+  leidaAt   DateTime?
+  createdAt DateTime  @default(now())
 
   @@index([userId, leida])
   @@index([userId, createdAt])
@@ -1144,21 +1158,21 @@ model Notificacion {
 }
 
 model Bitacora {
-  id          String   @id @default(cuid())
-  requestId   String?                       // X-Request-ID propagado por requestId middleware (correlación con logs pino)
-  usuarioId   String?
-  usuarioEmail String?            // snapshot del email al momento del evento
-  usuarioRol  String?             // snapshot del rol
-  metodo      String              // GET, POST, PATCH, PUT, DELETE
-  ruta        String              // ej: "/api/contracts/abc123"
-  entidad     String?             // ej: "Contract", "Payment"
-  entidadId   String?             // id del recurso afectado (si aplica)
-  accion      String              // verbo descriptivo: CREATE, UPDATE, DELETE, LOGIN, etc.
-  payloadJson Json?               // body sanitizado (sin password ni tokens)
-  responseStatus Int?             // 200, 201, 4xx, 5xx
-  ip          String?
-  userAgent   String?
-  createdAt   DateTime @default(now())
+  id             String   @id @default(cuid())
+  requestId      String? // X-Request-ID propagado por requestId middleware (correlación con logs pino)
+  usuarioId      String?
+  usuarioEmail   String? // snapshot del email al momento del evento
+  usuarioRol     String? // snapshot del rol
+  metodo         String // GET, POST, PATCH, PUT, DELETE
+  ruta           String // ej: "/api/contracts/abc123"
+  entidad        String? // ej: "Contract", "Payment"
+  entidadId      String? // id del recurso afectado (si aplica)
+  accion         String // verbo descriptivo: CREATE, UPDATE, DELETE, LOGIN, etc.
+  payloadJson    Json? // body sanitizado (sin password ni tokens)
+  responseStatus Int? // 200, 201, 4xx, 5xx
+  ip             String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
 
   @@index([usuarioId])
   @@index([entidad, entidadId])
@@ -1201,13 +1215,13 @@ model Bitacora {
 // ============================================================
 
 enum ActorTipo {
-  OPERACION             // documentos del proceso de originación
-  SOLICITANTE           // titular del contrato (PFAE o PM)
-  REPRESENTANTE_LEGAL   // único, solo si tipoTitular = PM
-  PRINCIPAL_ACCIONISTA  // único, solo si tipoTitular = PM
-  AVAL                  // 0..N obligados solidarios por contrato
-  BIEN_ARRENDADO        // factura, avalúo, póliza, REPUVE, RUG, etc.
-  FORMALIZACION         // resolución, contrato firmado, RUG/RPP
+  OPERACION // documentos del proceso de originación
+  SOLICITANTE // titular del contrato (PFAE o PM)
+  REPRESENTANTE_LEGAL // único, solo si tipoTitular = PM
+  PRINCIPAL_ACCIONISTA // único, solo si tipoTitular = PM
+  AVAL // 0..N obligados solidarios por contrato
+  BIEN_ARRENDADO // factura, avalúo, póliza, REPUVE, RUG, etc.
+  FORMALIZACION // resolución, contrato firmado, RUG/RPP
 }
 
 enum ActorSubtipo {
@@ -1222,19 +1236,19 @@ enum DocumentoEstatus {
 }
 
 model ExpedienteActor {
-  id              String        @id @default(cuid())
-  contractId      String
-  contract        Contract      @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  tipo            ActorTipo
-  subtipo         ActorSubtipo? // requerido cuando tipo = AVAL; null en los demás
-  orden           Int           @default(1) // 1 para fijos; 1..N para AVAL
-  nombre          String?       // nombre completo o razón social del actor
-  rfc             String?       // opcional — para actores con identidad propia
-  datosAdicionales Json?        // dirección, teléfono, % accionario, parentesco, etc.
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id               String        @id @default(cuid())
+  contractId       String
+  contract         Contract      @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  tipo             ActorTipo
+  subtipo          ActorSubtipo? // requerido cuando tipo = AVAL; null en los demás
+  orden            Int           @default(1) // 1 para fijos; 1..N para AVAL
+  nombre           String? // nombre completo o razón social del actor
+  rfc              String? // opcional — para actores con identidad propia
+  datosAdicionales Json? // dirección, teléfono, % accionario, parentesco, etc.
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
-  documentos      ExpedienteDocumento[]
+  documentos ExpedienteDocumento[]
 
   // Unicidad: para actores fijos (orden=1) garantiza un solo
   // OPERACION/SOLICITANTE/REP_LEGAL/etc. por contrato. Para AVAL,
@@ -1245,28 +1259,28 @@ model ExpedienteActor {
 }
 
 model ExpedienteDocumento {
-  id             String           @id @default(cuid())
-  actorId        String
-  actor          ExpedienteActor  @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  id            String           @id @default(cuid())
+  actorId       String
+  actor         ExpedienteActor  @relation(fields: [actorId], references: [id], onDelete: Cascade)
   // Clave del catálogo del actor (ej. "INE", "ACTA_CONSTITUTIVA")
   // o null si el promotor lo subió como "Libre/Sin clasificar".
-  tipoDocumento  String?
+  tipoDocumento String?
   // Nombre original del archivo subido (para mostrar en UI).
-  nombreArchivo  String
+  nombreArchivo String
   // URL pública relativa (servida por express.static, ej. /uploads/expedientes/...).
-  archivoUrl     String
+  archivoUrl    String
   // Físico en oficina y digital en sistema son INDEPENDIENTES.
   // tieneDigital se setea automáticamente al subir; tieneFisico se
   // marca manualmente cuando llega la copia en papel.
-  tieneFisico    Boolean          @default(false)
-  tieneDigital   Boolean          @default(true)
-  estatus        DocumentoEstatus @default(PENDIENTE)
-  notas          String?
-  fechaSubida    DateTime         @default(now())
-  subidoPor      String?
-  subidoPorUser  User?            @relation(fields: [subidoPor], references: [id])
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  tieneFisico   Boolean          @default(false)
+  tieneDigital  Boolean          @default(true)
+  estatus       DocumentoEstatus @default(PENDIENTE)
+  notas         String?
+  fechaSubida   DateTime         @default(now())
+  subidoPor     String?
+  subidoPorUser User?            @relation(fields: [subidoPor], references: [id])
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 
   @@index([actorId])
   @@index([actorId, tipoDocumento])
@@ -1288,8 +1302,8 @@ model ExpedienteDocumento {
 //   - 'QUOTATION'       → COT-NNNN     (year = 0, no rota anual)
 //   - 'INVOICE_<serie>' → folio Int por serie SAT (year = 0)
 model FolioSequence {
-  scope     String   // 'CONTRACT' | 'QUOTATION' | 'INVOICE_<serie>'
-  year      Int      // 2026, o 0 si la serie no rota anual
+  scope     String // 'CONTRACT' | 'QUOTATION' | 'INVOICE_<serie>'
+  year      Int // 2026, o 0 si la serie no rota anual
   ultimo    Int      @default(0)
   updatedAt DateTime @updatedAt
 
@@ -1315,29 +1329,29 @@ model FolioSequence {
 // generado, y permite (a futuro) tener múltiples perfiles de tasas
 // (ej. clave='gobierno' con condiciones distintas).
 model Catalog {
-  clave                    String   @id  // 'default' (única por ahora)
+  clave                   String   @id // 'default' (única por ahora)
   // Tasa anual ordinaria (decimal: 0.36 = 36%)
-  tasaAnualDefault         Decimal  @db.Decimal(7, 4)
-  tasaAnualMin             Decimal  @db.Decimal(7, 4)
-  tasaAnualMax             Decimal  @db.Decimal(7, 4)
+  tasaAnualDefault        Decimal  @db.Decimal(7, 4)
+  tasaAnualMin            Decimal  @db.Decimal(7, 4)
+  tasaAnualMax            Decimal  @db.Decimal(7, 4)
   // Comisión de apertura (decimal: 0.05 = 5%)
-  comisionAperturaDefault  Decimal  @db.Decimal(7, 4)
-  comisionAperturaMin      Decimal  @db.Decimal(7, 4)
-  comisionAperturaMax      Decimal  @db.Decimal(7, 4)
+  comisionAperturaDefault Decimal  @db.Decimal(7, 4)
+  comisionAperturaMin     Decimal  @db.Decimal(7, 4)
+  comisionAperturaMax     Decimal  @db.Decimal(7, 4)
   // GPS — monto absoluto en MXN; suele ser único de instalación
-  gpsMontoDefault          Decimal  @db.Decimal(12, 2)
-  gpsFinanciableDefault    Boolean  @default(true)
+  gpsMontoDefault         Decimal  @db.Decimal(12, 2)
+  gpsFinanciableDefault   Boolean  @default(true)
   // Multiplicador moratorio sobre la tasa ordinaria (CLAUDE.md §4.9)
   // Default 2.0 → 36% ord. = 72% mor. Editable por si Inyecta cambia
   // política comercial (ej. 1.5× para clientes preferentes).
-  tasaMoratoriaMultiplier  Decimal  @db.Decimal(4, 2) @default(2.0)
+  tasaMoratoriaMultiplier Decimal  @default(2.0) @db.Decimal(4, 2)
   // Folio CONDUSEF del Registro de Contratos de Adhesión (cláusula I-F
   // PURO/FIN). Uno por producto. Vive en config porque es por
   // plantilla, no por contrato.
-  folioCondusefPuro        String?
-  folioCondusefFin         String?
-  updatedAt                DateTime @updatedAt
-  updatedById              String?  // user.id que editó la última vez
+  folioCondusefPuro       String?
+  folioCondusefFin        String?
+  updatedAt               DateTime @updatedAt
+  updatedById             String? // user.id que editó la última vez
 
   @@map("catalog")
 }
@@ -1357,12 +1371,12 @@ model Catalog {
 // suelen exigir aval del accionista mayoritario + del CEO).
 // ============================================================
 model Aval {
-  id              String   @id @default(cuid())
-  contractId      String
-  contract        Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  orden           Int      @default(1)  // 1, 2, 3 — para listar en orden estable
+  id         String   @id @default(cuid())
+  contractId String
+  contract   Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  orden      Int      @default(1) // 1, 2, 3 — para listar en orden estable
 
-  tipo            ClientType  // PFAE | PM
+  tipo ClientType // PFAE | PM
 
   // Identidad PF
   nombre          String
@@ -1373,7 +1387,7 @@ model Aval {
   fiel            String?
   fechaNacimiento DateTime?
   lugarNacimiento String?
-  nacionalidad    String?  @default("Mexicana")
+  nacionalidad    String?   @default("Mexicana")
 
   // Estado civil + cónyuge (relevante por gravamen patrimonial)
   estadoCivil        EstadoCivil?
@@ -1382,19 +1396,19 @@ model Aval {
   rfcConyuge         String?
 
   // Domicilio
-  calle           String?
-  numExterior     String?
-  numInterior     String?
-  colonia         String?
-  municipio       String?
-  ciudad          String?
-  estado          String?
-  pais            String?  @default("México")
-  cp              String?
+  calle       String?
+  numExterior String?
+  numInterior String?
+  colonia     String?
+  municipio   String?
+  ciudad      String?
+  estado      String?
+  pais        String? @default("México")
+  cp          String?
 
   // Contacto
-  telefono        String?
-  email           String?
+  telefono String?
+  email    String?
 
   // Si el aval es PM
   razonSocial          String?
@@ -1410,8 +1424,8 @@ model Aval {
   poderEscrituraFecha  DateTime?
   poderNotarioNombre   String?
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([contractId, orden])
   @@index([contractId])
@@ -1434,15 +1448,15 @@ model Pagare {
   id               String   @id @default(cuid())
   contractId       String   @unique
   contract         Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  numeroPagare     String                 // serie del pagaré (puede coincidir con folio del contrato)
-  fechaSuscripcion DateTime               // generalmente = Contract.fechaFirma
-  fechaVencimiento DateTime               // = Contract.fechaVencimiento
-  montoPagare      Decimal                // = renta × plazo con IVA (renta global)
+  numeroPagare     String // serie del pagaré (puede coincidir con folio del contrato)
+  fechaSuscripcion DateTime // generalmente = Contract.fechaFirma
+  fechaVencimiento DateTime // = Contract.fechaVencimiento
+  montoPagare      Decimal // = renta × plazo con IVA (renta global)
   lugarSuscripcion String?
   observaciones    String?
 
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("pagares")
 }
@@ -1464,21 +1478,21 @@ model Pagare {
 // (downstream el motor de cálculo recibe un solo número, sin saber del
 // proveedor — desacopla el catálogo del lease calculator).
 model GpsProveedor {
-  clave        String   @id            // 'GBR' | 'TECNO_LOGISTIC' | ... (clave estable, NO id auto)
-  nombre       String                  // 'GBR' / 'Tecno Logistic'
+  clave       String   @id // 'GBR' | 'TECNO_LOGISTIC' | ... (clave estable, NO id auto)
+  nombre      String // 'GBR' / 'Tecno Logistic'
   /// Texto que el operador ve junto al precio en el dropdown del cotizador.
   /// NO se imprime en el PDF (decisión Damián 28-04-2026).
-  descripcion  String?
+  descripcion String?
   /// Precios por plazo. La función `precioGpsPorPlazo(plazo)` redondea
   /// hacia arriba al siguiente plazo de la tabla (12/18/24 → precio24m,
   /// 30/36 → precio36m, 42/48 → precio48m).
-  precio24m    Decimal  @db.Decimal(12, 2)
-  precio36m    Decimal  @db.Decimal(12, 2)
-  precio48m    Decimal  @db.Decimal(12, 2)
-  orden        Int      @default(0)
-  activo       Boolean  @default(true)
-  updatedAt    DateTime @updatedAt
-  updatedById  String?
+  precio24m   Decimal  @db.Decimal(12, 2)
+  precio36m   Decimal  @db.Decimal(12, 2)
+  precio48m   Decimal  @db.Decimal(12, 2)
+  orden       Int      @default(0)
+  activo      Boolean  @default(true)
+  updatedAt   DateTime @updatedAt
+  updatedById String?
 
   @@map("gps_proveedores")
 }
@@ -1490,17 +1504,17 @@ model GpsProveedor {
 // Una fila por nivel. ADMIN/DIRECTOR puede ajustar los porcentajes;
 // el visor de opciones (generarOpcionesRiesgo) lee desde aquí.
 model RiskPreset {
-  nivel                String   @id  // 'A' | 'B' | 'C'
-  nombre               String           // 'Riesgo bajo' | 'medio' | 'alto'
+  nivel           String   @id // 'A' | 'B' | 'C'
+  nombre          String // 'Riesgo bajo' | 'medio' | 'alto'
   // PURO: enganche (típicamente 0), depósito (= valor residual display)
-  engachePuroPct       Decimal  @db.Decimal(7, 4) @default(0)
-  depositoPuroPct      Decimal  @db.Decimal(7, 4)
+  engachePuroPct  Decimal  @default(0) @db.Decimal(7, 4)
+  depositoPuroPct Decimal  @db.Decimal(7, 4)
   // FINANCIERO: enganche y depósito independientes
-  engancheFinPct       Decimal  @db.Decimal(7, 4)
-  depositoFinPct       Decimal  @db.Decimal(7, 4)
-  orden                Int      @default(0)  // 1, 2, 3 para ordenar UI
-  updatedAt            DateTime @updatedAt
-  updatedById          String?
+  engancheFinPct  Decimal  @db.Decimal(7, 4)
+  depositoFinPct  Decimal  @db.Decimal(7, 4)
+  orden           Int      @default(0) // 1, 2, 3 para ordenar UI
+  updatedAt       DateTime @updatedAt
+  updatedById     String?
 
   @@map("risk_presets")
 }

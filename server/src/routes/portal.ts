@@ -95,7 +95,7 @@ router.get('/:token/contract/:id', async (req: Request, res: Response) => {
       where: { id: req.params.id, clientId: client.id },
       include: {
         amortizacion: { orderBy: { periodo: 'asc' } },
-        pagos: { orderBy: [{ periodo: 'asc' }, { createdAt: 'asc' }] },
+        pagos: { where: { deletedAt: null }, orderBy: [{ periodo: 'asc' }, { createdAt: 'asc' }] },
       },
     });
     if (!contract) return res.status(404).json({ error: 'Contrato no encontrado' });
@@ -192,7 +192,7 @@ router.get('/:token/payments', async (req: Request, res: Response) => {
     if (!client) return res.status(404).json({ error: 'Token inválido' });
 
     const payments = await prisma.payment.findMany({
-      where: { contract: { clientId: client.id } },
+      where: { contract: { clientId: client.id }, deletedAt: null },
       include: { contract: { select: { folio: true } } },
       orderBy: { fechaPago: 'desc' },
       take: 200,

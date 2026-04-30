@@ -71,7 +71,7 @@ router.get('/preview', requireAuth, async (req: Request, res: Response) => {
           orderBy: { orden: 'asc' },
         },
         amortizacion: { orderBy: { periodo: 'asc' } },
-        pagos: { orderBy: [{ periodo: 'asc' }, { createdAt: 'asc' }] },
+        pagos: { where: { deletedAt: null }, orderBy: [{ periodo: 'asc' }, { createdAt: 'asc' }] },
       },
     });
 
@@ -339,7 +339,7 @@ router.get('/solicitud/:contractId', requireAuth, async (req: Request, res: Resp
           },
         },
         amortizacion: { orderBy: { periodo: 'asc' } },
-        pagos: { orderBy: [{ periodo: 'asc' }, { createdAt: 'asc' }] },
+        pagos: { where: { deletedAt: null }, orderBy: [{ periodo: 'asc' }, { createdAt: 'asc' }] },
       },
     });
 

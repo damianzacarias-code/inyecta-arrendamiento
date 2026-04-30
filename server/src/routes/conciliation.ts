@@ -185,7 +185,7 @@ router.post('/auto-match/:statementId', requireAuth, async (req: Request, res: R
       where: { estatus: { in: ['VIGENTE', 'VENCIDO'] } },
       include: {
         amortizacion: { orderBy: { periodo: 'asc' } },
-        pagos: true,
+        pagos: { where: { deletedAt: null } },
         client: { select: { nombre: true, apellidoPaterno: true, razonSocial: true, rfc: true } },
       },
     });

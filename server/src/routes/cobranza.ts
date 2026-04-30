@@ -214,12 +214,16 @@ router.get('/calendar', requireAuth, async (req: Request, res: Response) => {
       orderBy: { fechaPago: 'asc' },
     });
 
-    // Pagos del mes para esos contratos
+    // Pagos del mes para esos contratos. `deletedAt: null` excluye los
+    // pagos borrados (soft delete) — quedan en BD para auditoría pero no
+    // entran en cálculos de saldo / moratorio. Mismo patrón en el resto
+    // del archivo y en reports/portal/etc.
     const contractIds = [...new Set(entries.map(e => e.contractId))];
     const payments = await prisma.payment.findMany({
       where: {
         contractId: { in: contractIds },
         periodo: { in: entries.map(e => e.periodo) },
+        deletedAt: null,
       },
     });
 
@@ -290,7 +294,7 @@ router.get('/contract/:contractId', requireAuth, async (req: Request, res: Respo
           },
         },
         amortizacion: { orderBy: { periodo: 'asc' } },
-        pagos: { orderBy: [{ periodo: 'asc' }, { createdAt: 'asc' }] },
+        pagos: { where: { deletedAt: null }, orderBy: [{ periodo: 'asc' }, { createdAt: 'asc' }] },
       },
     });
 
@@ -481,7 +485,7 @@ router.post('/pay', requireAuth, async (req: Request, res: Response) => {
         // sujeto al control de Serializable (sin esto, dos TXs leerían los
         // mismos prevPayments y la detección de conflicto no se dispararía).
         const prevPayments = await tx.payment.findMany({
-          where: { contractId: data.contractId, periodo: data.periodo },
+          where: { contractId: data.contractId, periodo: data.periodo, deletedAt: null },
         });
 
         const now = new Date();
@@ -689,7 +693,7 @@ router.post('/pay-advance', requireAuth, async (req: Request, res: Response) => 
 
         // Pagos previos DENTRO de la TX (snapshot consistente bajo Serializable).
         const existingPayments = await tx.payment.findMany({
-          where: { contractId: data.contractId, periodo: { in: data.periodos } },
+          where: { contractId: data.contractId, periodo: { in: data.periodos }, deletedAt: null },
         });
 
         const paymentsByPeriodo = new Map<number, typeof existingPayments>();
@@ -805,7 +809,7 @@ router.get('/estado-cuenta/:contractId', requireAuth, async (req: Request, res: 
           },
         },
         amortizacion: { orderBy: { periodo: 'asc' } },
-        pagos: { orderBy: [{ periodo: 'asc' }, { createdAt: 'asc' }] },
+        pagos: { where: { deletedAt: null }, orderBy: [{ periodo: 'asc' }, { createdAt: 'asc' }] },
       },
     });
 
@@ -941,7 +945,7 @@ router.post('/pay-extra', requireAuth, async (req: Request, res: Response) => {
           where: { id: data.contractId },
           include: {
             amortizacion: { orderBy: { periodo: 'asc' } },
-            pagos: { orderBy: [{ periodo: 'asc' }, { createdAt: 'asc' }] },
+            pagos: { where: { deletedAt: null }, orderBy: [{ periodo: 'asc' }, { createdAt: 'asc' }] },
             client: { select: { tipo: true, nombre: true, apellidoPaterno: true, razonSocial: true } },
           },
         });
@@ -1293,15 +1297,62 @@ router.post('/seed-amortization', requireAuth, async (_req: Request, res: Respon
 });
 
 // ─── DELETE /api/cobranza/payment/:id ───────────────────────
-// Cancelar un pago (para correcciones)
+// Soft delete de un pago (para correcciones).
+//
+// Decisión 2026-04-30: NO se borra físicamente. Marcamos el Payment con
+// deletedAt + deletedBy + motivoEliminacion (texto opcional). Razones:
+//   1. Auditoría PLD/CNBV: cualquier borrado de un pago debe quedar
+//      reconstruible — el regulador puede pedir el historial completo.
+//   2. Seguridad operativa: si fue borrado por error, recuperar el pago
+//      es trivial (un UPDATE deletedAt=NULL) en lugar de re-introducirlo
+//      a mano con todos sus campos.
+//   3. Cuando se restrinjan roles (fase Roles, R-doc), bastará con
+//      filtrar la acción a ADMIN; hoy queda libre per Damián 2026-04-30.
+//
+// Body opcional: { motivo: string } — texto del operador explicando por qué.
+// El registro queda excluido automáticamente de:
+//   • calcConceptos (al filtrar payments con deletedAt:null en las lecturas).
+//   • Todos los reportes y estados de cuenta.
+// pero permanece visible en /admin/bitacora con el evento BITACORA del DELETE.
+const deletePaymentSchema = z.object({
+  motivo: z.string().trim().max(500).optional(),
+});
+
 router.delete('/payment/:id', requireAuth, async (req: Request, res: Response) => {
   try {
+    const userId = req.user!.userId;
+    const data = deletePaymentSchema.parse(req.body || {});
+
     const payment = await prisma.payment.findUnique({ where: { id: req.params.id } });
     if (!payment) return res.status(404).json({ error: 'Pago no encontrado' });
+    if (payment.deletedAt) {
+      return res.status(409).json({ error: 'Este pago ya estaba marcado como borrado' });
+    }
 
-    await prisma.payment.delete({ where: { id: req.params.id } });
-    res.json({ ok: true, deleted: payment });
+    // Borrado lógico — preserva el registro para auditoría.
+    // El advisory lock por contractId serializa esto con un /pay simultáneo
+    // sobre el mismo contrato (evita que el handler de pago lea un Payment
+    // que está siendo borrado en este mismo instante y vea ambos estados).
+    const updated = await serializableTransaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${payment.contractId})::int4, 0::int4)`;
+        return tx.payment.update({
+          where: { id: req.params.id },
+          data: {
+            deletedAt: new Date(),
+            deletedBy: userId,
+            motivoEliminacion: data.motivo || null,
+          },
+        });
+      },
+      { route: '/api/cobranza/payment/:id', reqId: req.id ? String(req.id) : undefined },
+    );
+
+    res.json({ ok: true, deleted: updated });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
     log.error({ err: error }, 'Delete payment error');
     res.status(500).json({ error: 'Error al cancelar pago' });
   }
