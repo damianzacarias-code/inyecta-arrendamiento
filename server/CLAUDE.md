@@ -2495,7 +2495,16 @@ distribución automática. En fase Roles: validar en server que
 `req.user.rol ∈ {ADMIN, DIRECTOR}` cuando llegue ese flag, si no →
 400 `EDIT_MANUAL_FORBIDDEN`.
 
-### R5 · `/documentos` huérfana (decisión pendiente)
+### R5 · ~~`/documentos` huérfana~~ ✅ RESUELTA (30-04-2026, opción 2)
+
+Se reescribió la página como **dashboard agregado de cumplimiento
+documental cross-contratos** consumiendo el nuevo endpoint
+`GET /api/documents/dashboard`. Sólo lectura — la edición sigue en
+`/contratos/:id → tab Documentos`. Commit `07a7a87`.
+
+---
+
+### R5-archivado · `/documentos` huérfana (resuelto)
 
 La página `client/src/pages/Documentos.tsx` y la entrada del sidebar
 "Arrendatarios → Documentos" llaman a 4 endpoints que **no existen** en
