@@ -62,7 +62,7 @@ export function PepInfoButton() {
           role="dialog"
           aria-label="Qué es una Persona Expuesta Políticamente"
           onClick={(e) => e.stopPropagation()}
-          className="absolute top-7 left-0 z-20 w-[min(28rem,90vw)] bg-white border border-gray-200 rounded-xl shadow-lg p-4 text-xs text-gray-700 normal-case font-normal"
+          className="absolute top-7 right-0 z-20 w-[min(28rem,90vw)] bg-white border border-gray-200 rounded-xl shadow-lg p-4 text-xs text-gray-700 normal-case font-normal"
         >
           <div className="flex items-start justify-between mb-2">
             <h4 className="font-semibold text-sm text-gray-900">
