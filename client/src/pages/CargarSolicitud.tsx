@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import api from '@/lib/api';
 import { useExtractPDF, type ExtractResponse } from '@/hooks/useExtractPDF';
+import { PepInfoButton } from '@/components/PepInfoButton';
 import {
   solicitudToClientPayload,
   solicitudToContractPayload,
@@ -448,7 +449,10 @@ function SolicitudReview({
         />
       </Card>
 
-      <Card title="Declaración PEP">
+      <Card
+        title="Declaración PEP (Persona Expuesta Políticamente)"
+        titleSuffix={<PepInfoButton />}
+      >
         <GenericObjectEditor
           obj={value.pep ?? {}}
           onChange={(o) => update({ pep: o })}
@@ -499,20 +503,36 @@ function SolicitudReview({
 // ─────────────────────────────────────────────────────────────────
 // Controles genéricos de formulario
 // ─────────────────────────────────────────────────────────────────
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function Card({
+  title,
+  titleSuffix,
+  children,
+}: {
+  title: string;
+  /**
+   * Nodo opcional al lado del título (botones de info, badges, etc.).
+   * Renderizado dentro del header pero fuera del botón colapsable —
+   * para que un click en titleSuffix no expanda/colapse el Card.
+   */
+  titleSuffix?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   const [open, setOpen] = useState(true);
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors"
-      >
-        <span className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-          <FileText size={14} className="text-gray-400" /> {title}
-        </span>
-        <span className="text-xs text-gray-500">{open ? '▲' : '▼'}</span>
-      </button>
+      <div className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors">
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className="flex-1 flex items-center justify-between text-left"
+        >
+          <span className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+            <FileText size={14} className="text-gray-400" /> {title}
+          </span>
+          <span className="text-xs text-gray-500 ml-2">{open ? '▲' : '▼'}</span>
+        </button>
+        {titleSuffix && <div className="ml-2 flex items-center">{titleSuffix}</div>}
+      </div>
       {open && <div className="p-4">{children}</div>}
     </div>
   );

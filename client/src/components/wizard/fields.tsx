@@ -293,11 +293,18 @@ export function TextAreaField({
 export function FormSection({
   title,
   description,
+  titleSuffix,
   children,
   className,
 }: {
   title: string;
   description?: string;
+  /**
+   * Nodo opcional que se renderiza al lado del título — pensado para
+   * botones de info, badges, contadores, etc. Mantener compacto: el
+   * título debe seguir siendo legible.
+   */
+  titleSuffix?: ReactNode;
   children: ReactNode;
   className?: string;
 }) {
@@ -309,7 +316,10 @@ export function FormSection({
       )}
     >
       <div className="mb-4">
-        <h3 className="font-semibold text-gray-900">{title}</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="font-semibold text-gray-900">{title}</h3>
+          {titleSuffix}
+        </div>
         {description && (
           <p className="text-xs text-gray-500 mt-1">{description}</p>
         )}

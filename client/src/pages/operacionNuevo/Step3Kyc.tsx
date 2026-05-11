@@ -19,6 +19,7 @@ import {
   TextAreaField,
   TextField,
 } from '@/components/wizard/fields';
+import { PepInfoButton } from '@/components/PepInfoButton';
 import {
   frecuenciaOptions,
   montoRangoOptions,
@@ -191,8 +192,9 @@ export function Step3Kyc() {
       </FormSection>
 
       <FormSection
-        title="Declaración PEP"
-        description="Persona Expuesta Políticamente. Registra una declaración por cada tipo aplicable (solicitante, pariente, socio/accionista)."
+        title="Declaración PEP (Persona Expuesta Políticamente)"
+        description="Registra una declaración por cada tipo aplicable (solicitante, pariente, socio/accionista)."
+        titleSuffix={<PepInfoButton />}
       >
         <div className="flex items-center justify-between mb-4">
           <div className="text-sm text-gray-600">
