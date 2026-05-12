@@ -437,6 +437,27 @@ function SolicitudReview({
             disabled={disabled}
             fields={CONYUGE_FIELDS}
           />
+          {/* Régimen matrimonial: el dato vive en value.solicitantePFAE
+              porque conceptualmente describe al solicitante (es el casado),
+              pero lo renderizamos junto al cónyuge para que sea más obvio
+              para el operador. Si el solicitante es PFAE pero no hay
+              cónyuge, este campo no aplica y no se muestra. */}
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <SelectField
+              label="Régimen matrimonial"
+              value={value.solicitantePFAE?.regimenMatrimonial ?? ''}
+              options={REGIMEN_MATRIMONIAL_OPTS}
+              disabled={disabled}
+              onChange={(v) =>
+                update({
+                  solicitantePFAE: {
+                    ...(value.solicitantePFAE ?? {}),
+                    regimenMatrimonial: v || null,
+                  },
+                })
+              }
+            />
+          </div>
         </Card>
       )}
 
@@ -752,7 +773,9 @@ const PFAE_FIELDS: FieldSpec[] = [
   { key: 'nacionalidad',        label: 'Nacionalidad',         kind: 'text' },
   { key: 'sexo',                label: 'Sexo',                 kind: 'select', options: [['H', 'Hombre'], ['M', 'Mujer']] },
   { key: 'estadoCivil',         label: 'Estado civil',         kind: 'text' },
-  { key: 'regimenMatrimonial',  label: 'Régimen matrimonial',  kind: 'text' },
+  // Régimen matrimonial: se muestra en el Card de Cónyuge (no aquí) para
+  // que quede co-localizado con los datos del cónyuge — es más natural
+  // para el operador.
   { key: 'email',               label: 'Email',                kind: 'text' },
   { key: 'telefono',            label: 'Teléfono',             kind: 'text' },
   { key: 'celular',             label: 'Celular',              kind: 'text' },
@@ -801,10 +824,19 @@ const CONYUGE_FIELDS: FieldSpec[] = [
   { key: 'nombre',           label: 'Nombre',           kind: 'text' },
   { key: 'apellidoPaterno',  label: 'Apellido paterno', kind: 'text' },
   { key: 'apellidoMaterno',  label: 'Apellido materno', kind: 'text' },
-  { key: 'rfc',              label: 'RFC',              kind: 'text' },
-  { key: 'curp',             label: 'CURP',             kind: 'text' },
-  { key: 'ocupacion',        label: 'Ocupación',        kind: 'text' },
   { key: 'telefono',         label: 'Teléfono',         kind: 'text' },
+];
+
+// Opciones para el régimen matrimonial. Coinciden con el enum de Prisma
+// (SEPARACION_BIENES / SOCIEDAD_CONYUGAL). NO_ESPECIFICADO es un valor
+// propio de la captura: cuando el operador no puede determinarlo desde
+// la solicitud (acta no anexa, casado por bienes ambiguos, etc.). Si más
+// adelante el mapper envía este campo al backend, NO_ESPECIFICADO debe
+// traducirse a null antes de mandarlo — el enum del server no lo acepta.
+const REGIMEN_MATRIMONIAL_OPTS: [string, string][] = [
+  ['SEPARACION_BIENES', 'Separación de bienes'],
+  ['SOCIEDAD_CONYUGAL', 'Sociedad conyugal'],
+  ['NO_ESPECIFICADO',   'No especificado'],
 ];
 
 const PERFIL_FIELDS: FieldSpec[] = [
