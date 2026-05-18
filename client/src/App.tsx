@@ -81,6 +81,7 @@ export default function App() {
               <Route path="clientes" element={<Clientes />} />
               <Route path="clientes/nuevo" element={<ClienteNuevo />} />
               <Route path="clientes/:id" element={<ClienteDetalle />} />
+              <Route path="clientes/:id/editar" element={<ClienteNuevo />} />
 
               {/* ─── Operaciones (alias legacy: contratos) ─── */}
               <Route path="contratos" element={<Contratos />} />
