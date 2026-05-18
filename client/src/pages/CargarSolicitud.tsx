@@ -109,10 +109,17 @@ export default function CargarSolicitud() {
     }
 
     // Paso 3: Avales (best-effort — si alguno falla, seguimos con los demás)
+    //
+    // ROOT CAUSE FIX (18-may-2026): antes posteábamos a
+    // `/expediente/actores`, pero el server expone la ruta como
+    // `/contracts/:id/expediente/actores`. Resultado: 404 silencioso
+    // para todos los avales, el loop reportaba solo el primero como
+    // warning y la pantalla pasaba a 'done' sin avales en BD.
+    // Ahora la URL incluye el contractId del aval (lo pone el mapper).
     const avales = solicitudToAvalesPayloads(solicitud, contractId);
     for (let i = 0; i < avales.length; i++) {
       try {
-        await api.post('/expediente/actores', avales[i]);
+        await api.post(`/contracts/${avales[i].contractId}/expediente/actores`, avales[i]);
       } catch (err) {
         // Reportamos el primero que falle. Los demás se quedan por crear
         // manualmente — no es crítico para que el contrato viva.
