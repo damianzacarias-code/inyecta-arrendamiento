@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mockup — Nueva operación · Inyecta</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'Roboto', system-ui, -apple-system, sans-serif; background: #fafafa; }
+    .inyecta-blue { background-color: #184892; }
+    .inyecta-blue-dark { background-color: #112239; }
+    .text-inyecta { color: #184892; }
+    .border-inyecta { border-color: #184892; }
+    .text-orange { color: #FF6600; }
+    .border-orange { border-color: #FF6600; }
+    .bg-orange-soft { background-color: #fff4ec; }
+    /* Scroll suave dentro de las columnas */
+    .col-scroll { max-height: calc(100vh - 200px); overflow-y: auto; }
+  </style>
+</head>
+<body class="text-gray-900">
+  <!-- ────────────────────────────────────────────────── -->
+  <!--   Banner de mockup (recordatorio que no es real)    -->
+  <!-- ────────────────────────────────────────────────── -->
+  <div class="bg-amber-100 border-b border-amber-300 px-4 py-2 text-xs text-amber-900 text-center">
+    <strong>MOCKUP DE DISEÑO</strong> — los datos son ficticios y los botones no conectan con el backend. Esta pantalla replica el layout planeado para <code>/operaciones/iniciar</code> de la Fase 2.
+  </div>
+
+  <!-- ────────────────────────────────────────────────── -->
+  <!--   Header                                            -->
+  <!-- ────────────────────────────────────────────────── -->
+  <header class="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <a href="#" class="text-gray-400 hover:text-gray-600">←</a>
+      <div>
+        <h1 class="text-lg font-bold text-gray-900">Nueva operación</h1>
+        <p class="text-xs text-gray-500">Sube docs en cualquier orden — el sistema extrae y consolida por actor.</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2 text-xs">
+      <span class="px-2 py-1 rounded bg-gray-100 text-gray-600">Borrador #DR-2026-0042</span>
+      <select class="border border-gray-300 rounded px-2 py-1 text-xs">
+        <option>Tipo de operación...</option>
+        <option selected>Arrendamiento FINANCIERO</option>
+        <option>Arrendamiento PURO</option>
+      </select>
+    </div>
+  </header>
+
+  <!-- ────────────────────────────────────────────────── -->
+  <!--   Checklists de completitud (banda superior)        -->
+  <!-- ────────────────────────────────────────────────── -->
+  <section class="bg-white border-b border-gray-200 px-6 py-3 flex gap-6">
+    <div class="flex-1">
+      <div class="flex justify-between text-xs mb-1">
+        <span class="font-medium text-gray-700">Para llenar la Solicitud CNBV</span>
+        <span class="text-gray-500"><span class="font-bold text-emerald-600">68%</span> — faltan: domicilio fiscal del Aval 2, declaración PEP</span>
+      </div>
+      <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
+        <div class="h-full bg-emerald-500" style="width: 68%"></div>
+      </div>
+    </div>
+    <div class="flex-1">
+      <div class="flex justify-between text-xs mb-1">
+        <span class="font-medium text-gray-700">Para emitir el contrato</span>
+        <span class="text-gray-500"><span class="font-bold text-amber-600">52%</span> — faltan: factura del bien, CLABE proveedor, póliza seguro</span>
+      </div>
+      <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
+        <div class="h-full bg-amber-500" style="width: 52%"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ────────────────────────────────────────────────── -->
+  <!--   3 columnas: Actores | Docs | Datos consolidados  -->
+  <!-- ────────────────────────────────────────────────── -->
+  <main class="grid grid-cols-12 gap-4 p-4">
+    <!-- ─── Col 1: Involucrados ─── -->
+    <aside class="col-span-3 bg-white rounded-lg border border-gray-200 p-4 col-scroll">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-gray-800">Involucrados</h2>
+        <button class="text-xs px-2 py-1 inyecta-blue text-white rounded hover:bg-blue-900">+ Agregar</button>
+      </div>
+
+      <!-- Titular -->
+      <div class="mb-3">
+        <div class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Titular</div>
+        <button data-actor="titular" class="actor-btn w-full text-left p-2.5 rounded-lg border border-orange bg-orange-soft hover:bg-orange-100">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-medium text-gray-900">Juan Pérez García</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">PFAE</span>
+          </div>
+          <div class="text-xs text-gray-500 mt-0.5">3 docs · 92% completo</div>
+        </button>
+      </div>
+
+      <!-- Avales -->
+      <div class="mb-3">
+        <div class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5 flex justify-between">
+          <span>Avales (2)</span>
+          <button class="text-[10px] text-inyecta hover:underline">+ Aval</button>
+        </div>
+        <button data-actor="aval-1" class="actor-btn w-full text-left p-2.5 rounded-lg border border-gray-200 hover:bg-gray-50 mb-1.5">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-medium text-gray-900">Pedro García Salinas</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">PF</span>
+          </div>
+          <div class="text-xs text-gray-500 mt-0.5">2 docs · 70% completo</div>
+        </button>
+        <button data-actor="aval-2" class="actor-btn w-full text-left p-2.5 rounded-lg border border-gray-200 hover:bg-gray-50">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-medium text-gray-900">Constructora XYZ SA</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">PM</span>
+          </div>
+          <div class="text-xs text-gray-500 mt-0.5">1 doc · 35% completo</div>
+        </button>
+      </div>
+
+      <!-- Rep Legal (v0.1) -->
+      <div class="mb-3 opacity-60">
+        <div class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5 flex justify-between">
+          <span>Rep. Legal</span>
+          <span class="text-[10px] text-gray-400">(v0.1)</span>
+        </div>
+        <button class="w-full text-left p-2.5 rounded-lg border border-dashed border-gray-300 text-xs text-gray-400">
+          + Agregar representante legal
+        </button>
+      </div>
+
+      <!-- Socios (v0.1) -->
+      <div class="opacity-60">
+        <div class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5 flex justify-between">
+          <span>Socios / Accionistas</span>
+          <span class="text-[10px] text-gray-400">(v0.1)</span>
+        </div>
+        <button class="w-full text-left p-2.5 rounded-lg border border-dashed border-gray-300 text-xs text-gray-400">
+          + Agregar socio
+        </button>
+      </div>
+    </aside>
+
+    <!-- ─── Col 2: Documentos ─── -->
+    <section class="col-span-5 bg-white rounded-lg border border-gray-200 p-4 col-scroll">
+      <h2 class="text-sm font-semibold text-gray-800 mb-3">Documentos</h2>
+
+      <!-- Drop zone -->
+      <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-inyecta hover:bg-blue-50 transition-colors cursor-pointer mb-4">
+        <div class="text-4xl mb-2">📄</div>
+        <p class="text-sm font-medium text-gray-700">Arrastra archivos aquí o haz clic para seleccionar</p>
+        <p class="text-xs text-gray-500 mt-1">Acepta PDF, JPG, PNG · hasta 10 MB cada uno</p>
+      </div>
+
+      <!-- Lista de docs subidos -->
+      <div class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Subidos (6)</div>
+
+      <div class="space-y-2">
+        <!-- Doc 1: INE Juan auto-asignado -->
+        <div class="flex items-center gap-3 p-2.5 rounded border border-gray-200 hover:bg-gray-50">
+          <span class="text-xl">📄</span>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium text-gray-900 truncate">INE_JuanPerez.pdf</div>
+            <div class="flex items-center gap-1.5 mt-0.5">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">INE</span>
+              <span class="text-[10px] text-gray-500">95% confianza</span>
+            </div>
+          </div>
+          <select class="text-xs border border-gray-300 rounded px-1.5 py-1 max-w-[140px]">
+            <option selected>→ Juan Pérez (auto)</option>
+            <option>→ Pedro García</option>
+            <option>→ Constructora XYZ</option>
+            <option>Sin asignar</option>
+          </select>
+          <button class="text-gray-400 hover:text-red-500 text-sm">✕</button>
+        </div>
+
+        <!-- Doc 2: CSF Juan -->
+        <div class="flex items-center gap-3 p-2.5 rounded border border-gray-200 hover:bg-gray-50">
+          <span class="text-xl">📄</span>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium text-gray-900 truncate">CSF_Juan_marzo2026.pdf</div>
+            <div class="flex items-center gap-1.5 mt-0.5">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">CSF</span>
+              <span class="text-[10px] text-gray-500">98% confianza</span>
+            </div>
+          </div>
+          <select class="text-xs border border-gray-300 rounded px-1.5 py-1 max-w-[140px]">
+            <option selected>→ Juan Pérez (auto)</option>
+            <option>→ Pedro García</option>
+            <option>→ Constructora XYZ</option>
+            <option>Sin asignar</option>
+          </select>
+          <button class="text-gray-400 hover:text-red-500 text-sm">✕</button>
+        </div>
+
+        <!-- Doc 3: Comprobante domicilio Juan -->
+        <div class="flex items-center gap-3 p-2.5 rounded border border-gray-200 hover:bg-gray-50">
+          <span class="text-xl">📄</span>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium text-gray-900 truncate">CFE_avenidaReforma.pdf</div>
+            <div class="flex items-center gap-1.5 mt-0.5">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">COMPROBANTE_DOMICILIO</span>
+              <span class="text-[10px] text-gray-500">88% confianza</span>
+            </div>
+          </div>
+          <select class="text-xs border border-gray-300 rounded px-1.5 py-1 max-w-[140px]">
+            <option selected>→ Juan Pérez (auto)</option>
+            <option>→ Pedro García</option>
+            <option>→ Constructora XYZ</option>
+            <option>Sin asignar</option>
+          </select>
+          <button class="text-gray-400 hover:text-red-500 text-sm">✕</button>
+        </div>
+
+        <!-- Doc 4: INE Pedro -->
+        <div class="flex items-center gap-3 p-2.5 rounded border border-gray-200 hover:bg-gray-50">
+          <span class="text-xl">📄</span>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium text-gray-900 truncate">INE_Pedro_Garcia.pdf</div>
+            <div class="flex items-center gap-1.5 mt-0.5">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">INE</span>
+              <span class="text-[10px] text-gray-500">94% confianza</span>
+            </div>
+          </div>
+          <select class="text-xs border border-gray-300 rounded px-1.5 py-1 max-w-[140px]">
+            <option>→ Juan Pérez</option>
+            <option selected>→ Pedro García (auto)</option>
+            <option>→ Constructora XYZ</option>
+            <option>Sin asignar</option>
+          </select>
+          <button class="text-gray-400 hover:text-red-500 text-sm">✕</button>
+        </div>
+
+        <!-- Doc 5: CSF Pedro -->
+        <div class="flex items-center gap-3 p-2.5 rounded border border-gray-200 hover:bg-gray-50">
+          <span class="text-xl">📄</span>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium text-gray-900 truncate">CSF_Pedro_GarciaS.pdf</div>
+            <div class="flex items-center gap-1.5 mt-0.5">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">CSF</span>
+              <span class="text-[10px] text-gray-500">96% confianza</span>
+            </div>
+          </div>
+          <select class="text-xs border border-gray-300 rounded px-1.5 py-1 max-w-[140px]">
+            <option>→ Juan Pérez</option>
+            <option selected>→ Pedro García (auto)</option>
+            <option>→ Constructora XYZ</option>
+            <option>Sin asignar</option>
+          </select>
+          <button class="text-gray-400 hover:text-red-500 text-sm">✕</button>
+        </div>
+
+        <!-- Doc 6: Acta XYZ (sin asignar - warning) -->
+        <div class="flex items-center gap-3 p-2.5 rounded border-2 border-amber-300 bg-amber-50">
+          <span class="text-xl">⚠️</span>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium text-gray-900 truncate">acta_constitutiva.pdf</div>
+            <div class="flex items-center gap-1.5 mt-0.5">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">ACTA_CONSTITUTIVA</span>
+              <span class="text-[10px] text-amber-700 font-medium">RFC no matchea ningún actor — asigna manual</span>
+            </div>
+          </div>
+          <select class="text-xs border-2 border-amber-400 rounded px-1.5 py-1 max-w-[140px]">
+            <option selected>Sin asignar</option>
+            <option>→ Juan Pérez</option>
+            <option>→ Pedro García</option>
+            <option>→ Constructora XYZ</option>
+          </select>
+          <button class="text-gray-400 hover:text-red-500 text-sm">✕</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── Col 3: Datos consolidados del actor seleccionado ─── -->
+    <section class="col-span-4 bg-white rounded-lg border border-gray-200 p-4 col-scroll">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-gray-800">Datos consolidados</h2>
+        <span id="actor-label" class="text-xs px-2 py-0.5 rounded bg-orange-soft text-orange">Juan Pérez García</span>
+      </div>
+
+      <!-- Vista del actor seleccionado: Juan -->
+      <div data-panel="titular" class="actor-panel">
+        <div class="mb-3">
+          <div class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Identidad</div>
+          <div class="space-y-2">
+            <div class="flex justify-between items-center">
+              <span class="text-xs text-gray-500">Nombre</span>
+              <input value="JUAN" class="text-sm text-gray-900 text-right border-0 bg-transparent w-32 focus:bg-gray-50 rounded px-1" />
+            </div>
+            <div class="flex justify-between items-center">
+              <span class="text-xs text-gray-500">Apellido paterno</span>
+              <input value="PÉREZ" class="text-sm text-gray-900 text-right border-0 bg-transparent w-32 focus:bg-gray-50 rounded px-1" />
+            </div>
+            <div class="flex justify-between items-center">
+              <span class="text-xs text-gray-500">Apellido materno</span>
+              <input value="GARCÍA" class="text-sm text-gray-900 text-right border-0 bg-transparent w-32 focus:bg-gray-50 rounded px-1" />
+            </div>
+            <div class="flex justify-between items-center">
+              <span class="text-xs text-gray-500">RFC</span>
+              <input value="PEGJ800101AB1" class="text-sm text-gray-900 text-right font-mono border-0 bg-transparent w-40 focus:bg-gray-50 rounded px-1" />
+            </div>
+            <div class="flex justify-between items-center">
+              <span class="text-xs text-gray-500">CURP</span>
+              <input value="PEGJ800101HDFRRN02" class="text-sm text-gray-900 text-right font-mono border-0 bg-transparent w-48 focus:bg-gray-50 rounded px-1" />
+            </div>
+            <div class="flex justify-between items-center">
+              <span class="text-xs text-gray-500">Fecha nacimiento</span>
+              <input value="1980-01-01" class="text-sm text-gray-900 text-right border-0 bg-transparent w-32 focus:bg-gray-50 rounded px-1" />
+            </div>
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <div class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Identidad fiscal</div>
+          <div class="space-y-2">
+            <div class="flex justify-between items-center">
+              <span class="text-xs text-gray-500">Régimen fiscal</span>
+              <input value="612 - PFAE" class="text-sm text-gray-900 text-right border-0 bg-transparent w-32 focus:bg-gray-50 rounded px-1" />
+            </div>
+            <!-- Conflicto: CSF dice un domicilio, comprobante CFE dice otro -->
+            <div class="flex justify-between items-start bg-amber-50 -mx-2 px-2 py-1.5 rounded">
+              <div>
+                <span class="text-xs text-amber-800 font-medium">⚠ Domicilio fiscal</span>
+                <div class="text-[10px] text-amber-700 mt-0.5">CSF dice Reforma 100; CFE dice Reforma 102</div>
+              </div>
+              <input value="Av. Reforma 100" class="text-sm text-gray-900 text-right border border-amber-300 rounded w-32 px-1 focus:bg-white" />
+            </div>
+            <div class="flex justify-between items-center">
+              <span class="text-xs text-gray-500">Colonia</span>
+              <input value="Centro" class="text-sm text-gray-900 text-right border-0 bg-transparent w-32 focus:bg-gray-50 rounded px-1" />
+            </div>
+            <div class="flex justify-between items-center">
+              <span class="text-xs text-gray-500">C.P.</span>
+              <input value="06000" class="text-sm text-gray-900 text-right border-0 bg-transparent w-20 focus:bg-gray-50 rounded px-1" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Docs que aportan datos a este actor -->
+        <div>
+          <div class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Documentos vinculados</div>
+          <div class="space-y-1.5">
+            <div class="text-xs flex items-center gap-2 p-1.5 rounded hover:bg-gray-50">
+              <span>📄</span>
+              <span class="flex-1 truncate">INE_JuanPerez.pdf</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">INE</span>
+            </div>
+            <div class="text-xs flex items-center gap-2 p-1.5 rounded hover:bg-gray-50">
+              <span>📄</span>
+              <span class="flex-1 truncate">CSF_Juan_marzo2026.pdf</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">CSF</span>
+            </div>
+            <div class="text-xs flex items-center gap-2 p-1.5 rounded hover:bg-gray-50">
+              <span>📄</span>
+              <span class="flex-1 truncate">CFE_avenidaReforma.pdf</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">COMPROBANTE</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Vista del Aval 1 (Pedro) — oculta por default -->
+      <div data-panel="aval-1" class="actor-panel hidden">
+        <div class="text-xs text-gray-500 italic">Datos consolidados de <strong>Pedro García Salinas</strong>… (mockup omite contenido para no inflar la página)</div>
+      </div>
+
+      <!-- Vista del Aval 2 (Constructora XYZ) — oculta por default -->
+      <div data-panel="aval-2" class="actor-panel hidden">
+        <div class="text-xs text-gray-500 italic">Datos consolidados de <strong>Constructora XYZ SA</strong>… (mockup omite contenido)</div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ────────────────────────────────────────────────── -->
+  <!--   Footer con acciones                               -->
+  <!-- ────────────────────────────────────────────────── -->
+  <footer class="bg-white border-t border-gray-200 px-6 py-3 flex items-center justify-between sticky bottom-0">
+    <div class="flex items-center gap-3">
+      <button class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancelar</button>
+      <button class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Guardar borrador y salir</button>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="text-xs text-gray-500">Borrador guardado automáticamente · hace 2s</span>
+      <button class="px-5 py-2 inyecta-blue-dark text-white rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50" disabled>
+        Finalizar y crear contrato →
+      </button>
+    </div>
+  </footer>
+
+  <script>
+    // Switcheo de panel al hacer clic en un actor (solo cosmético, no
+    // hay backend en este mockup).
+    document.querySelectorAll('.actor-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const which = btn.dataset.actor;
+        // Borrar borde naranja de todos los actores
+        document.querySelectorAll('.actor-btn').forEach(b => {
+          b.classList.remove('border-orange', 'bg-orange-soft');
+          b.classList.add('border-gray-200');
+        });
+        btn.classList.remove('border-gray-200');
+        btn.classList.add('border-orange', 'bg-orange-soft');
+        // Mostrar panel correspondiente
+        document.querySelectorAll('.actor-panel').forEach(p => p.classList.add('hidden'));
+        document.querySelector(`[data-panel="${which}"]`).classList.remove('hidden');
+        // Update label
+        const label = document.querySelector('#actor-label');
+        label.textContent = btn.querySelector('.text-sm.font-medium').textContent;
+      });
+    });
+  </script>
+</body>
+</html>
