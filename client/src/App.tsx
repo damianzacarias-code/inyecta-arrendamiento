@@ -17,6 +17,7 @@ import Contratos from '@/pages/Contratos';
 import ContratoNuevo from '@/pages/ContratoNuevo';
 import ContratoDetalle from '@/pages/ContratoDetalle';
 import CargarSolicitud from '@/pages/CargarSolicitud';
+import OperacionIniciar from '@/pages/operacionIniciar/OperacionIniciar';
 import Cobranza from '@/pages/Cobranza';
 import CobranzaContrato from '@/pages/CobranzaContrato';
 import Seguros from '@/pages/Seguros';
@@ -118,6 +119,9 @@ export default function App() {
 
               {/* ─── Solicitudes ─── */}
               <Route path="solicitudes/cargar" element={<CargarSolicitud />} />
+              {/* ─── Operaciones · Iniciar (Fase 2 — flujo de borrador) ─── */}
+              <Route path="operaciones/iniciar" element={<OperacionIniciar />} />
+              <Route path="operaciones/iniciar/:draftId" element={<OperacionIniciar />} />
               <Route path="solicitudes/nueva" element={<EnConstruccion titulo="Solicitudes · Nueva" />} />
               <Route path="solicitudes/excel" element={<EnConstruccion titulo="Solicitudes · Carga Masiva" />} />
 
