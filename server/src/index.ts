@@ -29,6 +29,7 @@ import catalogConfigRoutes from './routes/catalog';
 import usersRoutes from './routes/users';
 import documentsDashboardRoutes from './routes/documentsDashboard';
 import avalesRoutes from './routes/avales';
+import operationDraftsRoutes from './routes/operationDrafts';
 import pagaresRoutes from './routes/pagares';
 import { bitacora } from './middleware/bitacora';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
@@ -229,6 +230,9 @@ app.use('/api/documents', documentsDashboardRoutes);
 // mergeParams para tomar :contractId del prefijo padre.
 app.use('/api/contracts/:contractId/avales', avalesRoutes);
 app.use('/api/contracts/:contractId/pagare', pagaresRoutes);
+// Borradores de operación — flujo nuevo "subir docs indiscriminadamente"
+// (prototipo mínimo Fase 1, 20-05-2026). Ver routes/operationDrafts.ts.
+app.use('/api/operation-drafts', operationDraftsRoutes);
 
 // 404 para /api/* sin match — devuelve el mismo formato { error: {...} }
 app.use('/api', notFoundHandler);

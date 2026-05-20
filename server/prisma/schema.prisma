@@ -51,6 +51,7 @@ model User {
   passwordHistory   PasswordHistory[]
   revokedTokens     RevokedToken[]
   mfaBackupCodes    MfaBackupCode[]
+  operationDrafts   OperationDraft[]      @relation("OperationDraftCreatedBy")
 
   @@map("users")
 }
@@ -648,6 +649,10 @@ model Contract {
 
   // Pagaré (sólo FIN, cláusula DÉCIMA TERCERA). 1:1.
   pagare Pagare?
+
+  // Si este contrato fue originado desde un OperationDraft (flujo
+  // nuevo de captura por docs), apuntamos al borrador. 1:1 opcional.
+  draftPredecessor OperationDraft?
 
   @@map("contracts")
 }
@@ -1517,4 +1522,120 @@ model RiskPreset {
   updatedById     String?
 
   @@map("risk_presets")
+}
+
+// ────────────────────────────────────────────────────────────
+// OperationDraft — borrador progresivo de una operación
+//
+// Modelo nuevo del flujo "subir docs indiscriminadamente +
+// declarar actores". Vive ANTES de que existan Client/Contract.
+// El operador puede llenarlo en sesiones distintas (subes hoy
+// el INE del titular, mañana la CSF del aval). Al "finalizar",
+// se crean Client + Contract + ExpedienteActor reales con los
+// docs ya cargados.
+//
+// Diseño deliberado:
+//   - datosConsolidados es JSON libre (shape mirror de
+//     SolicitudPFAE/PM) — NO normalizamos columnas hasta que
+//     se finaliza el draft. Permite iterar sin migraciones.
+//   - tipoDocumento es String, NO enum — el catálogo crecerá
+//     conforme Damián agregue más tipos (recibos de nómina,
+//     estados de cuenta, declaraciones, etc.). Validación de
+//     valores conocidos vive en código, no en BD.
+// ────────────────────────────────────────────────────────────
+
+enum OperationDraftStatus {
+  DRAFT
+  FINALIZED
+  DISCARDED
+}
+
+enum DraftActorRol {
+  TITULAR
+  AVAL
+  REPRESENTANTE_LEGAL
+  SOCIO
+}
+
+model OperationDraft {
+  id            String               @id @default(cuid())
+  status        OperationDraftStatus @default(DRAFT)
+  // Producto que se va a originar. Opcional al inicio del draft
+  // (puede declararse después). LeaseType ya existe (PURO/FINANCIERO).
+  tipoOperacion LeaseType?
+
+  createdById String
+  createdBy   User   @relation("OperationDraftCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  finalizedAt         DateTime?
+  finalizedContractId String?   @unique
+  finalizedContract   Contract? @relation(fields: [finalizedContractId], references: [id])
+
+  actores OperationDraftActor[]
+
+  @@index([createdById, status])
+  @@map("operation_drafts")
+}
+
+model OperationDraftActor {
+  id      String @id @default(cuid())
+  draftId String
+  draft   OperationDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+
+  rol     DraftActorRol
+  // Subtipo del actor:
+  //   PFAE / PM (matches ClientType para titular)
+  //   PF — persona física no actividad empresarial (avales, socios PF)
+  // Almacenado como String para no romper compat con ClientType.
+  subtipo String
+  // Nombre declarado por el operador para identificar al actor en la
+  // UI antes de tener docs. Se reemplaza por el nombre del INE/CSF
+  // cuando se extrae.
+  nombre  String
+  orden   Int
+
+  // Datos consolidados (merge de extracciones). Shape libre que la
+  // UI usa para renderizar el card del actor; al finalizar el draft,
+  // se mapea a Client + RepresentanteLegal + Shareholder + Aval.
+  datosConsolidados Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  documentos OperationDraftDocument[]
+
+  @@unique([draftId, rol, orden])
+  @@index([draftId])
+  @@map("operation_draft_actores")
+}
+
+model OperationDraftDocument {
+  id      String @id @default(cuid())
+  draftId String // denormalized para listados del draft completos
+  // actorId puede ser null si el doc todavía no se ha asignado a un actor
+  // (caso típico: el operador soltó el PDF, el sistema lo extrajo, pero
+  // el CURP/RFC del doc no matchea a ningún actor declarado).
+  actorId String?
+  actor   OperationDraftActor? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  tipoDocumento String // 'INE' | 'CSF' | 'COMPROBANTE_DOMICILIO' | 'OTRO' | ...
+  nombreArchivo String
+  archivoPath   String // path relativo bajo uploads/
+
+  // Resultado de la extracción con Claude
+  extraccion          Json?
+  confianzaExtraccion Int? // 0-100
+  extraidoEn          DateTime?
+  extraccionError     String?
+
+  // Asignación automática vs manual
+  autoAsignado Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([draftId])
+  @@index([actorId])
+  @@map("operation_draft_documents")
 }

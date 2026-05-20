@@ -28,12 +28,12 @@ const cipherLog = childLogger('upload-cipher');
 const ROOT = path.resolve(__dirname, '..', '..', 'uploads');
 
 // Asegura que existan los subdirectorios al iniciar el módulo.
-['clientes', 'contratos', 'expedientes'].forEach(dir => {
+['clientes', 'contratos', 'expedientes', 'drafts'].forEach(dir => {
   const full = path.join(ROOT, dir);
   if (!fs.existsSync(full)) fs.mkdirSync(full, { recursive: true });
 });
 
-export type UploadKind = 'clientes' | 'contratos' | 'expedientes';
+export type UploadKind = 'clientes' | 'contratos' | 'expedientes' | 'drafts';
 
 // ─────────────────────────────────────────────────────────────────
 // Tipos permitidos: pdf + imágenes comunes (jpg/jpeg/png/webp).
@@ -110,6 +110,15 @@ const _uploadExpediente = multer({
   limits,
 }).single('archivo');
 
+// Borradores de operación — flujo nuevo "subir docs indiscriminadamente".
+// Se sirve bajo /uploads/drafts/... hasta que el draft se finalice; en
+// ese momento los archivos podrían moverse o quedarse según diseño.
+const _uploadDraft = multer({
+  storage: makeStorage('drafts'),
+  fileFilter,
+  limits,
+}).single('archivo');
+
 // ─────────────────────────────────────────────────────────────────
 // Wrapper que normaliza errores de multer a AppError, para que el
 // errorHandler global los serialice al formato estándar.
@@ -173,6 +182,7 @@ function wrapMulter(handler: RequestHandler): RequestHandler {
 export const uploadCliente: RequestHandler = wrapMulter(_uploadCliente);
 export const uploadContrato: RequestHandler = wrapMulter(_uploadContrato);
 export const uploadExpediente: RequestHandler = wrapMulter(_uploadExpediente);
+export const uploadDraft: RequestHandler = wrapMulter(_uploadDraft);
 
 export function publicUrl(filename: string, kind: UploadKind): string {
   // Si el archivo termina en .enc (S6), removemos el sufijo en la URL
