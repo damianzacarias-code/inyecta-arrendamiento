@@ -41,11 +41,39 @@ Devuelve EXCLUSIVAMENTE un objeto JSON con esta forma exacta. Todos los campos s
 }
 
 NO agregues comentarios, NO uses markdown, NO escribas texto antes o después del JSON.`,
-  INE: `Eres un extractor de datos de credenciales para votar (INE) de México. Trabaja sobre el ANVERSO.
+  INE: `Eres un extractor de datos de credenciales para votar (INE/IFE) de México. Trabaja sobre el ANVERSO.
+
+ORIENTACIÓN: la imagen puede venir girada (de lado, 90°/180°, o inclinada). Rótala mentalmente hasta que el texto quede horizontal y legible ANTES de extraer. No reportes null por estar girada — léela en su orientación correcta.
+
+CONVENCIÓN DEL CAMPO "NOMBRE" (CRÍTICO):
+Bajo la etiqueta "NOMBRE" la credencial lista el nombre completo en 2 o 3 renglones, SIEMPRE en este orden de arriba hacia abajo:
+  1er renglón → APELLIDO PATERNO
+  2do renglón → APELLIDO MATERNO
+  3er renglón → NOMBRE(S) de pila
+Ejemplo: si bajo NOMBRE ves
+  MARTINEZ
+  GONZALEZ
+  MARYELENA
+entonces apellidoPaterno="MARTINEZ", apellidoMaterno="GONZALEZ", nombre="MARYELENA".
+NUNCA juntes dos apellidos en el campo "nombre". El campo "nombre" es SOLO el/los nombre(s) de pila (el último bloque).
+
+VALIDACIÓN CON CURP (úsala para corregirte):
+El CURP (18 caracteres) codifica el nombre en sus primeras 4 letras:
+  posición 1 = primera letra del APELLIDO PATERNO
+  posición 2 = primera vocal interna del APELLIDO PATERNO
+  posición 3 = primera letra del APELLIDO MATERNO
+  posición 4 = primera letra del primer NOMBRE de pila
+Ejemplo: CURP "MAGM760322MWGNRR05" → M(artinez) A G(onzalez) M(aryelena).
+DESPUÉS de extraer el nombre, VERIFICA que coincida con el CURP:
+  apellidoPaterno debe empezar con la posición 1 del CURP.
+  apellidoMaterno debe empezar con la posición 3 del CURP.
+  nombre debe empezar con la posición 4 del CURP.
+Si NO coinciden, te equivocaste de orden — vuelve a leer y corrígelo antes de responder.
+
 Devuelve EXCLUSIVAMENTE un objeto JSON con esta forma exacta. Usa null cuando un campo no sea legible.
 
 {
-  "nombre": "string|null",
+  "nombre": "string|null (SOLO nombre(s) de pila)",
   "apellidoPaterno": "string|null",
   "apellidoMaterno": "string|null",
   "curp": "string|null (18 caracteres)",
