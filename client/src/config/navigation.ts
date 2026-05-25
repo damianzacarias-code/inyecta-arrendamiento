@@ -83,6 +83,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: 'Operaciones',
     icon:  Briefcase,
     items: [
+      { label: 'Iniciar operación',    icon: FolderOpen, path: '/operaciones/iniciar' },
       { label: 'Cargar solicitud PDF', icon: FileUp,   path: '/solicitudes/cargar' },
       { label: 'Nueva operación',    icon: FilePlus,  path: '/contratos/nuevo' },
       { label: 'Mesa de registros',  icon: Briefcase, path: '/contratos'       },
