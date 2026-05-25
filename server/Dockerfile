@@ -78,9 +78,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # Instalar SOLO deps de producción para reducir tamaño. devDependencies
-# (tsx, typescript, prisma CLI, vitest) no se necesitan en runtime —
-# `prisma migrate deploy` viene del paquete @prisma/client + el binario
-# que se copia desde deps en el COPY de abajo.
+# (tsx, typescript, vitest) no se necesitan en runtime. El CLI `prisma`
+# SÍ se necesita en runtime para correr `prisma migrate deploy` al
+# arrancar el contenedor — por eso vive en `dependencies` (no devDeps).
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
@@ -114,4 +114,16 @@ ENTRYPOINT ["/usr/bin/tini", "--"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS http://localhost:3001/api/health/live || exit 1
 
-CMD ["node", "dist/index.js"]
+# Al arrancar:
+#   1. `prisma migrate deploy` aplica cualquier migración pendiente a la
+#      BD apuntada por DATABASE_URL (disponible en runtime, NO en build).
+#      Es idempotente — si la BD ya está al día, no hace nada. Si una
+#      migración falla, el contenedor NO arranca (falla explícito, mejor
+#      que correr con esquema incompatible).
+#   2. `exec node` reemplaza el shell por el proceso node, para que tini
+#      enrute SIGTERM directo a node → graceful shutdown (lib/shutdown.ts).
+#
+# Nota: en escalado multi-instancia, varios contenedores podrían correr
+# migrate deploy a la vez; Prisma toma un advisory lock que serializa la
+# aplicación, así que es seguro. Hoy (Render free, 1 instancia) no aplica.
+CMD ["sh", "-c", "npx prisma migrate deploy && exec node dist/index.js"]
