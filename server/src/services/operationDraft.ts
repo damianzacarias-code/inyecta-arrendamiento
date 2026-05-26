@@ -26,6 +26,7 @@ import prisma from '../config/db';
 import { getExtractProvider, type TipoExtract } from './pdfExtract';
 import { childLogger } from '../lib/logger';
 import { isEnabled as cipherEnabled, decryptBuffer } from '../lib/uploadCipher';
+import { validarNombreVsCurp, type IneNombreData } from './ineValidation';
 
 const log = childLogger('operationDraft');
 
@@ -148,13 +149,33 @@ export async function extractAndMergeDoc(documentId: string): Promise<void> {
     return;
   }
 
+  // B — Validación cruzada nombre↔CURP (solo INE). Si Claude parseó mal
+  // el nombre (imagen girada, convención de apellidos), las primeras
+  // letras no coinciden con el CURP y lo marcamos. NO bloquea el merge:
+  // poblamos los datos de todos modos (el operador corrige), pero dejamos
+  // la advertencia visible y bajamos la confianza para que salte a la
+  // vista en la UI. Reutilizamos `extraccionError` como campo de
+  // advertencia (un campo `advertencia` dedicado queda para v0.1).
+  let advertencia: string | null = null;
+  if (doc.tipoDocumento === 'INE') {
+    const v = validarNombreVsCurp(result.data as IneNombreData);
+    if (!v.ok) {
+      advertencia = v.motivo ?? null;
+      log.warn({ documentId, motivo: v.motivo }, 'INE: nombre no coincide con CURP');
+    }
+  }
+
   await prisma.operationDraftDocument.update({
     where: { id: documentId },
     data: {
       extraccion: result.data as never,
-      confianzaExtraccion: Math.round(result.confidence * 100),
+      // Si hay advertencia, capamos la confianza a 50 para que la UI la
+      // muestre como dudosa aunque Claude haya reportado alta confianza.
+      confianzaExtraccion: advertencia
+        ? Math.min(Math.round(result.confidence * 100), 50)
+        : Math.round(result.confidence * 100),
       extraidoEn: new Date(),
-      extraccionError: null,
+      extraccionError: advertencia,
     },
   });
 

@@ -298,6 +298,25 @@ function tryParseJson(text: string): Record<string, unknown> | null {
   return null;
 }
 
+/**
+ * Auto-rotación EXIF de una imagen. Aplica la orientación EXIF a los
+ * píxeles (sharp().rotate() sin args) y devuelve el buffer normalizado
+ * en el mismo formato de entrada. Fail-safe: ante cualquier error
+ * (sharp no instalado, formato raro, buffer corrupto) devuelve el
+ * buffer original — la rotación es una mejora, no debe tumbar la
+ * extracción. Import dinámico para no cargar sharp en rutas que no lo
+ * usan (tests con MockProvider).
+ */
+async function autoRotateImage(buffer: Buffer): Promise<Buffer> {
+  try {
+    const sharp = (await import('sharp')).default;
+    return await sharp(buffer).rotate().toBuffer();
+  } catch (err) {
+    log.warn({ err }, 'auto-rotación EXIF falló; uso el buffer original');
+    return buffer;
+  }
+}
+
 export class ClaudeProvider implements IExtractProvider {
   readonly name = 'CLAUDE' as const;
   private client: Anthropic;
@@ -329,7 +348,14 @@ export class ClaudeProvider implements IExtractProvider {
       };
     }
 
-    const base64 = file.toString('base64');
+    // A — Auto-rotación EXIF: las fotos de celular suelen venir con una
+    // etiqueta de orientación (ej. "girar 90°") que el visor respeta pero
+    // el modelo no siempre. sharp().rotate() aplica esa orientación y la
+    // hornea en los píxeles, dejando la imagen derecha. Fail-safe: si
+    // sharp truena, seguimos con el buffer original (no rompemos la
+    // extracción por un problema de rotación). NO aplica a PDFs.
+    const imageBuffer = isImage ? await autoRotateImage(file) : file;
+    const base64 = imageBuffer.toString('base64');
     // Claude SDK acepta document (PDF) o image como content blocks.
     const documentBlock = isPdf
       ? {
