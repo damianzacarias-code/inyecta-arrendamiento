@@ -1153,7 +1153,7 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                 <div className="border-t-2 border-inyecta-200 pt-3 mt-1 bg-inyecta-50/40 -mx-2 px-2 py-2 rounded-lg">
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="text-xs font-semibold text-inyecta-800 uppercase tracking-wide">
-                      Ganancia (interno)
+                      Ganancia para Inyecta
                     </span>
                     <span className="text-[10px] text-gray-400">no se imprime</span>
                   </div>
