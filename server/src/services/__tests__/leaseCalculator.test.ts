@@ -134,6 +134,60 @@ describe('calcularArrendamiento — FINANCIERO', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// Ganancia (sin IVA) — definición Damián 26-05-2026.
+// Debe coincidir al centavo con el motor del cliente (regla 5).
+// ═══════════════════════════════════════════════════════════════════
+describe('calcularArrendamiento — ganancia (sin IVA)', () => {
+  describe('FINANCIERO', () => {
+    const r = calcularArrendamiento({
+      ...baseParams,
+      producto: 'FINANCIERO',
+      enganchePct: 0,
+      depositoGarantiaPct: 0,
+      valorResidualPct: 0,
+    });
+
+    it('total = comisión + intereses + opción (invariante)', () => {
+      const suma =
+        r.gananciaDesglose.comisionApertura +
+        r.gananciaDesglose.intereses +
+        r.gananciaDesglose.opcionCompra;
+      expect(r.ganancia).toBeCloseTo(suma, 2);
+    });
+
+    it('comisión = 91,317.24', () => {
+      expect(r.gananciaDesglose.comisionApertura).toBeCloseTo(91_317.24, 2);
+    });
+
+    it('intereses = Σ rentas netas − montoFinanciado (FV=0)', () => {
+      const esperado = r.rentaMensual * 48 - r.montoFinanciar;
+      expect(r.gananciaDesglose.intereses).toBeCloseTo(esperado, 0);
+    });
+
+    it('opción de compra = residual completo (FV=0) = 36,526.90', () => {
+      expect(r.gananciaDesglose.opcionCompra).toBeCloseTo(36_526.90, 2);
+    });
+
+    it('ganancia total ≈ 1,853,228 (coincide con el motor del cliente)', () => {
+      expect(r.ganancia).toBeCloseTo(1_853_228.47, 0);
+    });
+  });
+
+  describe('PURO — opción de compra no aplica (= saldo no amortizado)', () => {
+    const r = calcularArrendamiento(baseParams); // PURO, residual=depósito=16%
+
+    it('opción de compra = 0 (FV del PMT = residual)', () => {
+      expect(r.gananciaDesglose.opcionCompra).toBeCloseTo(0, 2);
+    });
+
+    it('ganancia = comisión + intereses (sin aporte del residual)', () => {
+      const suma = r.gananciaDesglose.comisionApertura + r.gananciaDesglose.intereses;
+      expect(r.ganancia).toBeCloseTo(suma, 2);
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // Casos extendidos del Excel — banderas nuevas (§4.13, §4.14)
 // Verifican al centavo que el motor del servidor procesa correctamente
 // los nuevos inputs (residual=comisión, seguro pendiente, B17 con

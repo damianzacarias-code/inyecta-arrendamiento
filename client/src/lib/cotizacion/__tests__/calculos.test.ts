@@ -526,3 +526,82 @@ describe('aplicarPagoAdicionalFinanciero (Rentas Anticipadas)', () => {
     expect(out[20].iva).toBeCloseTo(pmtNuevo * 0.16, 1);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// Ganancia (visible en calculadora, NO en PDF) — confirmado con Damián
+// 26-05-2026. Nominal sin IVA = comisión + intereses + opción neta.
+// ═══════════════════════════════════════════════════════════════════
+describe('calcularCotizacion — ganancia', () => {
+  describe('FINANCIERO (caso §4 de referencia)', () => {
+    const cot = calcularCotizacion({
+      ...baseInputs,
+      producto: 'FINANCIERO',
+      porcentajeDeposito: 0,
+      valorResidual: 0,
+    });
+
+    it('total = comisión + intereses + opción (invariante de la suma)', () => {
+      const suma =
+        cot.ganancia.comisionApertura +
+        cot.ganancia.intereses +
+        cot.ganancia.opcionCompra;
+      expect(cot.ganancia.total).toBeCloseTo(suma, 2);
+    });
+
+    it('intereses = Σ rentas netas − capital recuperado (PV − FV)', () => {
+      // FIN: FV=0, capital recuperado = montoFinanciadoReal.
+      const esperado = cot.rentaMensual.montoNeto * cot.plazo - cot.montoFinanciadoReal;
+      expect(cot.ganancia.intereses).toBeCloseTo(esperado, 0);
+    });
+
+    it('opción de compra = residual completo (FV=0, no hay saldo que netear)', () => {
+      expect(cot.ganancia.opcionCompra).toBeCloseTo(cot.residual.monto, 2);
+    });
+
+    it('comisión apertura = baseBien × 5% = $91,317.24', () => {
+      // baseBien = montoFinanciadoReal / 1.05 = 1,917,662.07 / 1.05.
+      expect(cot.ganancia.comisionApertura).toBeCloseTo(91_317.24, 2);
+    });
+
+    it('ganancia total ≈ $1,853,228 (comisión + intereses + opción)', () => {
+      expect(cot.ganancia.total).toBeCloseTo(1_853_228.47, 0);
+    });
+  });
+
+  describe('PURO — la opción de compra NO aplica (= saldo no amortizado)', () => {
+    const cot = calcularCotizacion({ ...baseInputs, producto: 'PURO' });
+
+    it('opción de compra = 0 (FV del PMT = residual ⇒ solo recupera capital)', () => {
+      // Justo el caso del paréntesis de Damián: cuando la opción de
+      // compra es igual al monto no amortizado, no aporta ganancia.
+      expect(cot.ganancia.opcionCompra).toBeCloseTo(0, 2);
+    });
+
+    it('ganancia = comisión + intereses (sin aporte del residual)', () => {
+      const suma = cot.ganancia.comisionApertura + cot.ganancia.intereses;
+      expect(cot.ganancia.total).toBeCloseTo(suma, 2);
+    });
+
+    it('ganancia total positiva', () => {
+      expect(cot.ganancia.total).toBeGreaterThan(0);
+    });
+  });
+
+  describe('PURO con valor residual MAYOR al depósito → opción aporta el exceso', () => {
+    // Depósito 10%, residual 20% (absoluto vía dual ≥2 no; usamos %).
+    // El FV del PMT = valorResidualResuelto = residual (20%), y el
+    // residualDisplay también = residual. Como en PURO FV=residual,
+    // la opción neta SIEMPRE da 0 — este test documenta esa invariante.
+    const cot = calcularCotizacion({
+      ...baseInputs,
+      producto: 'PURO',
+      porcentajeDeposito: 0.10,
+      valorResidual: 0.20,
+      valorResidualEsDeposito: false,
+    });
+
+    it('opción de compra sigue siendo 0 en PURO (FV = residual por diseño)', () => {
+      expect(cot.ganancia.opcionCompra).toBeCloseTo(0, 2);
+    });
+  });
+});

@@ -94,7 +94,23 @@ export interface LeaseResult {
   totalRentas: number;
   desembolsoInicial: number;
   totalPagar: number;
+  /**
+   * Ganancia NOMINAL de la financiera, SIN IVA (definición Damián
+   * 26-05-2026). El IVA es de paso (cobrado en rentas → SAT; del bien
+   * → acreditable), así que no entra. Es la utilidad real de Inyecta:
+   *   ganancia = comisión apertura + intereses ganados + opción de
+   *              compra neta del saldo no amortizado.
+   * Equivale al flujo de caja "lo que entra − desembolso del bien".
+   * NO se imprime en el PDF — solo se muestra en la calculadora.
+   */
   ganancia: number;
+  /** Desglose de la ganancia (para mostrar el apartado en la UI). */
+  gananciaDesglose: {
+    comisionApertura: number;
+    intereses: number;
+    /** Opción de compra − FV del PMT. 0 en PURO (FV=residual), 2% en FIN. */
+    opcionCompra: number;
+  };
   amortizacion: AmortizationRow[];
 }
 
@@ -247,7 +263,23 @@ export function calcularArrendamiento(params: LeaseParams): LeaseResult {
     .plus(rentaInicial || 0);
 
   const totalPagar = totalRentas.plus(desembolsoInicial);
-  const ganancia   = totalPagar.minus(valorConIVA);
+
+  // ── Ganancia (SIN IVA, nominal) — definición Damián 26-05-2026 ───
+  // Descomposición = comisión apertura + intereses ganados + opción de
+  // compra neta del saldo no amortizado. Equivale al flujo de caja
+  // "lo que entra a Inyecta − desembolso del bien (sin IVA)".
+  //   intereses  = Σ rentas NETAS (sin IVA) − capital recuperado (PV − FV)
+  //   opciónNeta = valorResidual − FV  (0 en PURO porque FV=residual;
+  //                = 2% en FIN porque FV=0)
+  // GPS y seguro NO entran: pass-through (cobrado = costo) → se cancelan.
+  // El IVA es de paso (rentas→SAT, bien→acreditable) → no afecta.
+  // NOTA: la fórmula anterior (totalPagar − valorConIVA) mezclaba IVA en
+  // ambos lados y usaba la renta CON IVA truncada — daba un número que
+  // no era la utilidad real. Reemplazada por la descomposición correcta.
+  const capitalRecuperado = montoFinanciado.minus(fvPMT);
+  const gananciaIntereses = rentaNeta.times(plazo).minus(capitalRecuperado);
+  const gananciaOpcion    = valorResidual.minus(fvPMT);
+  const ganancia          = comisionApertura.plus(gananciaIntereses).plus(gananciaOpcion);
 
   // ── Tabla de amortización ─────────────────────────────────────────
   const amortizacion = generarAmortizacion({
@@ -274,6 +306,11 @@ export function calcularArrendamiento(params: LeaseParams): LeaseResult {
     desembolsoInicial: r2(desembolsoInicial),
     totalPagar:       r2(totalPagar),
     ganancia:         r2(ganancia),
+    gananciaDesglose: {
+      comisionApertura: r2(comisionApertura),
+      intereses:        r2(gananciaIntereses),
+      opcionCompra:     r2(gananciaOpcion),
+    },
     amortizacion,
   };
 }

@@ -209,6 +209,28 @@ export interface ResultadoCotizacion {
     total: number;
   };
 
+  // ── Ganancia (VISIBLE en calculadora, NO en el PDF) ──────────────
+  // Confirmado con Damián 26-05-2026. Nominal, todo SIN IVA (el IVA es
+  // de paso: lo cobrado en rentas va al SAT, lo del bien se acredita).
+  // Descomposición = comisión apertura + intereses ganados + opción de
+  // compra (neta del saldo no amortizado). Equivale al flujo de caja
+  // "lo que entra a Inyecta − lo que sale (desembolso del bien)".
+  ganancia: {
+    /** Comisión de apertura total (contado + financiada). */
+    comisionApertura: number;
+    /** Intereses ganados = Σ rentas netas − capital recuperado (PV − FV). */
+    intereses: number;
+    /**
+     * Opción de compra / valor residual NETO del saldo no amortizado.
+     * = residual − FV del PMT. En PURO el FV = residual ⇒ aporta 0
+     * (solo recupera capital, "no aplica" como dijo Damián). En FIN el
+     * FV = 0 ⇒ aporta la opción completa (2%).
+     */
+    opcionCompra: number;
+    /** Suma de los tres conceptos. */
+    total: number;
+  };
+
   // ── Campos técnicos para la tabla de amortización ────────────────
   /** Monto real financiado (SIN IVA del bien) usado para PMT */
   montoFinanciadoReal: number;
@@ -410,6 +432,22 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
     .plus(depositoGarantia)
     .plus(gpsContado);
 
+  // ── Ganancia (visible en calculadora, NO en PDF) ─────────────────
+  // Ver doc de ResultadoCotizacion.ganancia. Flujo de caja nominal sin
+  // IVA, descompuesto en comisión + intereses + opción neta.
+  //   intereses    = Σ rentas netas − capital recuperado (PV − FV)
+  //   opciónNeta   = residual − FV  (0 en PURO porque FV=residual;
+  //                  = 2% en FIN porque FV=0)
+  //   comisión     = comisión apertura total (contado + financiada)
+  // GPS y seguro NO aparecen: son pass-through (lo cobrado = el costo
+  // que Inyecta paga al proveedor/aseguradora) → se cancelan.
+  const sumaRentasNetas    = rentaDecimal.times(plazoMeses);
+  const capitalRecuperado  = montoFinanciadoReal.minus(fvPMT);
+  const gananciaIntereses  = sumaRentasNetas.minus(capitalRecuperado);
+  const gananciaOpcion     = residualDisplay.minus(fvPMT);
+  const gananciaComision   = comisionMonto;
+  const gananciaTotal      = gananciaComision.plus(gananciaIntereses).plus(gananciaOpcion);
+
   // ── Fecha ────────────────────────────────────────────────────────
   const fechaStr = formatFechaDMY(inp.fecha);
 
@@ -472,6 +510,13 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
       monto:      r2(residualDisplay),
       iva:        r2(residualIVA),
       total:      r2(residualTotal),
+    },
+
+    ganancia: {
+      comisionApertura: r2(gananciaComision),
+      intereses:        r2(gananciaIntereses),
+      opcionCompra:     r2(gananciaOpcion),
+      total:            r2(gananciaTotal),
     },
 
     montoFinanciadoReal: r2(montoFinanciadoReal),

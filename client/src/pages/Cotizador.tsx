@@ -64,6 +64,11 @@ interface SimulationResult {
     totalRentas: number;
     totalPagar: number;
     ganancia: number;
+    gananciaDesglose: {
+      comisionApertura: number;
+      intereses: number;
+      opcionCompra: number;
+    };
     amortizacion: Array<{
       periodo: number;
       saldoInicial: number;
@@ -1138,7 +1143,43 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                 <div className="border-t border-gray-100 pt-3">
                   <ResultRow label="Total Rentas" value={formatCurrency(result.resultado.totalRentas)} />
                   <ResultRow label="Total a Pagar" value={formatCurrency(result.resultado.totalPagar)} />
-                  <ResultRow label="Ganancia" value={formatCurrency(result.resultado.ganancia)} accent />
+                </div>
+
+                {/* ── Apartado GANANCIA (interno — NO se imprime en el PDF) ──
+                    Utilidad real de la financiera, sin IVA (IVA de paso).
+                    = comisión apertura + intereses ganados + opción de
+                    compra neta. Solo visible aquí, nunca en la cotización
+                    que se entrega al cliente. */}
+                <div className="border-t-2 border-inyecta-200 pt-3 mt-1 bg-inyecta-50/40 -mx-2 px-2 py-2 rounded-lg">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs font-semibold text-inyecta-800 uppercase tracking-wide">
+                      Ganancia (interno)
+                    </span>
+                    <span className="text-[10px] text-gray-400">no se imprime</span>
+                  </div>
+                  <ResultRow
+                    label="Comisión apertura"
+                    value={formatCurrency(result.resultado.gananciaDesglose.comisionApertura)}
+                  />
+                  <ResultRow
+                    label="Intereses ganados"
+                    value={formatCurrency(result.resultado.gananciaDesglose.intereses)}
+                  />
+                  <ResultRow
+                    label="Opción de compra"
+                    value={formatCurrency(result.resultado.gananciaDesglose.opcionCompra)}
+                  />
+                  <div className="border-t border-inyecta-200 mt-1 pt-1">
+                    <ResultRow
+                      label="Ganancia total"
+                      value={formatCurrency(result.resultado.ganancia)}
+                      highlight
+                      accent
+                    />
+                  </div>
+                  <p className="text-[10px] text-gray-500 mt-1.5 leading-snug">
+                    Sin IVA (de paso). El costo del bien se recupera con las rentas.
+                  </p>
                 </div>
               </div>
             ) : (
