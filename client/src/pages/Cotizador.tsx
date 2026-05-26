@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PDFDownloadLink } from '@react-pdf/renderer';
 import api from '@/lib/api';
@@ -111,6 +111,21 @@ function todayISO(): string {
   );
 }
 
+/**
+ * Agrupa la parte entera con comas de miles, preservando la parte
+ * decimal tal cual viene (sin forzar 2 decimales — eso pasa al salir
+ * del campo). Acepta un string ya "limpio" (solo dígitos y a lo más un
+ * punto). Ej: "1000000"     → "1,000,000"
+ *             "1000000.5"   → "1,000,000.5"
+ *             "1000000.50"  → "1,000,000.50"
+ */
+function formatMiles(clean: string): string {
+  if (clean === '') return '';
+  const [intPart, decPart] = clean.split('.');
+  const intGrouped = (intPart || '0').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return decPart !== undefined ? `${intGrouped}.${decPart}` : intGrouped;
+}
+
 const defaultForm = {
   nombreCliente: '',
   producto: 'PURO' as 'PURO' | 'FINANCIERO',
@@ -194,6 +209,15 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [error, setError] = useState('');
 
+  // Valor del bien: input de TEXTO con formato en vivo (1,000,000.00).
+  // `form.valorBien` sigue siendo el número fuente de verdad; este string
+  // es solo la presentación. Ref de foco para no pisar lo que el usuario
+  // escribe cuando el número cambia desde afuera (ej. Reset).
+  const [valorBienInput, setValorBienInput] = useState(() =>
+    formatMiles(String(defaultForm.valorBien)),
+  );
+  const valorBienFocusedRef = useRef(false);
+
   // T8 — Simulación de pagos adicionales
   const [pagosExtra, setPagosExtra] = useState<PagoExtra[]>([]);
   const [nuevoPagoPeriodo, setNuevoPagoPeriodo] = useState<number>(12);
@@ -255,6 +279,72 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
   const updateField = <K extends keyof FormState>(field: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
+
+  // ── Valor del bien: handlers del input formateado ────────────────
+  // onChange: limpia a dígitos + 1 punto + máx 2 decimales, reformatea
+  // con comas y RESTAURA el cursor contando dígitos a su izquierda
+  // (para no saltar al final cuando se edita en medio).
+  const handleValorBienChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const el = e.target;
+    const raw = el.value;
+    const caret = el.selectionStart ?? raw.length;
+    const digitosIzq = raw.slice(0, caret).replace(/\D/g, '').length;
+
+    // Limpiar: solo dígitos y un único punto, máximo 2 decimales.
+    let clean = raw.replace(/[^\d.]/g, '');
+    const primerPunto = clean.indexOf('.');
+    if (primerPunto !== -1) {
+      clean =
+        clean.slice(0, primerPunto + 1) +
+        clean.slice(primerPunto + 1).replace(/\./g, '');
+    }
+    const punto = clean.indexOf('.');
+    if (punto !== -1) clean = clean.slice(0, punto + 3);
+
+    const formatted = formatMiles(clean);
+    setValorBienInput(formatted);
+    updateField('valorBien', clean === '' ? 0 : Number(clean));
+
+    // Restaurar cursor: avanzar hasta haber pasado `digitosIzq` dígitos.
+    requestAnimationFrame(() => {
+      let pos = 0;
+      let vistos = 0;
+      while (pos < formatted.length && vistos < digitosIzq) {
+        if (/\d/.test(formatted[pos])) vistos++;
+        pos++;
+      }
+      try { el.setSelectionRange(pos, pos); } catch { /* input pudo desmontarse */ }
+    });
+  };
+
+  // onBlur: normaliza a 2 decimales con comas (1,000,000.00).
+  const handleValorBienBlur = () => {
+    valorBienFocusedRef.current = false;
+    const num = form.valorBien;
+    setValorBienInput(
+      !num || num <= 0
+        ? ''
+        : num.toLocaleString('es-MX', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          }),
+    );
+  };
+
+  // Resincroniza el display cuando `form.valorBien` cambia desde afuera
+  // (ej. Reset) y el campo NO está enfocado — para no pisar lo que el
+  // usuario está escribiendo.
+  useEffect(() => {
+    if (valorBienFocusedRef.current) return;
+    setValorBienInput(
+      form.valorBien > 0
+        ? form.valorBien.toLocaleString('es-MX', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })
+        : '',
+    );
+  }, [form.valorBien]);
 
   // Distribución actual derivada del aporte inicial y el nivel.
   // Cuando edicionManual=true, el cotizador IGNORA esto y usa los
@@ -724,11 +814,13 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
                   <input
-                    type="number"
-                    value={form.valorBien}
-                    onChange={(e) => updateField('valorBien', Number(e.target.value))}
-                    min={150000}
-                    max={3000000}
+                    type="text"
+                    inputMode="decimal"
+                    value={valorBienInput}
+                    onChange={handleValorBienChange}
+                    onFocus={() => { valorBienFocusedRef.current = true; }}
+                    onBlur={handleValorBienBlur}
+                    placeholder="1,000,000.00"
                     className="w-full pl-7 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none"
                   />
                 </div>
