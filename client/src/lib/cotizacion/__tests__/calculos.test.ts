@@ -607,11 +607,19 @@ describe('calcularCotizacion — ganancia', () => {
       return totalInt + monto * 0.05;
     }
 
-    it('coincide AL CENTAVO con la corrida oficial (1,000,000 × 36m → $713,044.94)', () => {
-      // Verificado contra el PDF de amortización del sistema Inyecta
-      // (26-05-2026): pago $49,142.56, saldo final $0.00, intereses
-      // $663,044.94 + comisión $50,000 = $713,044.94.
+    // Verificado AL CENTAVO contra 3 corridas oficiales del sistema
+    // Inyecta (PDFs de amortización, 26-05-2026). Ganancia = Σintereses
+    // + comisión 5% sin IVA. Si alguien cambia la fórmula, estos truenan.
+    it('corrida oficial 1,000,000 × 36m → $713,044.94', () => {
       expect(calcGananciaCredito(1_000_000, 36)).toBeCloseTo(713_044.94, 1);
+    });
+
+    it('corrida oficial 500,000 × 48m → $486,815.99', () => {
+      expect(calcGananciaCredito(500_000, 48)).toBeCloseTo(486_815.99, 1);
+    });
+
+    it('corrida oficial 1,200,000 × 36m → $855,653.92', () => {
+      expect(calcGananciaCredito(1_200_000, 36)).toBeCloseTo(855_653.92, 1);
     });
 
     it('coincide con la réplica del modelo (1,000,000 × 36m)', () => {
