@@ -346,14 +346,54 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
     );
   }, [form.valorBien]);
 
-  // Ganancia hipotética si fuera CRÉDITO (no arrendamiento) por el
-  // mismo monto y plazo. Indicador comparativo — se recalcula en vivo
-  // al cambiar el Valor del Bien o el plazo. Parámetros fijos (36%,
-  // comisión 5%, IVA 16%) viven en calcGananciaCredito.
+  // Capital NETO que invierte Inyecta en el arrendamiento (Damián
+  // 26-05-2026): valor del bien sin IVA − aportes del cliente al inicio
+  // (enganche + depósito + comisión/GPS/seguro de contado). Es el dinero
+  // que realmente sale de la bolsa de Inyecta. Se calcula en vivo con
+  // calcularCotizacion (mismo motor que el PDF) — no espera al Simular.
+  const capitalInvertido = useMemo(() => {
+    if (form.valorBien <= 0) return 0;
+    const cot = calcularCotizacion({
+      valorBienConIVA: form.valorBien * 1.16,
+      tasaIVA: 0.16,
+      producto: form.producto,
+      plazo: form.plazo,
+      tasaAnual: form.tasaAnual,
+      tasaComisionApertura: form.comisionAperturaPct,
+      comisionAperturaEsContado: !form.comisionAperturaFinanciada,
+      porcentajeDeposito: form.depositoGarantiaPct,
+      valorResidual: form.valorResidualPct,
+      valorResidualEsDeposito: form.valorResidualEsDeposito,
+      gpsMonto: form.gpsInstalacion,
+      gpsEsContado: !form.gpsFinanciado,
+      seguroAnual: form.seguroAnual,
+      seguroPendiente: form.seguroPendiente,
+      seguroEsContado: !form.seguroFinanciado,
+      engancheMonto: form.valorBien * form.enganchePct,
+      nombreBien: '', estadoBien: '', seguroEstado: '', nombreCliente: '',
+      fecha: new Date(),
+    });
+    return Math.max(0, cot.valorBienSinIVA - cot.pagoInicial.total);
+  }, [
+    form.valorBien, form.producto, form.plazo, form.tasaAnual,
+    form.comisionAperturaPct, form.comisionAperturaFinanciada,
+    form.depositoGarantiaPct, form.valorResidualPct, form.valorResidualEsDeposito,
+    form.gpsInstalacion, form.gpsFinanciado, form.seguroAnual,
+    form.seguroPendiente, form.seguroFinanciado, form.enganchePct,
+  ]);
+
+  // Ganancia si en vez del arrendamiento se diera un CRÉDITO simple por
+  // el MISMO capital que invierte Inyecta (no el valor del bien). Tasa
+  // 36%, comisión 5%, IVA 16% FIJOS (no cambian con el arrendamiento).
   const gananciaCredito = useMemo(
-    () => calcGananciaCredito(form.valorBien, form.plazo),
-    [form.valorBien, form.plazo],
+    () => calcGananciaCredito(capitalInvertido, form.plazo),
+    [capitalInvertido, form.plazo],
   );
+
+  // ROI de cada producto sobre el mismo capital invertido.
+  const roiArrendamiento = (gananciaArr: number) =>
+    capitalInvertido > 0 ? (gananciaArr / capitalInvertido) * 100 : 0;
+  const roiCredito = capitalInvertido > 0 ? (gananciaCredito / capitalInvertido) * 100 : 0;
 
   // Distribución actual derivada del aporte inicial y el nivel.
   // Cuando edicionManual=true, el cotizador IGNORA esto y usa los
@@ -1293,36 +1333,56 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                     />
                   </div>
 
-                  {/* Comparativo: ganancia si en vez de arrendamiento se
-                      diera un CRÉDITO simple por el mismo monto y plazo.
-                      Verificado al centavo contra el simulador legado. */}
+                  {/* Retorno de inversión: arrendamiento vs crédito sobre
+                      el MISMO capital que invierte Inyecta. Crédito a 36%/
+                      5%/16% fijos, verificado al centavo contra el
+                      simulador legado. */}
                   <div className="border-t border-amber-200 mt-2 pt-2">
+                    <div className="text-[11px] font-semibold text-gray-700 uppercase tracking-wide mb-1.5">
+                      Retorno de inversión
+                    </div>
                     <ResultRow
-                      label="💡 Ganancia si fuera crédito"
-                      value={formatCurrency(gananciaCredito)}
+                      label="Capital que invierte Inyecta"
+                      value={formatCurrency(capitalInvertido)}
                     />
                     {(() => {
-                      const dif = result.resultado.ganancia - gananciaCredito;
-                      const arrGana = dif >= 0;
-                      const base = gananciaCredito || 1;
-                      const pct = Math.abs(dif / base) * 100;
+                      const gArr = result.resultado.ganancia;
+                      const roiArr = roiArrendamiento(gArr);
+                      const arrGana = gArr >= gananciaCredito;
                       return (
-                        <div
-                          className={`mt-1 text-xs font-medium ${
-                            arrGana ? 'text-emerald-700' : 'text-amber-700'
-                          }`}
-                        >
-                          {arrGana
-                            ? `El arrendamiento deja ${formatCurrency(dif)} más`
-                            : `El crédito dejaría ${formatCurrency(-dif)} más`}
-                          {' '}({pct.toFixed(1)}%)
-                        </div>
+                        <>
+                          {/* Tabla compacta de 2 columnas */}
+                          <div className="grid grid-cols-[1fr_auto_auto] gap-x-2 gap-y-0.5 mt-1.5 text-xs">
+                            <span className="text-gray-400"></span>
+                            <span className="text-right font-medium text-inyecta-700">Arrend.</span>
+                            <span className="text-right font-medium text-amber-700">Crédito</span>
+
+                            <span className="text-gray-500">Ganancia</span>
+                            <span className="text-right text-gray-900">{formatCurrency(gArr)}</span>
+                            <span className="text-right text-gray-900">{formatCurrency(gananciaCredito)}</span>
+
+                            <span className="text-gray-500">ROI</span>
+                            <span className="text-right font-bold text-inyecta-700">{roiArr.toFixed(1)}%</span>
+                            <span className="text-right font-bold text-amber-700">{roiCredito.toFixed(1)}%</span>
+                          </div>
+                          <div
+                            className={`mt-1.5 text-xs font-medium ${
+                              arrGana ? 'text-emerald-700' : 'text-amber-700'
+                            }`}
+                          >
+                            {arrGana
+                              ? `→ El arrendamiento rinde ${(roiArr - roiCredito).toFixed(1)} pts más`
+                              : `→ El crédito rinde ${(roiCredito - roiArr).toFixed(1)} pts más`}
+                          </div>
+                        </>
                       );
                     })()}
                   </div>
 
                   <p className="text-[10px] text-gray-500 mt-1.5 leading-snug">
-                    Ganancias sin IVA (de paso). El costo del bien se recupera con las rentas.
+                    Ganancias sin IVA. ROI = ganancia ÷ capital que invierte
+                    Inyecta (valor del bien − aportes del cliente al inicio).
+                    El crédito presta ese mismo capital al 36%.
                   </p>
                 </div>
               </div>
