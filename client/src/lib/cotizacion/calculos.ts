@@ -538,12 +538,22 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
  * Parámetros DINÁMICOS: monto y parcialidades (del cotizador).
  *
  * Amortización francesa (saldos insolutos) con la particularidad de
- * que el IVA de los intereses se absorbe dentro del pago fijo:
- *   PagoMensual    = Monto × (r / (1 − (1+r)^(−n)))
- *   Intereses[i]   = Saldo[i-1] × r
- *   IVA[i]         = Intereses[i] × 0.16
- *   PagoCapital[i] = PagoMensual − Intereses[i] − IVA[i]
- *   Saldo[i]       = Saldo[i-1] − PagoCapital[i]
+ * que el IVA de los intereses se RESTA del pago fijo. Verificado al
+ * centavo contra la corrida oficial del sistema Inyecta (26-05-2026,
+ * $1,000,000 × 36m → pago $49,142.56, saldo final $0.00).
+ *
+ *   tasaEfectiva = r × (1 + IVA)   ← 3% × 1.16 = 3.48%
+ *   PagoMensual  = Monto × (tasaEfectiva / (1 − (1+tasaEfectiva)^(−n)))
+ *   Intereses[i] = Saldo[i-1] × r           (interés al 3%, sin IVA)
+ *   IVA[i]       = Intereses[i] × 0.16
+ *   PagoCapital  = PagoMensual − Intereses[i] − IVA[i]
+ *   Saldo[i]     = Saldo[i-1] − PagoCapital[i]   → llega a 0 en n
+ *
+ * El pago se calcula con la tasa EFECTIVA (que incluye el IVA) para que
+ * el saldo amortice completo: como cada periodo se le resta también el
+ * IVA, el "costo financiero" real sobre el saldo es r×(1+IVA). Si se
+ * usara solo r (3%), el pago no alcanzaría a cubrir capital+interés+IVA
+ * y quedaría un saldo insoluto al final (no es lo que hace un crédito).
  *
  * Ganancia (sin IVA, sin recuperación de capital):
  *   GananciaCrédito = ΣIntereses + Monto × 0.05
@@ -563,12 +573,14 @@ export function calcGananciaCredito(monto: number, parcialidades: number): numbe
 
   const n = Math.floor(parcialidades);
   const M = new Decimal(monto);
-  const r = new Decimal(0.36).dividedBy(12); // 0.03
+  const r = new Decimal(0.36).dividedBy(12); // 0.03 mensual
+  const iva = new Decimal(0.16);
 
-  // PagoMensual = M × (r / (1 − (1+r)^(−n)))
-  const unoMasR = r.plus(1);
-  const denom = new Decimal(1).minus(unoMasR.pow(-n));
-  const pagoMensual = M.times(r.dividedBy(denom));
+  // Pago fijo a la tasa EFECTIVA r×(1+IVA) para que el saldo cierre en 0
+  // pese a restarle también el IVA cada periodo.
+  const rEff = r.times(iva.plus(1)); // 0.0348
+  const denom = new Decimal(1).minus(rEff.plus(1).pow(-n));
+  const pagoMensual = M.times(rEff.dividedBy(denom));
 
   const comisionApertura = M.times(0.05);
 
@@ -576,8 +588,8 @@ export function calcGananciaCredito(monto: number, parcialidades: number): numbe
   let totalIntereses = new Decimal(0);
   for (let i = 0; i < n; i++) {
     const intereses = saldo.times(r);
-    const iva = intereses.times(0.16);
-    const pagoCapital = pagoMensual.minus(intereses).minus(iva);
+    const ivaInteres = intereses.times(iva);
+    const pagoCapital = pagoMensual.minus(intereses).minus(ivaInteres);
     saldo = saldo.minus(pagoCapital);
     totalIntereses = totalIntereses.plus(intereses);
   }

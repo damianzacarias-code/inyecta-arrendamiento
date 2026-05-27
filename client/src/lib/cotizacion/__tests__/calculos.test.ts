@@ -588,11 +588,13 @@ describe('calcularCotizacion — ganancia', () => {
   });
 
   describe('calcGananciaCredito (indicador comparativo crédito)', () => {
-    // Réplica independiente del spec de Damián con números planos,
-    // para confirmar que la implementación con Decimal sigue la fórmula.
+    // Réplica independiente con números planos. Usa la tasa EFECTIVA
+    // r×(1+IVA) en el pago para que el saldo amortice completo, igual
+    // que la corrida oficial del sistema Inyecta.
     function gananciaRef(monto: number, n: number): number {
       const r = 0.36 / 12;
-      const pago = monto * (r / (1 - Math.pow(1 + r, -n)));
+      const rEff = r * 1.16;
+      const pago = monto * (rEff / (1 - Math.pow(1 + rEff, -n)));
       let saldo = monto;
       let totalInt = 0;
       for (let i = 0; i < n; i++) {
@@ -605,7 +607,14 @@ describe('calcularCotizacion — ganancia', () => {
       return totalInt + monto * 0.05;
     }
 
-    it('coincide con la réplica del spec (1,000,000 × 36m)', () => {
+    it('coincide AL CENTAVO con la corrida oficial (1,000,000 × 36m → $713,044.94)', () => {
+      // Verificado contra el PDF de amortización del sistema Inyecta
+      // (26-05-2026): pago $49,142.56, saldo final $0.00, intereses
+      // $663,044.94 + comisión $50,000 = $713,044.94.
+      expect(calcGananciaCredito(1_000_000, 36)).toBeCloseTo(713_044.94, 1);
+    });
+
+    it('coincide con la réplica del modelo (1,000,000 × 36m)', () => {
       expect(calcGananciaCredito(1_000_000, 36)).toBeCloseTo(gananciaRef(1_000_000, 36), 1);
     });
 
@@ -614,8 +623,6 @@ describe('calcularCotizacion — ganancia', () => {
     });
 
     it('incluye la comisión de apertura (5% del monto)', () => {
-      // La ganancia debe ser SIEMPRE mayor que la comisión sola
-      // (porque suma además los intereses positivos).
       const g = calcGananciaCredito(1_000_000, 24);
       expect(g).toBeGreaterThan(1_000_000 * 0.05);
     });
