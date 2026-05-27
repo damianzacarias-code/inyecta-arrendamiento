@@ -1292,8 +1292,37 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                       accent
                     />
                   </div>
+
+                  {/* Comparativo: ganancia si en vez de arrendamiento se
+                      diera un CRÉDITO simple por el mismo monto y plazo.
+                      Verificado al centavo contra el simulador legado. */}
+                  <div className="border-t border-amber-200 mt-2 pt-2">
+                    <ResultRow
+                      label="💡 Ganancia si fuera crédito"
+                      value={formatCurrency(gananciaCredito)}
+                    />
+                    {(() => {
+                      const dif = result.resultado.ganancia - gananciaCredito;
+                      const arrGana = dif >= 0;
+                      const base = gananciaCredito || 1;
+                      const pct = Math.abs(dif / base) * 100;
+                      return (
+                        <div
+                          className={`mt-1 text-xs font-medium ${
+                            arrGana ? 'text-emerald-700' : 'text-amber-700'
+                          }`}
+                        >
+                          {arrGana
+                            ? `El arrendamiento deja ${formatCurrency(dif)} más`
+                            : `El crédito dejaría ${formatCurrency(-dif)} más`}
+                          {' '}({pct.toFixed(1)}%)
+                        </div>
+                      );
+                    })()}
+                  </div>
+
                   <p className="text-[10px] text-gray-500 mt-1.5 leading-snug">
-                    Sin IVA (de paso). El costo del bien se recupera con las rentas.
+                    Ganancias sin IVA (de paso). El costo del bien se recupera con las rentas.
                   </p>
                 </div>
               </div>
