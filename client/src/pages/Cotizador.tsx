@@ -373,7 +373,11 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
       nombreBien: '', estadoBien: '', seguroEstado: '', nombreCliente: '',
       fecha: new Date(),
     });
-    return Math.max(0, cot.valorBienSinIVA - cot.pagoInicial.total);
+    // Capital invertido = BASE DEL BIEN = valor sin IVA − enganche
+    // + GPS/seguro financiados. NO resta el depósito (se devuelve al
+    // cliente, no es capital de Inyecta) ni la comisión (es ingreso, no
+    // inversión). baseBien = montoFinanciadoReal − comisión financiada.
+    return Math.max(0, cot.montoFinanciadoReal - cot.monto.comisionAperturaFinanciada);
   }, [
     form.valorBien, form.producto, form.plazo, form.tasaAnual,
     form.comisionAperturaPct, form.comisionAperturaFinanciada,
@@ -390,10 +394,19 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
     [capitalInvertido, form.plazo],
   );
 
-  // ROI de cada producto sobre el mismo capital invertido.
-  const roiArrendamiento = (gananciaArr: number) =>
-    capitalInvertido > 0 ? (gananciaArr / capitalInvertido) * 100 : 0;
-  const roiCredito = capitalInvertido > 0 ? (gananciaCredito / capitalInvertido) * 100 : 0;
+  // ROI sobre el mismo capital invertido. Dos vistas:
+  //   total = ganancia / capital (retorno de TODO el periodo)
+  //   anual = (1 + total)^(1/años) − 1  (retorno por año; deja comparar
+  //           plazos distintos y contra el benchmark 15-30% anual de la
+  //           industria — investigación 26-05-2026).
+  const aniosPlazo = form.plazo / 12;
+  const roiTotalPct = (ganancia: number) =>
+    capitalInvertido > 0 ? (ganancia / capitalInvertido) * 100 : 0;
+  const roiAnualPct = (ganancia: number) => {
+    if (capitalInvertido <= 0 || aniosPlazo <= 0) return 0;
+    const total = ganancia / capitalInvertido; // fracción
+    return (Math.pow(1 + total, 1 / aniosPlazo) - 1) * 100;
+  };
 
   // Distribución actual derivada del aporte inicial y el nivel.
   // Cuando edicionManual=true, el cotizador IGNORA esto y usa los
@@ -1347,11 +1360,12 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                     />
                     {(() => {
                       const gArr = result.resultado.ganancia;
-                      const roiArr = roiArrendamiento(gArr);
+                      const roiArrAnual = roiAnualPct(gArr);
+                      const roiCredAnual = roiAnualPct(gananciaCredito);
                       const arrGana = gArr >= gananciaCredito;
                       return (
                         <>
-                          {/* Tabla compacta de 2 columnas */}
+                          {/* Tabla compacta: Arrendamiento vs Crédito */}
                           <div className="grid grid-cols-[1fr_auto_auto] gap-x-2 gap-y-0.5 mt-1.5 text-xs">
                             <span className="text-gray-400"></span>
                             <span className="text-right font-medium text-inyecta-700">Arrend.</span>
@@ -1361,9 +1375,13 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                             <span className="text-right text-gray-900">{formatCurrency(gArr)}</span>
                             <span className="text-right text-gray-900">{formatCurrency(gananciaCredito)}</span>
 
-                            <span className="text-gray-500">ROI</span>
-                            <span className="text-right font-bold text-inyecta-700">{roiArr.toFixed(1)}%</span>
-                            <span className="text-right font-bold text-amber-700">{roiCredito.toFixed(1)}%</span>
+                            <span className="text-gray-500">ROI total</span>
+                            <span className="text-right text-gray-900">{roiTotalPct(gArr).toFixed(1)}%</span>
+                            <span className="text-right text-gray-900">{roiTotalPct(gananciaCredito).toFixed(1)}%</span>
+
+                            <span className="text-gray-500">ROI anual</span>
+                            <span className="text-right font-bold text-inyecta-700">{roiArrAnual.toFixed(1)}%</span>
+                            <span className="text-right font-bold text-amber-700">{roiCredAnual.toFixed(1)}%</span>
                           </div>
                           <div
                             className={`mt-1.5 text-xs font-medium ${
@@ -1371,8 +1389,8 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                             }`}
                           >
                             {arrGana
-                              ? `→ El arrendamiento rinde ${(roiArr - roiCredito).toFixed(1)} pts más`
-                              : `→ El crédito rinde ${(roiCredito - roiArr).toFixed(1)} pts más`}
+                              ? `→ El arrendamiento rinde ${(roiArrAnual - roiCredAnual).toFixed(1)} pts anuales más`
+                              : `→ El crédito rinde ${(roiCredAnual - roiArrAnual).toFixed(1)} pts anuales más`}
                           </div>
                         </>
                       );
@@ -1380,9 +1398,10 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                   </div>
 
                   <p className="text-[10px] text-gray-500 mt-1.5 leading-snug">
-                    Ganancias sin IVA. ROI = ganancia ÷ capital que invierte
-                    Inyecta (valor del bien − aportes del cliente al inicio).
-                    El crédito presta ese mismo capital al 36%.
+                    Ganancias sin IVA. ROI total = ganancia ÷ capital invertido
+                    (base del bien, sin restar depósito ni comisión). ROI anual
+                    = (1+ROI total)^(1/años)−1. El crédito presta ese mismo
+                    capital al 36%.
                   </p>
                 </div>
               </div>
