@@ -15,7 +15,10 @@
  *   FINANCIERO renta = $75,896.80   monto fin = $1,917,662.07
  */
 import { describe, it, expect } from 'vitest';
-import { calcPMT, calcularCotizacion, calcGananciaCredito } from '../calculos';
+import {
+  calcPMT, calcularCotizacion, calcGananciaCredito,
+  tirAnualDeFlujos, calcTIRCredito, calcTIRArrendamiento,
+} from '../calculos';
 import {
   calcAmortPuro,
   calcAmortFinanciero,
@@ -640,6 +643,77 @@ describe('calcularCotizacion — ganancia', () => {
       expect(calcGananciaCredito(1_000_000, 0)).toBe(0);
       expect(calcGananciaCredito(-5, 36)).toBe(0);
       expect(calcGananciaCredito(NaN, 36)).toBe(0);
+    });
+  });
+
+  describe('TIR (tasa interna de retorno)', () => {
+    it('sanity: presta 1000, recibe 1100 al mes 1 → 10%/mes → ~213.8% anual', () => {
+      expect(tirAnualDeFlujos([-1000, 1100])).toBeCloseTo((Math.pow(1.1, 12) - 1) * 100, 0);
+    });
+
+    it('annuity a 1%/mes 12 pagos → TIR ~12.68% anual', () => {
+      // PMT(1000, 1%, 12) = 88.85
+      const flujos = [-1000, ...Array(12).fill(88.8488)];
+      expect(tirAnualDeFlujos(flujos)).toBeCloseTo((Math.pow(1.01, 12) - 1) * 100, 0);
+    });
+
+    it('sin cambio de signo → NaN', () => {
+      expect(Number.isNaN(tirAnualDeFlujos([100, 200, 300]))).toBe(true);
+    });
+
+    it('flujos no-finitos o vacíos → NaN (no número basura)', () => {
+      expect(Number.isNaN(tirAnualDeFlujos([-1000, NaN, 100]))).toBe(true);
+      expect(Number.isNaN(tirAnualDeFlujos([-1000, Infinity, 100]))).toBe(true);
+      expect(Number.isNaN(tirAnualDeFlujos([]))).toBe(true);
+      expect(Number.isNaN(tirAnualDeFlujos([-1000]))).toBe(true);
+    });
+
+    it('arrendamiento con inputs no-finitos → NaN', () => {
+      expect(Number.isNaN(calcTIRArrendamiento({
+        capital: 1000, rentaNeta: NaN, residual: 0,
+        deposito: 0, comisionContado: 0, parcialidades: 12,
+      }))).toBe(true);
+    });
+
+    it('crédito 900,000 × 36m → TIR ≈ 48.4% anual (≈ CAT)', () => {
+      expect(calcTIRCredito(900_000, 36)).toBeCloseTo(48.36, 1);
+    });
+
+    it('crédito: TIR mucho más estable que el ROI simple entre plazos', () => {
+      const t12 = calcTIRCredito(900_000, 12);
+      const t60 = calcTIRCredito(900_000, 60);
+      // Se mantiene en una banda estrecha (~57% → ~47%), no se desploma
+      // como el ROI anual simple (26% → 18%).
+      expect(t12).toBeGreaterThan(45);
+      expect(t60).toBeGreaterThan(45);
+      expect(t12 - t60).toBeLessThan(15);
+    });
+
+    it('crédito inputs inválidos → NaN', () => {
+      expect(Number.isNaN(calcTIRCredito(0, 36))).toBe(true);
+      expect(Number.isNaN(calcTIRCredito(900_000, 0))).toBe(true);
+    });
+
+    it('arrendamiento: annuity simple = la tasa implícita de las rentas', () => {
+      // capital 1000, 12 rentas de 88.85, sin depósito/residual/comisión
+      // → TIR ≈ 12.68% anual (mismo que un crédito a 1%/mes).
+      const tir = calcTIRArrendamiento({
+        capital: 1000, rentaNeta: 88.8488, residual: 0,
+        deposito: 0, comisionContado: 0, parcialidades: 12,
+      });
+      expect(tir).toBeCloseTo((Math.pow(1.01, 12) - 1) * 100, 0);
+    });
+
+    it('arrendamiento: el residual al final sube la TIR', () => {
+      const sinResidual = calcTIRArrendamiento({
+        capital: 1000, rentaNeta: 80, residual: 0,
+        deposito: 0, comisionContado: 0, parcialidades: 12,
+      });
+      const conResidual = calcTIRArrendamiento({
+        capital: 1000, rentaNeta: 80, residual: 200,
+        deposito: 0, comisionContado: 0, parcialidades: 12,
+      });
+      expect(conResidual).toBeGreaterThan(sinResidual);
     });
   });
 

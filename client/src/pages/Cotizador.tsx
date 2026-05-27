@@ -4,7 +4,7 @@ import { PDFDownloadLink } from '@react-pdf/renderer';
 import api from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import { Calculator, Save, RotateCcw, ChevronDown, ChevronUp, FileText, Table, Plus, X, Sparkles } from 'lucide-react';
-import { calcularCotizacion, calcGananciaCredito } from '@/lib/cotizacion/calculos';
+import { calcularCotizacion, calcGananciaCredito, calcTIRCredito, calcTIRArrendamiento } from '@/lib/cotizacion/calculos';
 import {
   distribuirAporte,
   lemaOpcionBajo,
@@ -1362,7 +1362,22 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                       const gArr = result.resultado.ganancia;
                       const roiArrAnual = roiAnualPct(gArr);
                       const roiCredAnual = roiAnualPct(gananciaCredito);
-                      const arrGana = gArr >= gananciaCredito;
+                      // TIR anual (estable entre plazos, ≈ CAT).
+                      const tirArr = calcTIRArrendamiento({
+                        capital: capitalInvertido,
+                        rentaNeta: result.resultado.rentaMensual,
+                        residual: result.resultado.valorResidual,
+                        deposito: result.resultado.depositoGarantia,
+                        comisionContado: form.comisionAperturaFinanciada
+                          ? 0
+                          : result.resultado.comisionApertura,
+                        parcialidades: form.plazo,
+                      });
+                      const tirCred = calcTIRCredito(capitalInvertido, form.plazo);
+                      const fmtPct = (v: number) => (Number.isFinite(v) ? `${v.toFixed(1)}%` : '—');
+                      const arrGana = Number.isFinite(tirArr) && Number.isFinite(tirCred)
+                        ? tirArr >= tirCred
+                        : gArr >= gananciaCredito;
                       return (
                         <>
                           {/* Tabla compacta: Arrendamiento vs Crédito */}
@@ -1380,28 +1395,35 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                             <span className="text-right text-gray-900">{roiTotalPct(gananciaCredito).toFixed(1)}%</span>
 
                             <span className="text-gray-500">ROI anual</span>
-                            <span className="text-right font-bold text-inyecta-700">{roiArrAnual.toFixed(1)}%</span>
-                            <span className="text-right font-bold text-amber-700">{roiCredAnual.toFixed(1)}%</span>
+                            <span className="text-right text-gray-700">{roiArrAnual.toFixed(1)}%</span>
+                            <span className="text-right text-gray-700">{roiCredAnual.toFixed(1)}%</span>
+
+                            <span className="text-gray-500 font-medium">TIR anual</span>
+                            <span className="text-right font-bold text-inyecta-700">{fmtPct(tirArr)}</span>
+                            <span className="text-right font-bold text-amber-700">{fmtPct(tirCred)}</span>
                           </div>
-                          <div
-                            className={`mt-1.5 text-xs font-medium ${
-                              arrGana ? 'text-emerald-700' : 'text-amber-700'
-                            }`}
-                          >
-                            {arrGana
-                              ? `→ El arrendamiento rinde ${(roiArrAnual - roiCredAnual).toFixed(1)} pts anuales más`
-                              : `→ El crédito rinde ${(roiCredAnual - roiArrAnual).toFixed(1)} pts anuales más`}
-                          </div>
+                          {Number.isFinite(tirArr) && Number.isFinite(tirCred) && (
+                            <div
+                              className={`mt-1.5 text-xs font-medium ${
+                                arrGana ? 'text-emerald-700' : 'text-amber-700'
+                              }`}
+                            >
+                              {arrGana
+                                ? `→ El arrendamiento rinde ${(tirArr - tirCred).toFixed(1)} pts (TIR) más`
+                                : `→ El crédito rinde ${(tirCred - tirArr).toFixed(1)} pts (TIR) más`}
+                            </div>
+                          )}
                         </>
                       );
                     })()}
                   </div>
 
                   <p className="text-[10px] text-gray-500 mt-1.5 leading-snug">
-                    Ganancias sin IVA. ROI total = ganancia ÷ capital invertido
-                    (base del bien, sin restar depósito ni comisión). ROI anual
-                    = (1+ROI total)^(1/años)−1. El crédito presta ese mismo
-                    capital al 36%.
+                    Sin IVA. ROI total = ganancia ÷ capital invertido. ROI anual
+                    = (1+ROI)^(1/años)−1 (baja con el plazo). TIR = rendimiento
+                    anual real del flujo neto (considera que el capital se
+                    devuelve mes a mes; estable entre plazos). El crédito presta
+                    el mismo capital al 36%.
                   </p>
                 </div>
               </div>

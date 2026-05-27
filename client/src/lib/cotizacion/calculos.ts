@@ -600,6 +600,129 @@ export function calcGananciaCredito(monto: number, parcialidades: number): numbe
     .toNumber();
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// TIR (Tasa Interna de Retorno) — rendimiento anualizado de los flujos
+// ───────────────────────────────────────────────────────────────────
+// A diferencia del ROI simple, la TIR considera que el capital se va
+// devolviendo mes a mes (amortización), así que da un rendimiento ANUAL
+// estable que NO se distorsiona con el plazo. Es el equivalente al CAT.
+//
+// NOTA sobre Decimal.js: los MONTOS de los flujos se calculan con
+// Decimal aguas arriba; la TIR es una TASA que se encuentra por
+// iteración numérica (bisección sobre el VPN), igual que el IRR de
+// Excel. El root-finding usa `number` por diseño — no es acumulación de
+// dinero, es búsqueda de una raíz a una tolerancia.
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Resuelve la TIR MENSUAL de un arreglo de flujos por bisección.
+ * flujos[0] = mes 0 (típicamente negativo), flujos[t] = mes t.
+ * Devuelve NaN si no hay cambio de signo (no existe raíz).
+ */
+function tirMensual(flujos: number[]): number {
+  // Guarda: necesitamos al menos 2 flujos y que TODOS sean finitos.
+  // Sin esto, un NaN/Infinity en los flujos devolvía un número basura.
+  if (flujos.length < 2 || flujos.some((f) => !Number.isFinite(f))) return NaN;
+
+  const LO = -0.99;
+  const HI = 10; // 1000% mensual como cota superior (absurdo para el negocio)
+  const vpn = (i: number) =>
+    flujos.reduce((acc, cf, t) => acc + cf / Math.pow(1 + i, t), 0);
+
+  let lo = LO;
+  let hi = HI;
+  let fLo = vpn(lo);
+  const fHi = vpn(hi);
+  if (!Number.isFinite(fLo) || !Number.isFinite(fHi) || fLo * fHi > 0) {
+    return NaN; // sin cambio de signo → no hay raíz en el rango
+  }
+  for (let k = 0; k < 300; k++) {
+    const mid = (lo + hi) / 2;
+    const fMid = vpn(mid);
+    if (Math.abs(fMid) < 1e-9) return mid;
+    if (fLo * fMid < 0) {
+      hi = mid;
+    } else {
+      lo = mid;
+      fLo = fMid;
+    }
+  }
+  const root = (lo + hi) / 2;
+  // Si la raíz quedó pegada a los límites, no es confiable (TIR fuera
+  // de un rango razonable) → NaN en vez de un valor engañoso.
+  if (root <= LO + 1e-6 || root >= HI - 1e-6) return NaN;
+  return root;
+}
+
+/** TIR ANUAL en % a partir de flujos MENSUALES. NaN si no converge. */
+export function tirAnualDeFlujos(flujos: number[]): number {
+  const m = tirMensual(flujos);
+  if (!Number.isFinite(m)) return NaN;
+  return (Math.pow(1 + m, 12) - 1) * 100;
+}
+
+/**
+ * TIR anual (%) de un CRÉDITO simple por `capital` a `parcialidades`
+ * meses. Flujos de Inyecta, sin IVA:
+ *   mes 0:    − capital + comisión (5%)
+ *   mes 1..n: + (capital + interés) de cada pago (= pago − IVA)
+ * Tasa 36% / comisión 5% / IVA 16% fijos. Es la TIR del flujo NETO sin
+ * IVA — un proxy del rendimiento real, NO el CAT regulatorio (el CAT
+ * incluye IVA y todos los cargos).
+ */
+export function calcTIRCredito(capital: number, parcialidades: number): number {
+  if (!Number.isFinite(capital) || !Number.isFinite(parcialidades) || capital <= 0 || parcialidades <= 0) {
+    return NaN;
+  }
+  const n = Math.floor(parcialidades);
+  const C = new Decimal(capital);
+  const r = new Decimal(0.36).dividedBy(12);
+  const iva = new Decimal(0.16);
+  const rEff = r.times(iva.plus(1));
+  const pago = C.times(rEff.dividedBy(new Decimal(1).minus(rEff.plus(1).pow(-n))));
+  const flujos: number[] = [C.times(0.05).minus(C).toNumber()]; // − capital + comisión
+  let saldo = C;
+  for (let i = 0; i < n; i++) {
+    const interes = saldo.times(r);
+    const ivaInteres = interes.times(iva);
+    const pagoCapital = pago.minus(interes).minus(ivaInteres);
+    saldo = saldo.minus(pagoCapital);
+    flujos.push(pagoCapital.plus(interes).toNumber()); // entrada neta sin IVA
+  }
+  return tirAnualDeFlujos(flujos);
+}
+
+/**
+ * TIR anual (%) de un ARRENDAMIENTO. Flujos de Inyecta, sin IVA
+ * (definición confirmada con Damián 26-05-2026):
+ *   mes 0:    − capital invertido + comisión de contado + depósito
+ *   mes 1..n-1: + renta neta
+ *   mes n:    + renta neta − depósito (se devuelve) + valor residual
+ *             (cliente se lleva el bien)
+ */
+export function calcTIRArrendamiento(p: {
+  capital: number;
+  rentaNeta: number;
+  residual: number;
+  deposito: number;
+  comisionContado: number;
+  parcialidades: number;
+}): number {
+  const { capital, rentaNeta, residual, deposito, comisionContado, parcialidades } = p;
+  if (
+    ![capital, rentaNeta, residual, deposito, comisionContado, parcialidades].every(Number.isFinite) ||
+    capital <= 0 ||
+    parcialidades <= 0
+  ) {
+    return NaN;
+  }
+  const n = Math.floor(parcialidades);
+  const flujos: number[] = [-capital + comisionContado + deposito];
+  for (let i = 1; i < n; i++) flujos.push(rentaNeta);
+  flujos.push(rentaNeta - deposito + residual); // mes n
+  return tirAnualDeFlujos(flujos);
+}
+
 /** Formatea una fecha como "DD-MM-YYYY" */
 export function formatFechaDMY(d: Date): string {
   return (
