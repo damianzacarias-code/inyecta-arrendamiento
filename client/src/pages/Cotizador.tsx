@@ -4,7 +4,7 @@ import { PDFDownloadLink } from '@react-pdf/renderer';
 import api from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import { Calculator, Save, RotateCcw, ChevronDown, ChevronUp, FileText, Table, Plus, X, Sparkles } from 'lucide-react';
-import { calcularCotizacion } from '@/lib/cotizacion/calculos';
+import { calcularCotizacion, calcGananciaCredito } from '@/lib/cotizacion/calculos';
 import {
   distribuirAporte,
   lemaOpcionBajo,
@@ -345,6 +345,15 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
         : '',
     );
   }, [form.valorBien]);
+
+  // Ganancia hipotética si fuera CRÉDITO (no arrendamiento) por el
+  // mismo monto y plazo. Indicador comparativo — se recalcula en vivo
+  // al cambiar el Valor del Bien o el plazo. Parámetros fijos (36%,
+  // comisión 5%, IVA 16%) viven en calcGananciaCredito.
+  const gananciaCredito = useMemo(
+    () => calcGananciaCredito(form.valorBien, form.plazo),
+    [form.valorBien, form.plazo],
+  );
 
   // Distribución actual derivada del aporte inicial y el nivel.
   // Cuando edicionManual=true, el cotizador IGNORA esto y usa los
@@ -1218,6 +1227,20 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
 
         {/* Results sidebar */}
         <div className="space-y-4">
+          {/* Indicador comparativo: ganancia si fuera CRÉDITO (no
+              arrendamiento), mismo monto y plazo. Recalcula en vivo con
+              el Valor del Bien y el plazo. Solo display — no se imprime. */}
+          {form.valorBien > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+              <span className="text-sm text-amber-900">
+                💡 Ganancia si fuera crédito
+              </span>
+              <span className="text-sm font-bold text-amber-900 whitespace-nowrap">
+                {formatCurrency(gananciaCredito)}
+              </span>
+            </div>
+          )}
+
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h3 className="font-semibold text-gray-900 mb-4">Resumen</h3>
             {result ? (

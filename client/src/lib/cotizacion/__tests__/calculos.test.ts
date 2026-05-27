@@ -15,7 +15,7 @@
  *   FINANCIERO renta = $75,896.80   monto fin = $1,917,662.07
  */
 import { describe, it, expect } from 'vitest';
-import { calcPMT, calcularCotizacion } from '../calculos';
+import { calcPMT, calcularCotizacion, calcGananciaCredito } from '../calculos';
 import {
   calcAmortPuro,
   calcAmortFinanciero,
@@ -584,6 +584,47 @@ describe('calcularCotizacion — ganancia', () => {
 
     it('ganancia total positiva', () => {
       expect(cot.ganancia.total).toBeGreaterThan(0);
+    });
+  });
+
+  describe('calcGananciaCredito (indicador comparativo crédito)', () => {
+    // Réplica independiente del spec de Damián con números planos,
+    // para confirmar que la implementación con Decimal sigue la fórmula.
+    function gananciaRef(monto: number, n: number): number {
+      const r = 0.36 / 12;
+      const pago = monto * (r / (1 - Math.pow(1 + r, -n)));
+      let saldo = monto;
+      let totalInt = 0;
+      for (let i = 0; i < n; i++) {
+        const interes = saldo * r;
+        const iva = interes * 0.16;
+        const pagoCap = pago - interes - iva;
+        saldo = saldo - pagoCap;
+        totalInt += interes;
+      }
+      return totalInt + monto * 0.05;
+    }
+
+    it('coincide con la réplica del spec (1,000,000 × 36m)', () => {
+      expect(calcGananciaCredito(1_000_000, 36)).toBeCloseTo(gananciaRef(1_000_000, 36), 1);
+    });
+
+    it('coincide con la réplica (500,000 × 48m)', () => {
+      expect(calcGananciaCredito(500_000, 48)).toBeCloseTo(gananciaRef(500_000, 48), 1);
+    });
+
+    it('incluye la comisión de apertura (5% del monto)', () => {
+      // La ganancia debe ser SIEMPRE mayor que la comisión sola
+      // (porque suma además los intereses positivos).
+      const g = calcGananciaCredito(1_000_000, 24);
+      expect(g).toBeGreaterThan(1_000_000 * 0.05);
+    });
+
+    it('devuelve 0 con inputs inválidos', () => {
+      expect(calcGananciaCredito(0, 36)).toBe(0);
+      expect(calcGananciaCredito(1_000_000, 0)).toBe(0);
+      expect(calcGananciaCredito(-5, 36)).toBe(0);
+      expect(calcGananciaCredito(NaN, 36)).toBe(0);
     });
   });
 

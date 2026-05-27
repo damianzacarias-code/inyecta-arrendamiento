@@ -528,6 +528,66 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
 // Helper exportado
 // ═══════════════════════════════════════════════════════════════════
 
+/**
+ * Ganancia hipotética si en vez de arrendamiento se diera un CRÉDITO
+ * simple por el mismo monto y plazo. Indicador comparativo del
+ * cotizador (display, no afecta la cotización).
+ *
+ * Parámetros FIJOS (definidos por Damián 26-05-2026):
+ *   tasa anual 36% → mensual 3%, comisión apertura 5%, IVA 16%.
+ * Parámetros DINÁMICOS: monto y parcialidades (del cotizador).
+ *
+ * Amortización francesa (saldos insolutos) con la particularidad de
+ * que el IVA de los intereses se absorbe dentro del pago fijo:
+ *   PagoMensual    = Monto × (r / (1 − (1+r)^(−n)))
+ *   Intereses[i]   = Saldo[i-1] × r
+ *   IVA[i]         = Intereses[i] × 0.16
+ *   PagoCapital[i] = PagoMensual − Intereses[i] − IVA[i]
+ *   Saldo[i]       = Saldo[i-1] − PagoCapital[i]
+ *
+ * Ganancia (sin IVA, sin recuperación de capital):
+ *   GananciaCrédito = ΣIntereses + Monto × 0.05
+ *
+ * @returns ganancia redondeada a 2 decimales; 0 si los inputs no son
+ *          válidos (monto o parcialidades ≤ 0).
+ */
+export function calcGananciaCredito(monto: number, parcialidades: number): number {
+  if (
+    !Number.isFinite(monto) ||
+    !Number.isFinite(parcialidades) ||
+    monto <= 0 ||
+    parcialidades <= 0
+  ) {
+    return 0;
+  }
+
+  const n = Math.floor(parcialidades);
+  const M = new Decimal(monto);
+  const r = new Decimal(0.36).dividedBy(12); // 0.03
+
+  // PagoMensual = M × (r / (1 − (1+r)^(−n)))
+  const unoMasR = r.plus(1);
+  const denom = new Decimal(1).minus(unoMasR.pow(-n));
+  const pagoMensual = M.times(r.dividedBy(denom));
+
+  const comisionApertura = M.times(0.05);
+
+  let saldo = M;
+  let totalIntereses = new Decimal(0);
+  for (let i = 0; i < n; i++) {
+    const intereses = saldo.times(r);
+    const iva = intereses.times(0.16);
+    const pagoCapital = pagoMensual.minus(intereses).minus(iva);
+    saldo = saldo.minus(pagoCapital);
+    totalIntereses = totalIntereses.plus(intereses);
+  }
+
+  return totalIntereses
+    .plus(comisionApertura)
+    .toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+    .toNumber();
+}
+
 /** Formatea una fecha como "DD-MM-YYYY" */
 export function formatFechaDMY(d: Date): string {
   return (
