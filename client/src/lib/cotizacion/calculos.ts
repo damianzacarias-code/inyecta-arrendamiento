@@ -33,31 +33,45 @@ Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
  * @param fv         valor futuro / residual (positivo, default 0)
  * @returns          renta mensual (positivo)
  */
+/**
+ * PMT a PRECISIÓN COMPLETA (Decimal, sin redondear). Es el cálculo
+ * crudo de la renta; el servidor (leaseCalculator.calcPMT) también
+ * devuelve la renta sin redondear, así que usar esta versión para los
+ * acumulados (totalRentas/totalPagar) garantiza paridad al centavo con
+ * lo que el servidor persiste e imprime. Para el DISPLAY de la renta se
+ * usa `calcPMT` (redondeada a 2 decimales).
+ */
+function pmtDecimal(
+  tasaAnual: number,
+  plazo: number,
+  pv: number,
+  fv = 0,
+): Decimal {
+  const r = new Decimal(tasaAnual).dividedBy(12);
+  const P = new Decimal(pv);
+  const FV = new Decimal(fv);
+
+  if (r.isZero()) {
+    return P.minus(FV).dividedBy(plazo);
+  }
+
+  const factor = r.plus(1).pow(plazo);
+  //   PMT = (P·r·(1+r)^n − FV·r) / ((1+r)^n − 1)
+  return P.times(r)
+    .times(factor)
+    .minus(FV.times(r))
+    .dividedBy(factor.minus(1));
+}
+
 export function calcPMT(
   tasaAnual: number,
   plazo: number,
   pv: number,
   fv = 0,
 ): number {
-  const r = new Decimal(tasaAnual).dividedBy(12);
-  const P = new Decimal(pv);
-  const FV = new Decimal(fv);
-
-  if (r.isZero()) {
-    return P.minus(FV)
-      .dividedBy(plazo)
-      .toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
-      .toNumber();
-  }
-
-  const factor = r.plus(1).pow(plazo);
-  //   PMT = (P·r·(1+r)^n − FV·r) / ((1+r)^n − 1)
-  const pmt = P.times(r)
-    .times(factor)
-    .minus(FV.times(r))
-    .dividedBy(factor.minus(1));
-
-  return pmt.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
+  return pmtDecimal(tasaAnual, plazo, pv, fv)
+    .toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+    .toNumber();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -156,6 +170,14 @@ export interface InputsCotizacion {
   seguroEstado: string;      // "Pendiente", "Contratado", etc.
   nombreCliente: string;
 
+  /**
+   * Renta anticipada que el cliente paga al inicio (opcional). Entra en
+   * el desembolso inicial y en el total a pagar, igual que en el
+   * servidor (leaseCalculator.desembolsoInicial). NO afecta la renta
+   * mensual ni totalRentas. Default 0.
+   */
+  rentaInicial?: number;
+
   /** Fecha de la cotización */
   fecha: Date;
 }
@@ -230,6 +252,15 @@ export interface ResultadoCotizacion {
     /** Suma de los tres conceptos. */
     total: number;
   };
+
+  // ── Totales (espejo del servidor leaseCalculator) ────────────────
+  // Permiten mostrar el panel del Cotizador 100% en vivo sin descuadre.
+  /** Renta CON IVA × plazo (§4.4). */
+  totalRentas: number;
+  /** Pago inicial + renta anticipada (= server desembolsoInicial). */
+  desembolsoInicial: number;
+  /** totalRentas + desembolsoInicial. */
+  totalPagar: number;
 
   // ── Campos técnicos para la tabla de amortización ────────────────
   /** Monto real financiado (SIN IVA del bien) usado para PMT */
@@ -376,12 +407,15 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
   const fvPMT = inp.producto === 'PURO' ? valorResidualResuelto : new Decimal(0);
 
   // ── Renta mensual ────────────────────────────────────────────────
-  const rentaNeta = calcPMT(
+  // Renta a precisión completa (para acumulados, espejo del servidor) y
+  // su versión redondeada a 2 decimales (para display y amortización).
+  const rentaNetaFull = pmtDecimal(
     inp.tasaAnual,
     inp.plazo,
     montoFinanciadoReal.toNumber(),
     fvPMT.toNumber(),
   );
+  const rentaNeta    = rentaNetaFull.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
   const rentaDecimal = new Decimal(rentaNeta);
   const rentaIVA     = rentaDecimal.times(IVA);
 
@@ -431,6 +465,19 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
     .plus(seguroContado)
     .plus(depositoGarantia)
     .plus(gpsContado);
+
+  // ── Totales (espejo EXACTO del servidor leaseCalculator §4.4) ────
+  // totalRentas = renta CON IVA × plazo, usando la renta a PRECISIÓN
+  // COMPLETA (`rentaNetaFull`), igual que el servidor — así el panel en
+  // vivo coincide al centavo con lo que el servidor persiste e imprime.
+  // (Si se usara la renta redondeada, el total quedaría ~$0.27 abajo.)
+  // El IVA aquí NO se trunca: el TRUNC de §4.4 aplica sólo al campo de
+  // DISPLAY `rentaMensual.total`, no al acumulado.
+  // desembolsoInicial = pago inicial + renta anticipada (§ server
+  // desembolsoInicial = ... + rentaInicial). totalPagar suma ambos.
+  const totalRentasDec       = rentaNetaFull.times(IVA.plus(1)).times(plazoMeses);
+  const desembolsoInicialDec = pagoInicialTotal.plus(inp.rentaInicial || 0);
+  const totalPagarDec        = totalRentasDec.plus(desembolsoInicialDec);
 
   // ── Ganancia (visible en calculadora, NO en PDF) ─────────────────
   // Ver doc de ResultadoCotizacion.ganancia. Flujo de caja nominal sin
@@ -518,6 +565,10 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
       opcionCompra:     r2(gananciaOpcion),
       total:            r2(gananciaTotal),
     },
+
+    totalRentas:         r2(totalRentasDec),
+    desembolsoInicial:   r2(desembolsoInicialDec),
+    totalPagar:          r2(totalPagarDec),
 
     montoFinanciadoReal: r2(montoFinanciadoReal),
     fvAmortizacion:      r2(fvPMT),

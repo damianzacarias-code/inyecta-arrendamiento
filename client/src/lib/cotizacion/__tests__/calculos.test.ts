@@ -112,6 +112,43 @@ describe('calcularCotizacion PURO (caso §4)', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// calcularCotizacion — totales (totalRentas / desembolsoInicial /
+// totalPagar) — espejo del servidor leaseCalculator (§4.4). Permiten
+// que el panel del Cotizador se muestre 100% en vivo sin presionar
+// "Simular" y sin descuadre entre la renta y los totales.
+// ═══════════════════════════════════════════════════════════════════
+
+describe('calcularCotizacion — totales (espejo servidor)', () => {
+  const cot = calcularCotizacion({ ...baseInputs, producto: 'PURO' });
+
+  it('totalRentas = renta CON IVA × plazo = $4,070,098.02 (igual que el servidor)', () => {
+    // Renta a PRECISIÓN COMPLETA × 1.16 × 48. Coincide al centavo con
+    // leaseCalculator.totalRentas (que también usa la renta sin redondear).
+    expect(cot.totalRentas).toBeCloseTo(4_070_098.02, 2);
+  });
+
+  it('desembolsoInicial = pago inicial ($292,215.17 — sólo depósito; comisión y GPS financiados)', () => {
+    expect(cot.desembolsoInicial).toBeCloseTo(292_215.17, 2);
+  });
+
+  it('totalPagar = totalRentas + desembolsoInicial = $4,362,313.19', () => {
+    // totalRentas (full) + depósito (full, 292,215.1724…), igual que el servidor.
+    expect(cot.totalPagar).toBeCloseTo(4_362_313.19, 2);
+  });
+
+  it('rentaInicial anticipada se suma al desembolso y al total a pagar (no a totalRentas)', () => {
+    const conRenta = calcularCotizacion({
+      ...baseInputs,
+      producto: 'PURO',
+      rentaInicial: 73_098.02,
+    });
+    expect(conRenta.desembolsoInicial).toBeCloseTo(365_313.19, 2); // 292,215.17 + 73,098.02
+    expect(conRenta.totalPagar).toBeCloseTo(4_435_411.21, 2);      // totalPagar base + 73,098.02
+    expect(conRenta.totalRentas).toBeCloseTo(cot.totalRentas, 2);  // no cambia
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // calcularCotizacion — caso FINANCIERO de referencia
 // ═══════════════════════════════════════════════════════════════════
 

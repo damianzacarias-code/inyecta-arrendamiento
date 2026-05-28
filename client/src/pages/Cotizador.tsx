@@ -351,9 +351,16 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
   // (enganche + depósito + comisión/GPS/seguro de contado). Es el dinero
   // que realmente sale de la bolsa de Inyecta. Se calcula en vivo con
   // calcularCotizacion (mismo motor que el PDF) — no espera al Simular.
-  const capitalInvertido = useMemo(() => {
-    if (form.valorBien <= 0) return 0;
-    const cot = calcularCotizacion({
+  // Cotización en VIVO (cliente, sin round-trip). Es la fuente de verdad
+  // del panel de resultados: Resumen + Ganancia + Retorno de inversión se
+  // recalculan al instante con cada cambio del form (sin presionar
+  // "Simular"). Antes el panel mezclaba datos viejos de la última
+  // simulación (renta/residual) con el plazo nuevo del dropdown, lo que
+  // hacía saltar la TIR (bug 28-05-2026). `result` (servidor) queda solo
+  // para la tabla de amortización y para guardar/persistir.
+  const cotLive = useMemo(() => {
+    if (form.valorBien <= 0) return null;
+    return calcularCotizacion({
       valorBienConIVA: form.valorBien * 1.16,
       tasaIVA: 0.16,
       producto: form.producto,
@@ -370,21 +377,27 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
       seguroPendiente: form.seguroPendiente,
       seguroEsContado: !form.seguroFinanciado,
       engancheMonto: form.valorBien * form.enganchePct,
+      rentaInicial: form.rentaInicial,
       nombreBien: '', estadoBien: '', seguroEstado: '', nombreCliente: '',
       fecha: new Date(),
     });
-    // Capital invertido = BASE DEL BIEN = valor sin IVA − enganche
-    // + GPS/seguro financiados. NO resta el depósito (se devuelve al
-    // cliente, no es capital de Inyecta) ni la comisión (es ingreso, no
-    // inversión). baseBien = montoFinanciadoReal − comisión financiada.
-    return Math.max(0, cot.montoFinanciadoReal - cot.monto.comisionAperturaFinanciada);
   }, [
     form.valorBien, form.producto, form.plazo, form.tasaAnual,
     form.comisionAperturaPct, form.comisionAperturaFinanciada,
     form.depositoGarantiaPct, form.valorResidualPct, form.valorResidualEsDeposito,
     form.gpsInstalacion, form.gpsFinanciado, form.seguroAnual,
     form.seguroPendiente, form.seguroFinanciado, form.enganchePct,
+    form.rentaInicial,
   ]);
+
+  // Capital invertido = BASE DEL BIEN = valor sin IVA − enganche
+  // + GPS/seguro financiados. NO resta el depósito (se devuelve al
+  // cliente, no es capital de Inyecta) ni la comisión (es ingreso, no
+  // inversión). baseBien = montoFinanciadoReal − comisión financiada.
+  const capitalInvertido = useMemo(() => {
+    if (!cotLive) return 0;
+    return Math.max(0, cotLive.montoFinanciadoReal - cotLive.monto.comisionAperturaFinanciada);
+  }, [cotLive]);
 
   // Ganancia si en vez del arrendamiento se diera un CRÉDITO simple por
   // el MISMO capital que invierte Inyecta (no el valor del bien). Tasa
@@ -1296,21 +1309,21 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
 
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h3 className="font-semibold text-gray-900 mb-4">Resumen</h3>
-            {result ? (
+            {cotLive ? (
               <div className="space-y-3">
-                <ResultRow label="Valor del Bien + IVA" value={formatCurrency(result.resultado.valorBienIVA)} />
-                <ResultRow label="Enganche" value={formatCurrency(result.resultado.enganche)} />
-                <ResultRow label="Deposito Garantia" value={formatCurrency(result.resultado.depositoGarantia)} />
-                <ResultRow label="Comision Apertura" value={formatCurrency(result.resultado.comisionApertura)} />
-                <ResultRow label="Monto a Financiar" value={formatCurrency(result.resultado.montoFinanciar)} highlight />
+                <ResultRow label="Valor del Bien + IVA" value={formatCurrency(cotLive.valorBienConIVA)} />
+                <ResultRow label="Enganche" value={formatCurrency(cotLive.pagoInicial.engancheContado)} />
+                <ResultRow label="Deposito Garantia" value={formatCurrency(cotLive.pagoInicial.depositoGarantia)} />
+                <ResultRow label="Comision Apertura" value={formatCurrency(cotLive.pagoInicial.comisionAperturaContado + cotLive.monto.comisionAperturaFinanciada)} />
+                <ResultRow label="Monto a Financiar" value={formatCurrency(cotLive.montoFinanciadoReal)} highlight />
                 <div className="border-t border-gray-100 pt-3">
-                  <ResultRow label="Renta Mensual" value={formatCurrency(result.resultado.rentaMensual)} />
-                  <ResultRow label="Renta + IVA" value={formatCurrency(result.resultado.rentaMensualIVA)} highlight accent />
-                  <ResultRow label="Valor Residual" value={formatCurrency(result.resultado.valorResidual)} />
+                  <ResultRow label="Renta Mensual" value={formatCurrency(cotLive.rentaMensual.montoNeto)} />
+                  <ResultRow label="Renta + IVA" value={formatCurrency(cotLive.rentaMensual.total)} highlight accent />
+                  <ResultRow label="Valor Residual" value={formatCurrency(cotLive.residual.monto)} />
                 </div>
                 <div className="border-t border-gray-100 pt-3">
-                  <ResultRow label="Total Rentas" value={formatCurrency(result.resultado.totalRentas)} />
-                  <ResultRow label="Total a Pagar" value={formatCurrency(result.resultado.totalPagar)} />
+                  <ResultRow label="Total Rentas" value={formatCurrency(cotLive.totalRentas)} />
+                  <ResultRow label="Total a Pagar" value={formatCurrency(cotLive.totalPagar)} />
                 </div>
 
                 {/* ── Apartado GANANCIA (interno — NO se imprime en el PDF) ──
@@ -1327,20 +1340,20 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                   </div>
                   <ResultRow
                     label="Comisión apertura"
-                    value={formatCurrency(result.resultado.gananciaDesglose.comisionApertura)}
+                    value={formatCurrency(cotLive.ganancia.comisionApertura)}
                   />
                   <ResultRow
                     label="Intereses ganados"
-                    value={formatCurrency(result.resultado.gananciaDesglose.intereses)}
+                    value={formatCurrency(cotLive.ganancia.intereses)}
                   />
                   <ResultRow
                     label="Opción de compra"
-                    value={formatCurrency(result.resultado.gananciaDesglose.opcionCompra)}
+                    value={formatCurrency(cotLive.ganancia.opcionCompra)}
                   />
                   <div className="border-t border-inyecta-200 mt-1 pt-1">
                     <ResultRow
                       label="Ganancia total"
-                      value={formatCurrency(result.resultado.ganancia)}
+                      value={formatCurrency(cotLive.ganancia.total)}
                       highlight
                       accent
                     />
@@ -1359,18 +1372,18 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                       value={formatCurrency(capitalInvertido)}
                     />
                     {(() => {
-                      const gArr = result.resultado.ganancia;
+                      const gArr = cotLive.ganancia.total;
                       const roiArrAnual = roiAnualPct(gArr);
                       const roiCredAnual = roiAnualPct(gananciaCredito);
-                      // TIR anual (estable entre plazos, ≈ CAT).
+                      // TIR anual del flujo neto sin IVA. Todo en vivo
+                      // (renta/residual/depósito/plazo del mismo cotLive),
+                      // así no hay descuadre al cambiar el plazo.
                       const tirArr = calcTIRArrendamiento({
                         capital: capitalInvertido,
-                        rentaNeta: result.resultado.rentaMensual,
-                        residual: result.resultado.valorResidual,
-                        deposito: result.resultado.depositoGarantia,
-                        comisionContado: form.comisionAperturaFinanciada
-                          ? 0
-                          : result.resultado.comisionApertura,
+                        rentaNeta: cotLive.rentaMensual.montoNeto,
+                        residual: cotLive.residual.monto,
+                        deposito: cotLive.pagoInicial.depositoGarantia,
+                        comisionContado: cotLive.pagoInicial.comisionAperturaContado,
                         parcialidades: form.plazo,
                       });
                       const tirCred = calcTIRCredito(capitalInvertido, form.plazo);
@@ -1421,15 +1434,15 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                   <p className="text-[10px] text-gray-500 mt-1.5 leading-snug">
                     Sin IVA. ROI total = ganancia ÷ capital invertido. ROI anual
                     = (1+ROI)^(1/años)−1 (baja con el plazo). TIR = rendimiento
-                    anual real del flujo neto (considera que el capital se
-                    devuelve mes a mes; estable entre plazos). El crédito presta
-                    el mismo capital al 36%.
+                    anual real del flujo neto. Ambos indicadores bajan al
+                    alargar el plazo (la comisión y el depósito iniciales se
+                    diluyen en más años). El crédito presta el mismo capital al 36%.
                   </p>
                 </div>
               </div>
             ) : (
               <p className="text-sm text-gray-400 text-center py-8">
-                Ajusta los parametros y presiona Simular
+                Captura el valor del bien para ver el resumen
               </p>
             )}
           </div>
