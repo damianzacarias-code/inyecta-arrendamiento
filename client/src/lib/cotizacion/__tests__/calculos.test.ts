@@ -193,6 +193,33 @@ describe('calcularCotizacion FINANCIERO (caso §4)', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// Plazos extendidos 54 / 60 meses — las fórmulas son paramétricas, así
+// que sólo verificamos que el motor produce renta sana y que la
+// amortización cierra en el FV exacto a plazos altos (sin overflow ni
+// off-by-one en el último periodo).
+// ═══════════════════════════════════════════════════════════════════
+
+describe('calcularCotizacion — plazos 54 y 60 meses', () => {
+  for (const plazo of [54, 60]) {
+    it(`PURO a ${plazo}m: renta consistente con calcPMT y amortización de ${plazo} filas`, () => {
+      const cot = calcularCotizacion({ ...baseInputs, producto: 'PURO', plazo });
+      // La renta del motor coincide con calcPMT al mismo plazo (FV = depósito).
+      const esperada = calcPMT(0.36, plazo, cot.montoFinanciadoReal, cot.fvAmortizacion);
+      expect(cot.rentaMensual.montoNeto).toBeCloseTo(esperada, 2);
+      expect(cot.rentaMensual.montoNeto).toBeGreaterThan(0);
+      const filas = calcAmortPuro(cot.rentaMensual.montoNeto, plazo, new Date(2026, 0, 15));
+      expect(filas).toHaveLength(plazo);
+    });
+
+    it(`FINANCIERO a ${plazo}m: amortización cierra en saldo final $0.00 exacto`, () => {
+      const filas = calcAmortFinanciero(1_917_662.07, 0.36, plazo, 0, new Date(2026, 0, 15));
+      expect(filas).toHaveLength(plazo);
+      expect(filas[plazo - 1].saldo).toBeCloseTo(0, 2);
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // Amortización PURO al cliente — solo renta + IVA
 // ═══════════════════════════════════════════════════════════════════
 

@@ -908,7 +908,7 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                   onChange={(e) => updateField('plazo', Number(e.target.value))}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none"
                 >
-                  {[12, 18, 24, 30, 36, 42, 48].map((p) => (
+                  {[12, 18, 24, 30, 36, 42, 48, 54, 60].map((p) => (
                     <option key={p} value={p}>{p} meses</option>
                   ))}
                 </select>

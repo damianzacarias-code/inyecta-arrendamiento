@@ -85,7 +85,7 @@ const createContractBaseSchema = z.object({
   proveedorLegacy: z.string().optional(),
   producto: z.enum(['PURO', 'FINANCIERO']),
   valorBien: z.number().min(150000),
-  plazo: z.number().min(12).max(48),
+  plazo: z.number().min(12).max(60),
   tasaAnual: z.number().default(0.36),
   nivelRiesgo: z.enum(['A', 'B', 'C']).default('B'),
   enganche: z.number().default(0),

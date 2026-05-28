@@ -37,7 +37,7 @@ Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
 export interface LeaseParams {
   producto: 'PURO' | 'FINANCIERO';
   valorBien: number;                    // SIN IVA
-  plazo: number;                        // meses (12-48)
+  plazo: number;                        // meses (12-60)
   tasaAnual: number;                    // e.g. 0.36
   enganchePct: number;                  // FINANCIERO: % sobre valorConIVA
   /** §4.12: depósito en garantía (FV del PMT en PURO). */
@@ -465,7 +465,7 @@ const DEFAULT_RISK_PRESETS: RiskPresetInput[] = [
  * desde /admin/catalogo sin redeploy.
  *
  * @param valorBien    valor SIN IVA del bien.
- * @param plazo        meses (12..48).
+ * @param plazo        meses (12..60).
  * @param tasaAnual    decimal (ej: 0.36 = 36%).
  * @param gps          monto GPS — siempre financiado en estos escenarios.
  * @param comisionPct  comisión apertura — siempre financiada.

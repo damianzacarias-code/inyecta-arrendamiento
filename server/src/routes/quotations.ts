@@ -34,7 +34,7 @@ const quotationSchema = z.object({
   bienNuevo: z.boolean().default(true),
   producto: z.enum(['PURO', 'FINANCIERO']),
   valorBien: z.number().min(150000).max(3000000),
-  plazo: z.number().min(12).max(48),
+  plazo: z.number().min(12).max(60),
   tasaAnual: z.number().min(0).max(1).default(0.36),
   nivelRiesgo: z.enum(['A', 'B', 'C']).default('B'),
   /** Aporte inicial total (% del valorBien) capturado por el operador.

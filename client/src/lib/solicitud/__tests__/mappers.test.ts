@@ -251,8 +251,8 @@ describe('solicitudToContractPayload', () => {
     expect(() => solicitudToContractPayload(s, { clientId: 'c1' })).toThrow(/valor/);
   });
 
-  it('lanza si plazo está fuera de [12, 48]', () => {
-    const s = { ...baseSolicitud, operacion: { ...baseSolicitud.operacion, plazoMeses: 60 } };
+  it('lanza si plazo está fuera de [12, 60]', () => {
+    const s = { ...baseSolicitud, operacion: { ...baseSolicitud.operacion, plazoMeses: 72 } };
     expect(() => solicitudToContractPayload(s, { clientId: 'c1' })).toThrow(/plazo/i);
   });
 

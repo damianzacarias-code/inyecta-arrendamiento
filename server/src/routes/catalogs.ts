@@ -107,7 +107,7 @@ router.get('/lease-params', requireAuth, (_req: Request, res: Response) => {
     montoMinimo: 150000,
     montoMaximo: 3000000,
     plazoMinimo: 12,
-    plazoMaximo: 48,
+    plazoMaximo: 60,
     tasaBase: 0.36,
     comisionApertura: 0.05,
     ivaRate: 0.16,

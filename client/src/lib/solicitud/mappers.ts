@@ -229,8 +229,8 @@ export function solicitudToContractPayload(
   if (!bien.valorConIVA || bien.valorConIVA <= 0) {
     throw new Error('La solicitud no trae el valor del bien con IVA.');
   }
-  if (!op.plazoMeses || op.plazoMeses < 12 || op.plazoMeses > 48) {
-    throw new Error('El plazo debe estar entre 12 y 48 meses (la solicitud trae: ' + String(op.plazoMeses) + ').');
+  if (!op.plazoMeses || op.plazoMeses < 12 || op.plazoMeses > 60) {
+    throw new Error('El plazo debe estar entre 12 y 60 meses (la solicitud trae: ' + String(op.plazoMeses) + ').');
   }
   const producto = op.tipoArrendamiento ?? 'FINANCIERO';
 

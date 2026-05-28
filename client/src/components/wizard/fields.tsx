@@ -123,7 +123,7 @@ export function SelectField({
   className?: string;
   /** Si true, convierte el value del <select> de string a number antes
    *  de comprometerlo al form state. Necesario cuando el schema zod
-   *  declara el campo como `z.number()` (p.ej. plazo 12-48). */
+   *  declara el campo como `z.number()` (p.ej. plazo 12-60). */
   valueAsNumber?: boolean;
 }) {
   const {

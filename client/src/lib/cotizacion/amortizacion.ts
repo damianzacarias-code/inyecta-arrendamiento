@@ -55,7 +55,7 @@ export interface FilaAmortFinanciero {
  *
  * @param rentaNeta        renta mensual sin IVA (tomada del PMT con
  *                          FV = depósito en garantía).
- * @param plazo            número de períodos mensuales (12..48).
+ * @param plazo            número de períodos mensuales (12..60).
  * @param fechaPrimerPago  fecha del 1° pago; los siguientes se
  *                          generan con `addMeses` (evita el bug de
  *                          fin-de-mes de Date.setMonth).
@@ -117,7 +117,7 @@ export function calcAmortPuro(
  *
  * @param montoFinanciadoReal  PV (sin IVA del bien).
  * @param tasaAnual            tasa anual decimal (ej: 0.36 = 36%).
- * @param plazo                número de períodos mensuales (12..48).
+ * @param plazo                número de períodos mensuales (12..60).
  * @param fvAmortizacion       FV objetivo al final del plazo.
  * @param fechaPrimerPago      fecha del 1° pago (resto vía `addMeses`).
  * @param tasaIVA              tasa de IVA decimal, default 0.16.

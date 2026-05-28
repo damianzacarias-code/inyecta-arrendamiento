@@ -107,7 +107,7 @@ export interface InputsCotizacion {
 
   // ── Producto ─────────────────────────────────────────────────────
   producto: 'PURO' | 'FINANCIERO';
-  /** Plazo en meses (12, 18, 24, 30, 36, 42, 48) */
+  /** Plazo en meses (12, 18, 24, 30, 36, 42, 48, 54, 60) */
   plazo: number;
   /** Tasa anual decimal (ej: 0.36 = 36%) */
   tasaAnual: number;
