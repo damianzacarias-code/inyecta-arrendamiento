@@ -69,14 +69,18 @@ interface SimulationResult {
       intereses: number;
       opcionCompra: number;
     };
+    // Espejo de server AmortizationRow (leaseCalculator.ts). OJO: los
+    // nombres son pagoCapital / intereses / pagoTotal (NO capital /
+    // interes / rentaConIVA) — el tipo viejo no coincidía con lo que
+    // manda el servidor y la tabla mostraba $NaN en esas 3 columnas.
     amortizacion: Array<{
       periodo: number;
       saldoInicial: number;
-      capital: number;
-      interes: number;
+      intereses: number;
+      pagoCapital: number;
       renta: number;
       iva: number;
-      rentaConIVA: number;
+      pagoTotal: number;
       saldoFinal: number;
     }>;
   };
@@ -1739,9 +1743,9 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                         {result.resultado.amortizacion.map((row) => (
                           <tr key={row.periodo} className="border-b border-gray-50">
                             <td className="py-1.5 text-gray-600">{row.periodo}</td>
-                            <td className="py-1.5 text-right text-gray-700">{formatCurrency(row.capital)}</td>
-                            <td className="py-1.5 text-right text-gray-700">{formatCurrency(row.interes)}</td>
-                            <td className="py-1.5 text-right font-medium text-gray-900">{formatCurrency(row.rentaConIVA)}</td>
+                            <td className="py-1.5 text-right text-gray-700">{formatCurrency(row.pagoCapital)}</td>
+                            <td className="py-1.5 text-right text-gray-700">{formatCurrency(row.intereses)}</td>
+                            <td className="py-1.5 text-right font-medium text-gray-900">{formatCurrency(row.pagoTotal)}</td>
                             <td className="py-1.5 text-right text-gray-500">{formatCurrency(row.saldoFinal)}</td>
                           </tr>
                         ))}
