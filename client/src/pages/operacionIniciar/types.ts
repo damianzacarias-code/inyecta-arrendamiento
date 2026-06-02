@@ -11,7 +11,36 @@ export type LeaseType = 'PURO' | 'FINANCIERO';
 export type DraftActorRol = 'TITULAR' | 'AVAL' | 'REPRESENTANTE_LEGAL' | 'SOCIO';
 export type ActorSubtipo = 'PFAE' | 'PM' | 'PF';
 
+/**
+ * Subset AUTO-EXTRAÍBLE por el server (INE/CSF/COMPROBANTE). El resto
+ * del catálogo se sube como string libre y no se auto-extrae. `OTRO`
+ * es el escape hatch para docs fuera del catálogo.
+ */
 export type TipoDocSoportado = 'INE' | 'CSF' | 'COMPROBANTE_DOMICILIO' | 'OTRO';
+
+// ─── Catálogo de tipos de documento (server-driven) ─────────────────
+
+export interface CatalogoDocItem {
+  clave: string;
+  etiqueta: string;
+  opcional: boolean;
+}
+
+export type CatalogoSeccion =
+  | 'OPERACION_PFAE'
+  | 'OPERACION_PM'
+  | 'SOLICITANTE_PFAE'
+  | 'SOLICITANTE_PM'
+  | 'REPRESENTANTE_LEGAL'
+  | 'PRINCIPAL_ACCIONISTA'
+  | 'AVAL_PF'
+  | 'AVAL_PM'
+  | 'BIEN_ARRENDADO'
+  | 'FORMALIZACION';
+
+export interface CatalogoResponse {
+  catalogos: Record<CatalogoSeccion, CatalogoDocItem[]>;
+}
 
 export interface OperationDraftDoc {
   id: string;

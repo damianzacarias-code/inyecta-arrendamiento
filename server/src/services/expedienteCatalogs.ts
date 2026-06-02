@@ -162,6 +162,14 @@ const bienArrendado: CatalogoDoc[] = [
   { tipo: 'REPUVE',                     etiqueta: 'REPUVE' },
   { tipo: 'PAGO_DERECHOS_VEHICULARES',  etiqueta: 'Pago de derechos vehiculares' },
   { tipo: 'ANEXOS',                     etiqueta: 'Anexos', opcional: true },
+  // ── Documentos que la operación genera de forma natural ───────
+  // (opcionales: deseables en el expediente, no cuentan como
+  //  faltantes en el % de cobertura).
+  { tipo: 'ENDOSO_POLIZA',              etiqueta: 'Endoso de póliza', opcional: true },
+  { tipo: 'CONTRATO_GPS',               etiqueta: 'Contrato del GPS', opcional: true },
+  { tipo: 'CONTRATO_PROVEEDOR',         etiqueta: 'Contrato del proveedor', opcional: true },
+  { tipo: 'FACTURA_VENTA',              etiqueta: 'Factura de venta', opcional: true },
+  { tipo: 'ACTA_DEVOLUCION',            etiqueta: 'Acta de devolución', opcional: true },
 ];
 
 // ────────────────────────────────────────────────────────────────────
@@ -171,11 +179,61 @@ const formalizacion: CatalogoDoc[] = [
   { tipo: 'RESOLUCION',                 etiqueta: 'Resolución' },
   { tipo: 'CONTRATO_Y_ANEXOS',          etiqueta: 'Contrato y anexos' },
   { tipo: 'INSCRIPCION_RUG_O_RPP',      etiqueta: 'Inscripción RUG o RPP' },
+  // ── Documentos que la operación genera de forma natural ───────
+  // (opcionales: instrumentos contractuales, cobranza y cierre que
+  //  se producen a lo largo de la vida de la operación).
+  { tipo: 'PAGARE',                     etiqueta: 'Pagaré', opcional: true },
+  { tipo: 'CARATULA',                   etiqueta: 'Carátula del contrato', opcional: true },
+  { tipo: 'TABLA_AMORTIZACION',         etiqueta: 'Tabla de amortización', opcional: true },
+  { tipo: 'ACTA_ENTREGA_RECEPCION',     etiqueta: 'Acta de entrega-recepción', opcional: true },
+  { tipo: 'CARTA_DOMICILIACION',        etiqueta: 'Carta de domiciliación', opcional: true },
+  { tipo: 'CFDI_RENTA',                 etiqueta: 'CFDI de renta', opcional: true },
+  { tipo: 'RECIBO_PAGO',                etiqueta: 'Recibo de pago', opcional: true },
+  { tipo: 'ESTADO_CUENTA',              etiqueta: 'Estado de cuenta', opcional: true },
+  { tipo: 'CARTA_FINIQUITO',            etiqueta: 'Carta finiquito', opcional: true },
+];
+
+// Unión de todos los catálogos — fuente para validar si un tipo de
+// documento pertenece al catálogo del expediente (independiente del
+// actor). Lo consume el flujo borrador para validar `tipoDocumento`.
+const TODOS_LOS_CATALOGOS: CatalogoDoc[][] = [
+  operacionPFAE,
+  operacionPM,
+  solicitantePFAE,
+  solicitantePM,
+  representanteLegal,
+  principalAccionista,
+  avalPF,
+  avalPM,
+  bienArrendado,
+  formalizacion,
 ];
 
 // ────────────────────────────────────────────────────────────────────
 // API pública
 // ────────────────────────────────────────────────────────────────────
+
+/**
+ * Conjunto de todas las claves de tipo de documento conocidas en el
+ * catálogo del expediente (cualquier actor, PFAE o PM). Útil para
+ * validar membresía sin acoplarse a un actor concreto.
+ */
+export function tiposDocConocidos(): Set<string> {
+  const s = new Set<string>();
+  for (const cat of TODOS_LOS_CATALOGOS) {
+    for (const doc of cat) s.add(doc.tipo);
+  }
+  return s;
+}
+
+/**
+ * True si `tipo` es una clave conocida en el catálogo del expediente.
+ * NO implica que sea auto-extraíble (eso lo decide `esTipoDocSoportado`
+ * en services/operationDraft.ts, limitado a INE/CSF/COMPROBANTE).
+ */
+export function esTipoDocEnCatalogo(tipo: string): boolean {
+  return tiposDocConocidos().has(tipo);
+}
 
 /**
  * Devuelve el catálogo de documentos esperados para un actor dado,

@@ -16,10 +16,20 @@ import type {
   EditarActorPayload,
   EditarDocumentoPayload,
   LeaseType,
+  CatalogoResponse,
 } from './types';
 
 export async function listDrafts(): Promise<OperationDraftListItem[]> {
   const res = await api.get('/operation-drafts');
+  return res.data;
+}
+
+/**
+ * Catálogo de tipos de documento (server-driven). Estático — no
+ * depende del draft. La UI lo cachea en estado y arma el dropdown.
+ */
+export async function getCatalogo(): Promise<CatalogoResponse> {
+  const res = await api.get('/operation-drafts/catalogo');
   return res.data;
 }
 

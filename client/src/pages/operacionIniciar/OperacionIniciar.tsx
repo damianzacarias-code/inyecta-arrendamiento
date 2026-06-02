@@ -30,10 +30,10 @@ import * as draftApi from './api';
 import type {
   OperationDraftDetail,
   DraftActorRol,
-  TipoDocSoportado,
   ActorDatosConsolidados,
   CrearActorPayload,
   LeaseType,
+  CatalogoResponse,
 } from './types';
 
 function extractApiError(err: unknown): string {
@@ -51,6 +51,16 @@ export default function OperacionIniciar() {
   const [selectedActorId, setSelectedActorId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalRolDefault, setModalRolDefault] = useState<DraftActorRol | undefined>(undefined);
+  const [catalogo, setCatalogo] = useState<CatalogoResponse | null>(null);
+
+  // El catálogo de tipos de documento es estático — se carga una vez.
+  useEffect(() => {
+    let cancel = false;
+    draftApi.getCatalogo()
+      .then((c) => { if (!cancel) setCatalogo(c); })
+      .catch(() => { /* fallback al subset mínimo en el dropzone */ });
+    return () => { cancel = true; };
+  }, []);
 
   // Crear borrador en el primer mount cuando no haya :draftId
   useEffect(() => {
@@ -160,7 +170,7 @@ export default function OperacionIniciar() {
     }
   };
 
-  const handleUploadDoc = async (file: File, tipo: TipoDocSoportado) => {
+  const handleUploadDoc = async (file: File, tipo: string) => {
     try {
       await draftApi.uploadDocument(draft.id, file, tipo, null);
       await refetch();
@@ -211,6 +221,10 @@ export default function OperacionIniciar() {
   const selectedActor = draft.actores.find((a) => a.id === selectedActorId) ?? null;
   // Docs asignados al actor seleccionado vs. todos los demás.
   const allDocsAsignados = draft.actores.flatMap((a) => a.documentos);
+  // Tipo de titular para resolver las secciones del catálogo
+  // (OPERACION PFAE vs PM). Se deriva del subtipo del TITULAR.
+  const titular = draft.actores.find((a) => a.rol === 'TITULAR');
+  const tipoTitular: 'PFAE' | 'PM' = titular?.subtipo === 'PM' ? 'PM' : 'PFAE';
 
   return (
     <div className="h-[calc(100vh-60px)] flex flex-col">
@@ -276,6 +290,9 @@ export default function OperacionIniciar() {
             docsAsignados={allDocsAsignados}
             docsSinAsignar={draft.docsSinAsignar}
             actores={draft.actores}
+            catalogo={catalogo}
+            tipoTitular={tipoTitular}
+            selectedActor={selectedActor}
             onUpload={handleUploadDoc}
             onReassign={handleReassignDoc}
             onChangeTipo={handleChangeTipoDoc}

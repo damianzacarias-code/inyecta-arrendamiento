@@ -2,61 +2,150 @@
  * DocumentDropzone — columna central. Drop zone + lista de docs
  * subidos al draft.
  *
- * Cada doc muestra:
- *   - Tipo detectado (badge de color)
- *   - % de confianza
- *   - Dropdown para reasignar el actor
- *   - Botón borrar
- *   - Marca ⚠ si la extracción falló o si el actor está sin asignar
- *     y el sistema no pudo auto-matchear
+ * El selector "Tipo del próximo upload" y el re-etiquetado por doc se
+ * llenan desde el catálogo del expediente (server-driven). El catálogo
+ * se organiza por sección (optgroups):
+ *
+ *   - Documentos del involucrado seleccionado (filtrado por actor).
+ *   - Operación, Bien arrendado, Formalización (secciones compartidas;
+ *     incluyen los documentos que la operación genera de forma natural,
+ *     marcados como opcionales).
+ *   - OTRO (escape hatch para docs fuera del catálogo).
+ *
+ * Si el catálogo aún no cargó, cae al subset mínimo (INE/CSF/
+ * COMPROBANTE/OTRO) para que la UI siga funcionando.
  */
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { Upload, FileText, Loader2, Trash2, AlertTriangle } from 'lucide-react';
 import type {
   OperationDraftActor,
   OperationDraftDoc,
-  TipoDocSoportado,
+  CatalogoResponse,
+  CatalogoDocItem,
+  CatalogoSeccion,
 } from './types';
 
 interface Props {
   docsAsignados: OperationDraftDoc[];
   docsSinAsignar: OperationDraftDoc[];
   actores: OperationDraftActor[];
-  onUpload: (file: File, tipo: TipoDocSoportado) => Promise<void>;
+  catalogo: CatalogoResponse | null;
+  tipoTitular: 'PFAE' | 'PM';
+  selectedActor: OperationDraftActor | null;
+  onUpload: (file: File, tipo: string) => Promise<void>;
   onReassign: (docId: string, actorId: string | null) => Promise<void>;
   onChangeTipo: (docId: string, tipo: string) => Promise<void>;
   onDelete: (docId: string) => Promise<void>;
 }
 
-const TIPOS_V0: { value: TipoDocSoportado; label: string; bg: string; text: string }[] = [
-  { value: 'INE',                    label: 'INE',                    bg: 'bg-emerald-100', text: 'text-emerald-700' },
-  { value: 'CSF',                    label: 'CSF',                    bg: 'bg-blue-100',    text: 'text-blue-700' },
-  { value: 'COMPROBANTE_DOMICILIO',  label: 'Comprobante domicilio',  bg: 'bg-amber-100',   text: 'text-amber-700' },
-  { value: 'OTRO',                   label: 'Otro',                   bg: 'bg-gray-100',    text: 'text-gray-700' },
+// Colores para los tipos auto-extraíbles; el resto va en gris.
+const COLOR_POR_TIPO: Record<string, { bg: string; text: string }> = {
+  INE:                   { bg: 'bg-emerald-100', text: 'text-emerald-700' },
+  CSF:                   { bg: 'bg-blue-100',    text: 'text-blue-700' },
+  COMPROBANTE_DOMICILIO: { bg: 'bg-amber-100',   text: 'text-amber-700' },
+};
+const COLOR_DEFAULT = { bg: 'bg-gray-100', text: 'text-gray-700' };
+
+// Fallback mínimo si el catálogo no cargó.
+const FALLBACK_ITEMS: CatalogoDocItem[] = [
+  { clave: 'INE',                   etiqueta: 'INE',                   opcional: false },
+  { clave: 'CSF',                   etiqueta: 'CSF',                   opcional: false },
+  { clave: 'COMPROBANTE_DOMICILIO', etiqueta: 'Comprobante domicilio', opcional: false },
 ];
 
-function tipoStyle(tipo: string) {
-  const found = TIPOS_V0.find((t) => t.value === tipo);
-  return found ?? { value: 'OTRO', label: tipo, bg: 'bg-gray-100', text: 'text-gray-700' };
+/** Sección de catálogo de la persona según el rol/subtipo del actor. */
+function seccionPersonaParaActor(actor: OperationDraftActor): CatalogoSeccion {
+  switch (actor.rol) {
+    case 'TITULAR':
+      return actor.subtipo === 'PM' ? 'SOLICITANTE_PM' : 'SOLICITANTE_PFAE';
+    case 'REPRESENTANTE_LEGAL':
+      return 'REPRESENTANTE_LEGAL';
+    case 'SOCIO':
+      return 'PRINCIPAL_ACCIONISTA';
+    case 'AVAL':
+      return actor.subtipo === 'PM' ? 'AVAL_PM' : 'AVAL_PF';
+    default:
+      return 'SOLICITANTE_PFAE';
+  }
+}
+
+interface Optgroup {
+  label: string;
+  items: CatalogoDocItem[];
+}
+
+/**
+ * Arma los optgroups del dropdown: la sección del involucrado
+ * seleccionado (si hay) + las secciones compartidas. Si no hay
+ * catálogo, devuelve el fallback mínimo.
+ */
+function construirOptgroups(
+  catalogo: CatalogoResponse | null,
+  tipoTitular: 'PFAE' | 'PM',
+  selectedActor: OperationDraftActor | null,
+): Optgroup[] {
+  if (!catalogo) {
+    return [{ label: 'Documentos', items: FALLBACK_ITEMS }];
+  }
+  const c = catalogo.catalogos;
+  const groups: Optgroup[] = [];
+
+  if (selectedActor) {
+    const sec = seccionPersonaParaActor(selectedActor);
+    groups.push({ label: `Del involucrado: ${selectedActor.nombre}`, items: c[sec] });
+  }
+
+  groups.push({
+    label: 'Operación',
+    items: tipoTitular === 'PM' ? c.OPERACION_PM : c.OPERACION_PFAE,
+  });
+  groups.push({ label: 'Bien arrendado', items: c.BIEN_ARRENDADO });
+  groups.push({ label: 'Formalización', items: c.FORMALIZACION });
+
+  return groups;
+}
+
+/** Lista plana de todas las claves del catálogo (para re-etiquetar). */
+function todasLasClaves(
+  catalogo: CatalogoResponse | null,
+): CatalogoDocItem[] {
+  if (!catalogo) return FALLBACK_ITEMS;
+  const vistos = new Map<string, CatalogoDocItem>();
+  for (const seccion of Object.values(catalogo.catalogos)) {
+    for (const item of seccion) {
+      if (!vistos.has(item.clave)) vistos.set(item.clave, item);
+    }
+  }
+  return Array.from(vistos.values());
 }
 
 function DocRow({
   doc,
   actores,
+  etiquetaPorClave,
+  opcionesTipo,
   onReassign,
   onChangeTipo,
   onDelete,
 }: {
   doc: OperationDraftDoc;
   actores: OperationDraftActor[];
+  etiquetaPorClave: Map<string, string>;
+  opcionesTipo: CatalogoDocItem[];
   onReassign: (docId: string, actorId: string | null) => Promise<void>;
   onChangeTipo: (docId: string, tipo: string) => Promise<void>;
   onDelete: (docId: string) => Promise<void>;
 }) {
-  const style = tipoStyle(doc.tipoDocumento);
+  const color = COLOR_POR_TIPO[doc.tipoDocumento] ?? COLOR_DEFAULT;
+  const label = etiquetaPorClave.get(doc.tipoDocumento)
+    ?? (doc.tipoDocumento === 'OTRO' ? 'Otro' : doc.tipoDocumento);
   const sinAsignar = !doc.actorId;
   const conError = !!doc.extraccionError;
   const warn = sinAsignar || conError;
+
+  // Si el tipo actual no está en el catálogo (ej. 'OTRO' o legacy),
+  // lo agregamos a las opciones para que el <select> sea controlado.
+  const tipoEnOpciones = opcionesTipo.some((o) => o.clave === doc.tipoDocumento);
 
   return (
     <div className={`flex items-center gap-3 p-2.5 rounded border ${
@@ -66,8 +155,8 @@ function DocRow({
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium text-gray-900 truncate">{doc.nombreArchivo}</div>
         <div className="flex items-center gap-1.5 mt-0.5">
-          <span className={`text-[10px] px-1.5 py-0.5 rounded ${style.bg} ${style.text}`}>
-            {style.label}
+          <span className={`text-[10px] px-1.5 py-0.5 rounded ${color.bg} ${color.text}`}>
+            {label}
           </span>
           {doc.confianzaExtraccion !== null && (
             <span className="text-[10px] text-gray-500">{doc.confianzaExtraccion}% confianza</span>
@@ -86,11 +175,15 @@ function DocRow({
       <select
         value={doc.tipoDocumento}
         onChange={(e) => { void onChangeTipo(doc.id, e.target.value); }}
-        className="text-xs border border-gray-300 rounded px-1.5 py-1 max-w-[120px] bg-white"
+        className="text-xs border border-gray-300 rounded px-1.5 py-1 max-w-[140px] bg-white"
       >
-        {TIPOS_V0.map((t) => (
-          <option key={t.value} value={t.value}>{t.label}</option>
+        {!tipoEnOpciones && (
+          <option value={doc.tipoDocumento}>{label}</option>
+        )}
+        {opcionesTipo.map((t) => (
+          <option key={t.clave} value={t.clave}>{t.etiqueta}{t.opcional ? ' (opc.)' : ''}</option>
         ))}
+        <option value="OTRO">Otro</option>
       </select>
       <select
         value={doc.actorId ?? ''}
@@ -116,12 +209,24 @@ function DocRow({
 }
 
 export function DocumentDropzone({
-  docsAsignados, docsSinAsignar, actores, onUpload, onReassign, onChangeTipo, onDelete,
+  docsAsignados, docsSinAsignar, actores, catalogo, tipoTitular, selectedActor,
+  onUpload, onReassign, onChangeTipo, onDelete,
 }: Props) {
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [tipoSeleccionado, setTipoSeleccionado] = useState<TipoDocSoportado>('INE');
+  const [tipoSeleccionado, setTipoSeleccionado] = useState<string>('INE');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const optgroups = useMemo(
+    () => construirOptgroups(catalogo, tipoTitular, selectedActor),
+    [catalogo, tipoTitular, selectedActor],
+  );
+  const opcionesTipo = useMemo(() => todasLasClaves(catalogo), [catalogo]);
+  const etiquetaPorClave = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const o of opcionesTipo) m.set(o.clave, o.etiqueta);
+    return m;
+  }, [opcionesTipo]);
 
   const handleFiles = async (files: FileList | File[]) => {
     setUploading(true);
@@ -155,12 +260,19 @@ export function DocumentDropzone({
         <label className="block text-xs font-medium text-gray-600 mb-1">Tipo del próximo upload</label>
         <select
           value={tipoSeleccionado}
-          onChange={(e) => setTipoSeleccionado(e.target.value as TipoDocSoportado)}
+          onChange={(e) => setTipoSeleccionado(e.target.value)}
           className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white mb-2"
         >
-          {TIPOS_V0.map((t) => (
-            <option key={t.value} value={t.value}>{t.label}</option>
+          {optgroups.map((g) => (
+            <optgroup key={g.label} label={g.label}>
+              {g.items.map((t) => (
+                <option key={`${g.label}:${t.clave}`} value={t.clave}>
+                  {t.etiqueta}{t.opcional ? ' (opc.)' : ''}
+                </option>
+              ))}
+            </optgroup>
           ))}
+          <option value="OTRO">Otro</option>
         </select>
       </div>
 
@@ -216,6 +328,8 @@ export function DocumentDropzone({
               key={d.id}
               doc={d}
               actores={actores}
+              etiquetaPorClave={etiquetaPorClave}
+              opcionesTipo={opcionesTipo}
               onReassign={onReassign}
               onChangeTipo={onChangeTipo}
               onDelete={onDelete}

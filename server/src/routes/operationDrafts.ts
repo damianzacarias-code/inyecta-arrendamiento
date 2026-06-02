@@ -36,8 +36,11 @@ import { childLogger } from '../lib/logger';
 import {
   extractAndMergeDoc,
   esTipoDocSoportado,
-  TIPOS_DOC_DRAFT,
 } from '../services/operationDraft';
+import {
+  catalogoParaActor,
+  esTipoDocEnCatalogo,
+} from '../services/expedienteCatalogs';
 
 const log = childLogger('operation-drafts');
 const router = Router();
@@ -221,6 +224,41 @@ router.get(
       },
     });
     res.json(drafts);
+  }),
+);
+
+// GET /api/operation-drafts/catalogo — catálogo de tipos de documento
+//
+// Devuelve el catálogo del expediente proyectado por sección, para que
+// el dropdown del flujo borrador ("Tipo del próximo upload") se llene
+// desde el server en vez de tener tipos hardcodeados. El cliente filtra
+// la sección de la persona según el involucrado seleccionado y siempre
+// ofrece las secciones compartidas (OPERACIÓN, BIEN_ARRENDADO,
+// FORMALIZACIÓN) que incluyen los documentos que la operación genera.
+//
+// NO requiere :id ni toca un draft — es estático. Debe declararse ANTES
+// de GET /:id para que Express no lo capture como un id.
+router.get(
+  '/catalogo',
+  requireAuth,
+  asyncHandler(async (_req: Request, res: Response) => {
+    const proj = (cat: ReturnType<typeof catalogoParaActor>) =>
+      cat.map((c) => ({ clave: c.tipo, etiqueta: c.etiqueta, opcional: c.opcional ?? false }));
+
+    res.json({
+      catalogos: {
+        OPERACION_PFAE:       proj(catalogoParaActor('PFAE', 'OPERACION')),
+        OPERACION_PM:         proj(catalogoParaActor('PM', 'OPERACION')),
+        SOLICITANTE_PFAE:     proj(catalogoParaActor('PFAE', 'SOLICITANTE')),
+        SOLICITANTE_PM:       proj(catalogoParaActor('PM', 'SOLICITANTE')),
+        REPRESENTANTE_LEGAL:  proj(catalogoParaActor('PM', 'REPRESENTANTE_LEGAL')),
+        PRINCIPAL_ACCIONISTA: proj(catalogoParaActor('PM', 'PRINCIPAL_ACCIONISTA')),
+        AVAL_PF:              proj(catalogoParaActor('PFAE', 'AVAL', 'PF')),
+        AVAL_PM:              proj(catalogoParaActor('PFAE', 'AVAL', 'PM')),
+        BIEN_ARRENDADO:       proj(catalogoParaActor('PFAE', 'BIEN_ARRENDADO')),
+        FORMALIZACION:        proj(catalogoParaActor('PFAE', 'FORMALIZACION')),
+      },
+    });
   }),
 );
 
@@ -412,13 +450,14 @@ router.post(
       throw new AppError('FILE_REQUIRED', 'Debes adjuntar un archivo en el campo "archivo"', 400);
     }
 
-    // Tipo soportado en v0. Permitimos tipos no soportados (string libre
-    // del esquema Prisma) para que el operador pueda guardar el doc
-    // como "OTRO" — solo no se extrae.
-    if (!esTipoDocSoportado(data.tipoDocumento) && data.tipoDocumento !== 'OTRO') {
+    // El tipo debe pertenecer al catálogo del expediente, o ser 'OTRO'
+    // (escape hatch para docs fuera de catálogo). La AUTO-EXTRACCIÓN
+    // sigue limitada a INE/CSF/COMPROBANTE (esTipoDocSoportado); los
+    // demás tipos del catálogo se guardan pero no se extraen.
+    if (!esTipoDocEnCatalogo(data.tipoDocumento) && data.tipoDocumento !== 'OTRO') {
       throw new AppError(
         'TIPO_DOC_NO_SOPORTADO',
-        `Tipo no soportado en v0: ${data.tipoDocumento}. Permitidos: ${TIPOS_DOC_DRAFT.join(', ')} o OTRO`,
+        `Tipo de documento desconocido: ${data.tipoDocumento}. Debe pertenecer al catálogo del expediente o ser "OTRO".`,
         400,
       );
     }

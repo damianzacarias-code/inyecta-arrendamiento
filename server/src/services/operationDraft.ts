@@ -27,15 +27,53 @@ import { getExtractProvider, type TipoExtract } from './pdfExtract';
 import { childLogger } from '../lib/logger';
 import { isEnabled as cipherEnabled, decryptBuffer } from '../lib/uploadCipher';
 import { validarNombreVsCurp, type IneNombreData } from './ineValidation';
+import type { ActorTipo, DraftActorRol } from '@prisma/client';
 
 const log = childLogger('operationDraft');
 
-/** Tipos de documento soportados por el prototipo v0. */
+/**
+ * Tipos de documento AUTO-EXTRAÍBLES por el prototipo v0.
+ *
+ * OJO: esto NO es el catálogo completo de tipos válidos. Es el subset
+ * que el extractor (Claude/Mock) sabe parsear y auto-poblar al actor.
+ * El catálogo completo de tipos válidos (incluyendo los docs que la
+ * operación genera de forma natural) vive en `expedienteCatalogs.ts`
+ * y se valida con `esTipoDocEnCatalogo`.
+ */
 export const TIPOS_DOC_DRAFT = ['INE', 'CSF', 'COMPROBANTE_DOMICILIO'] as const;
 export type TipoDocDraft = (typeof TIPOS_DOC_DRAFT)[number];
 
 export function esTipoDocSoportado(tipo: string): tipo is TipoDocDraft {
   return (TIPOS_DOC_DRAFT as readonly string[]).includes(tipo);
+}
+
+/**
+ * Mapea el rol del actor del flujo borrador (`DraftActorRol`) al
+ * `ActorTipo` del catálogo del expediente. El catálogo es la fuente de
+ * verdad de qué documentos espera cada actor; el borrador usa un
+ * vocabulario distinto (TITULAR/SOCIO) que aquí se traduce.
+ *
+ *   TITULAR             → SOLICITANTE
+ *   AVAL                → AVAL
+ *   REPRESENTANTE_LEGAL → REPRESENTANTE_LEGAL
+ *   SOCIO               → PRINCIPAL_ACCIONISTA
+ */
+export function rolDraftToActorTipo(rol: DraftActorRol): ActorTipo {
+  switch (rol) {
+    case 'TITULAR':
+      return 'SOLICITANTE';
+    case 'AVAL':
+      return 'AVAL';
+    case 'REPRESENTANTE_LEGAL':
+      return 'REPRESENTANTE_LEGAL';
+    case 'SOCIO':
+      return 'PRINCIPAL_ACCIONISTA';
+    default: {
+      const _exhaustive: never = rol;
+      void _exhaustive;
+      return 'SOLICITANTE';
+    }
+  }
 }
 
 /**
