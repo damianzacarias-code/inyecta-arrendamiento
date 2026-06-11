@@ -229,7 +229,7 @@ export function tiposDocConocidos(): Set<string> {
 /**
  * True si `tipo` es una clave conocida en el catálogo del expediente.
  * NO implica que sea auto-extraíble (eso lo decide `esTipoDocSoportado`
- * en services/operationDraft.ts, limitado a INE/CSF/COMPROBANTE).
+ * en services/operationDraft.ts vía EXTRACT_POR_TIPO_DOC).
  */
 export function esTipoDocEnCatalogo(tipo: string): boolean {
   return tiposDocConocidos().has(tipo);

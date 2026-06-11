@@ -95,6 +95,10 @@ const datosConsolidadosSchema = z
     // Identidad fiscal
     regimenFiscal: z.string().max(200).nullable().optional(),
     fiel: z.string().max(50).nullable().optional(),
+    // Datos bancarios (extraídos del estado de cuenta o manuales)
+    banco: z.string().max(100).nullable().optional(),
+    clabe: z.string().max(20).nullable().optional(),
+    numeroCuenta: z.string().max(30).nullable().optional(),
     // Domicilio (mismos campos para fiscal y particular en v0)
     calle: z.string().max(200).nullable().optional(),
     numExterior: z.string().max(20).nullable().optional(),
@@ -452,8 +456,8 @@ router.post(
 
     // El tipo debe pertenecer al catálogo del expediente, o ser 'OTRO'
     // (escape hatch para docs fuera de catálogo). La AUTO-EXTRACCIÓN
-    // sigue limitada a INE/CSF/COMPROBANTE (esTipoDocSoportado); los
-    // demás tipos del catálogo se guardan pero no se extraen.
+    // aplica a los tipos con extractor (esTipoDocSoportado, ver
+    // EXTRACT_POR_TIPO_DOC); los demás se guardan sin extraer.
     if (!esTipoDocEnCatalogo(data.tipoDocumento) && data.tipoDocumento !== 'OTRO') {
       throw new AppError(
         'TIPO_DOC_NO_SOPORTADO',

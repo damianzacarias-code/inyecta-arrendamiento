@@ -77,6 +77,10 @@ export interface ActorDatosConsolidados {
   // Identidad fiscal
   regimenFiscal?: string | null;
   fiel?: string | null;
+  // Datos bancarios (extraídos del estado de cuenta o manuales)
+  banco?: string | null;
+  clabe?: string | null;
+  numeroCuenta?: string | null;
   // Domicilio
   calle?: string | null;
   numExterior?: string | null;

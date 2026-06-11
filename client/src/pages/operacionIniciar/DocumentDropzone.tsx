@@ -43,6 +43,14 @@ const COLOR_POR_TIPO: Record<string, { bg: string; text: string }> = {
   INE:                   { bg: 'bg-emerald-100', text: 'text-emerald-700' },
   CSF:                   { bg: 'bg-blue-100',    text: 'text-blue-700' },
   COMPROBANTE_DOMICILIO: { bg: 'bg-amber-100',   text: 'text-amber-700' },
+  ACTA_CONSTITUTIVA:     { bg: 'bg-purple-100',  text: 'text-purple-700' },
+  SOLICITUD:             { bg: 'bg-indigo-100',  text: 'text-indigo-700' },
+  FACTURA:               { bg: 'bg-cyan-100',    text: 'text-cyan-700' },
+  ESTADOS_CUENTA:        { bg: 'bg-teal-100',    text: 'text-teal-700' },
+  ESTADO_CUENTA:         { bg: 'bg-teal-100',    text: 'text-teal-700' },
+  TABLA_AMORTIZACION:    { bg: 'bg-rose-100',    text: 'text-rose-700' },
+  CARATULA:              { bg: 'bg-orange-100',  text: 'text-orange-700' },
+  CFDI_RENTA:            { bg: 'bg-lime-100',    text: 'text-lime-700' },
 };
 const COLOR_DEFAULT = { bg: 'bg-gray-100', text: 'text-gray-700' };
 

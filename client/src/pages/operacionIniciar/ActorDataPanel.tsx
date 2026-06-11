@@ -77,6 +77,14 @@ const SECCIONES: Record<string, { titulo: string; campos: { key: keyof ActorDato
         { key: 'ingresoMensual', label: 'Ingreso mensual', type: 'number' },
       ],
     },
+    {
+      titulo: 'Datos bancarios',
+      campos: [
+        { key: 'banco', label: 'Banco' },
+        { key: 'clabe', label: 'CLABE' },
+        { key: 'numeroCuenta', label: 'Número de cuenta' },
+      ],
+    },
   ],
   PM: [
     {
@@ -109,6 +117,14 @@ const SECCIONES: Record<string, { titulo: string; campos: { key: keyof ActorDato
       campos: [
         { key: 'email', label: 'Email' },
         { key: 'telefono', label: 'Teléfono' },
+      ],
+    },
+    {
+      titulo: 'Datos bancarios',
+      campos: [
+        { key: 'banco', label: 'Banco' },
+        { key: 'clabe', label: 'CLABE' },
+        { key: 'numeroCuenta', label: 'Número de cuenta' },
       ],
     },
   ],
@@ -149,6 +165,14 @@ const SECCIONES: Record<string, { titulo: string; campos: { key: keyof ActorDato
         { key: 'estadoCivil', label: 'Estado civil' },
         { key: 'regimenMatrimonial', label: 'Régimen matrimonial' },
         { key: 'nombreConyuge', label: 'Cónyuge' },
+      ],
+    },
+    {
+      titulo: 'Datos bancarios',
+      campos: [
+        { key: 'banco', label: 'Banco' },
+        { key: 'clabe', label: 'CLABE' },
+        { key: 'numeroCuenta', label: 'Número de cuenta' },
       ],
     },
   ],

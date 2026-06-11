@@ -271,6 +271,84 @@ export const solicitudSchema = z.object({
 export type SolicitudData = z.infer<typeof solicitudSchema>;
 
 // ─────────────────────────────────────────────────────────────────
+// Estado de cuenta bancario — datos de identificación de la cuenta.
+// NO extrae movimientos (eso es del flujo de depurado/conciliación);
+// aquí solo interesan los datos que pueblan al actor: banco, CLABE,
+// titular y el periodo del documento.
+// ─────────────────────────────────────────────────────────────────
+export const estadoCuentaSchema = z.object({
+  banco: z.string().nullable().optional(),            // "BBVA", "Banorte", "Monex"...
+  titular: z.string().nullable().optional(),
+  rfc: z.string().nullable().optional(),               // RFC del titular si aparece
+  clabe: z.string().nullable().optional(),             // 18 dígitos
+  numeroCuenta: z.string().nullable().optional(),
+  periodo: z.string().nullable().optional(),           // texto del periodo, ej "01-ene al 31-ene 2026"
+  saldoInicial: z.number().nullable().optional(),
+  saldoFinal: z.number().nullable().optional(),
+  totalDepositos: z.number().nullable().optional(),
+  totalRetiros: z.number().nullable().optional(),
+});
+export type EstadoCuentaData = z.infer<typeof estadoCuentaSchema>;
+
+// ─────────────────────────────────────────────────────────────────
+// Tabla de amortización — propia, legacy o de COMPETIDOR. Extrae los
+// parámetros financieros agregados (no las filas una por una).
+// Útil para comparar corridas de otras arrendadoras.
+// ─────────────────────────────────────────────────────────────────
+export const tablaAmortizacionSchema = z.object({
+  emisor: z.string().nullable().optional(),            // arrendadora que generó la tabla
+  cliente: z.string().nullable().optional(),
+  plazoMeses: z.number().int().nullable().optional(),
+  montoFinanciado: z.number().nullable().optional(),
+  rentaMensual: z.number().nullable().optional(),       // sin IVA si el doc lo distingue
+  rentaConIVA: z.number().nullable().optional(),
+  tasaAnual: z.number().nullable().optional(),           // fracción (0.36) o null si no aparece
+  valorResidual: z.number().nullable().optional(),
+  fechaPrimerPago: z.string().nullable().optional(),     // YYYY-MM-DD
+  fechaUltimoPago: z.string().nullable().optional(),
+  totalPagar: z.number().nullable().optional(),
+});
+export type TablaAmortizacionData = z.infer<typeof tablaAmortizacionSchema>;
+
+// ─────────────────────────────────────────────────────────────────
+// Carátula de contrato de arrendamiento
+// ─────────────────────────────────────────────────────────────────
+export const caratulaSchema = z.object({
+  folioContrato: z.string().nullable().optional(),
+  arrendador: z.string().nullable().optional(),
+  arrendatario: z.string().nullable().optional(),
+  rfcArrendatario: z.string().nullable().optional(),
+  producto: z.string().nullable().optional(),           // 'PURO' | 'FINANCIERO' | texto libre
+  plazoMeses: z.number().int().nullable().optional(),
+  rentaMensual: z.number().nullable().optional(),
+  valorBien: z.number().nullable().optional(),
+  depositoGarantia: z.number().nullable().optional(),
+  comisionApertura: z.number().nullable().optional(),
+  fechaFirma: z.string().nullable().optional(),         // YYYY-MM-DD
+  bienDescripcion: z.string().nullable().optional(),
+});
+export type CaratulaData = z.infer<typeof caratulaSchema>;
+
+// ─────────────────────────────────────────────────────────────────
+// CFDI de renta (factura de arrendamiento)
+// ─────────────────────────────────────────────────────────────────
+export const cfdiRentaSchema = z.object({
+  emisor: z.string().nullable().optional(),
+  rfcEmisor: z.string().nullable().optional(),
+  receptor: z.string().nullable().optional(),
+  rfcReceptor: z.string().nullable().optional(),
+  folioFiscal: z.string().nullable().optional(),         // UUID del timbre
+  serie: z.string().nullable().optional(),
+  folio: z.string().nullable().optional(),
+  fecha: z.string().nullable().optional(),               // YYYY-MM-DD
+  concepto: z.string().nullable().optional(),
+  subtotal: z.number().nullable().optional(),
+  iva: z.number().nullable().optional(),
+  total: z.number().nullable().optional(),
+});
+export type CfdiRentaData = z.infer<typeof cfdiRentaSchema>;
+
+// ─────────────────────────────────────────────────────────────────
 // Selector helper
 // ─────────────────────────────────────────────────────────────────
 export const SCHEMAS_BY_TIPO = {
@@ -280,6 +358,10 @@ export const SCHEMAS_BY_TIPO = {
   FACTURA_BIEN: facturaBienSchema,
   ACTA_CONSTITUTIVA: actaConstitutivaSchema,
   SOLICITUD: solicitudSchema,
+  ESTADO_CUENTA: estadoCuentaSchema,
+  TABLA_AMORTIZACION: tablaAmortizacionSchema,
+  CARATULA: caratulaSchema,
+  CFDI_RENTA: cfdiRentaSchema,
 } as const;
 
 export function getSchemaForTipo(tipo: TipoExtract) {

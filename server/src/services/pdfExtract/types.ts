@@ -14,6 +14,10 @@ export const TIPOS_EXTRACT = [
   'FACTURA_BIEN',            // Factura del proveedor del bien arrendado
   'ACTA_CONSTITUTIVA',       // Acta constitutiva (PM)
   'SOLICITUD',               // Solicitud de arrendamiento (PFAE o PM) — formulario completo
+  'ESTADO_CUENTA',           // Estado de cuenta bancario (datos de la cuenta, no movimientos)
+  'TABLA_AMORTIZACION',      // Tabla de amortización (propia, legacy o de competidor)
+  'CARATULA',                // Carátula de contrato de arrendamiento
+  'CFDI_RENTA',              // CFDI de renta (factura de arrendamiento)
 ] as const;
 
 export type TipoExtract = (typeof TIPOS_EXTRACT)[number];

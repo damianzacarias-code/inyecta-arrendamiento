@@ -266,6 +266,81 @@ FORMA EXACTA DEL JSON:
 }
 
 NO agregues comentarios ni markdown. Empieza DIRECTAMENTE con { y termina con }.`,
+  ESTADO_CUENTA: `Eres un extractor de datos de un estado de cuenta bancario mexicano (BBVA, Banorte, Santander, Banamex, HSBC, Scotiabank, Monex, BanBajío, Banregio, etc.).
+Extrae SOLO los datos de identificación de la cuenta y los totales del periodo. NO extraigas los movimientos individuales.
+Devuelve EXCLUSIVAMENTE un objeto JSON con esta forma exacta. Los montos son números (sin $ ni comas). Usa null cuando un dato no aparezca.
+
+{
+  "banco": "string|null (ej: 'BBVA', 'Banorte')",
+  "titular": "string|null (nombre o razón social del titular)",
+  "rfc": "string|null (RFC del titular si aparece)",
+  "clabe": "string|null (CLABE interbancaria, 18 dígitos)",
+  "numeroCuenta": "string|null",
+  "periodo": "string|null (texto del periodo, ej: '01/ENE/2026 al 31/ENE/2026')",
+  "saldoInicial": "number|null",
+  "saldoFinal": "number|null",
+  "totalDepositos": "number|null",
+  "totalRetiros": "number|null"
+}
+
+NO agregues comentarios ni markdown.`,
+  TABLA_AMORTIZACION: `Eres un extractor de datos de una tabla de amortización / corrida financiera de arrendamiento mexicana (puede ser de Inyecta o de un competidor: Activa, Credian, Leasing Team, etc.).
+Extrae los PARÁMETROS AGREGADOS de la corrida. NO extraigas las filas una por una.
+Devuelve EXCLUSIVAMENTE un objeto JSON con esta forma exacta. Los montos son números (sin $ ni comas). Las tasas son fracción (0.36 para 36%). Usa null cuando un dato no aparezca.
+
+{
+  "emisor": "string|null (arrendadora que generó la tabla)",
+  "cliente": "string|null",
+  "plazoMeses": "number|null (cantidad de pagos mensuales)",
+  "montoFinanciado": "number|null (capital/valor a financiar sin IVA)",
+  "rentaMensual": "number|null (renta sin IVA si el documento la distingue)",
+  "rentaConIVA": "number|null (pago mensual total con IVA)",
+  "tasaAnual": "number|null (fracción, ej 0.36; null si no aparece explícita)",
+  "valorResidual": "number|null (residual/opción de compra al final)",
+  "fechaPrimerPago": "string|null (YYYY-MM-DD)",
+  "fechaUltimoPago": "string|null (YYYY-MM-DD)",
+  "totalPagar": "number|null (suma de todos los pagos si aparece)"
+}
+
+NO agregues comentarios ni markdown.`,
+  CARATULA: `Eres un extractor de datos de la CARÁTULA de un contrato de arrendamiento mexicano (puro o financiero).
+Devuelve EXCLUSIVAMENTE un objeto JSON con esta forma exacta. Los montos son números (sin $ ni comas). Usa null cuando un dato no aparezca.
+
+{
+  "folioContrato": "string|null (ej: 'ARR-001-2026')",
+  "arrendador": "string|null",
+  "arrendatario": "string|null",
+  "rfcArrendatario": "string|null",
+  "producto": "string|null ('PURO' o 'FINANCIERO' si se distingue; texto literal si no)",
+  "plazoMeses": "number|null",
+  "rentaMensual": "number|null",
+  "valorBien": "number|null",
+  "depositoGarantia": "number|null",
+  "comisionApertura": "number|null",
+  "fechaFirma": "string|null (YYYY-MM-DD)",
+  "bienDescripcion": "string|null"
+}
+
+NO agregues comentarios ni markdown.`,
+  CFDI_RENTA: `Eres un extractor de datos de un CFDI 4.0 mexicano de renta de arrendamiento.
+Devuelve EXCLUSIVAMENTE un objeto JSON con esta forma exacta. Los montos son números (sin $ ni comas). Usa null cuando un dato no aparezca.
+
+{
+  "emisor": "string|null (razón social del emisor)",
+  "rfcEmisor": "string|null",
+  "receptor": "string|null",
+  "rfcReceptor": "string|null",
+  "folioFiscal": "string|null (UUID del timbre fiscal digital)",
+  "serie": "string|null",
+  "folio": "string|null",
+  "fecha": "string|null (YYYY-MM-DD)",
+  "concepto": "string|null (descripción del concepto principal)",
+  "subtotal": "number|null",
+  "iva": "number|null",
+  "total": "number|null"
+}
+
+NO agregues comentarios ni markdown.`,
 };
 
 /** Intenta extraer un objeto JSON del texto. Acepta JSON puro o JSON envuelto en markdown/texto. */
@@ -327,7 +402,7 @@ export class ClaudeProvider implements IExtractProvider {
       throw new Error('ClaudeProvider requiere ANTHROPIC_API_KEY');
     }
     this.client = new Anthropic({ apiKey: opts.apiKey });
-    this.model = opts.model || 'claude-sonnet-4-5-20250929';
+    this.model = opts.model || 'claude-fable-5';
   }
 
   async extract(file: Buffer, mimeType: string, tipo: TipoExtract): Promise<ExtractResult> {

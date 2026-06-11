@@ -97,8 +97,10 @@ const EnvSchema = z
     // EXTRACT_PROVIDER=MOCK devuelve datos hardcoded para tests/demos.
     EXTRACT_PROVIDER: extractProviderEnum.default('MOCK'),
     ANTHROPIC_API_KEY: z.string().optional(),
-    // Modelo a usar (override opcional). Default: claude-sonnet-4-5-20250929.
-    ANTHROPIC_MODEL: z.string().default('claude-sonnet-4-5-20250929'),
+    // Modelo a usar (override opcional). Default: claude-fable-5 —
+    // visión estado-del-arte para INEs giradas/borrosas y tablas
+    // (decisión Damián 10-06-2026; antes claude-sonnet-4-5-20250929).
+    ANTHROPIC_MODEL: z.string().default('claude-fable-5'),
 
     // ── Círculo de Crédito ────────────────────────────────
     // Clave de Otorgante asignada por Buró de Crédito / Círculo

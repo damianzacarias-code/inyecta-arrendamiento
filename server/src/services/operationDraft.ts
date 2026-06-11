@@ -18,7 +18,8 @@
  * NO maneja:
  *   - Finalizar el draft (crear Client + Contract reales) → v0.2.
  *   - Detectar conflictos en UI → v0.1.
- *   - Tipos de doc más allá de INE / CSF / COMPROBANTE_DOMICILIO.
+ *   - Tipos de doc sin extractor (PAGARE, REPORTE_BURO, etc.) — se
+ *     guardan sin extraer. Ver EXTRACT_POR_TIPO_DOC abajo.
  */
 import fs from 'fs';
 import path from 'path';
@@ -32,19 +33,46 @@ import type { ActorTipo, DraftActorRol } from '@prisma/client';
 const log = childLogger('operationDraft');
 
 /**
- * Tipos de documento AUTO-EXTRAÍBLES por el prototipo v0.
+ * Mapa tipoDocumento (catálogo del expediente) → TipoExtract (módulo
+ * pdfExtract). Define qué tipos se AUTO-EXTRAEN en el borrador.
  *
- * OJO: esto NO es el catálogo completo de tipos válidos. Es el subset
- * que el extractor (Claude/Mock) sabe parsear y auto-poblar al actor.
- * El catálogo completo de tipos válidos (incluyendo los docs que la
- * operación genera de forma natural) vive en `expedienteCatalogs.ts`
- * y se valida con `esTipoDocEnCatalogo`.
+ * Las claves del catálogo y del extractor divergen en dos casos:
+ *   - FACTURA (catálogo) → FACTURA_BIEN (extractor)
+ *   - ESTADOS_CUENTA (catálogo, plural) → ESTADO_CUENTA (extractor)
+ *
+ * OJO (hallazgo del architecture-reviewer 10-06-2026): la clave
+ * ESTADO_CUENTA singular del catálogo (sección FORMALIZACIÓN) es el
+ * estado de cuenta DEL CONTRATO que emite Inyecta — contiene la CLABE
+ * de FSMP para depósitos, NO los datos bancarios del cliente. Se deja
+ * deliberadamente FUERA de este mapa: extraerlo y mergearlo escribiría
+ * la CLABE de FSMP como dato bancario del actor (y ese campo es
+ * candidato a alimentar dispersión en v0.2). Solo el plural
+ * ESTADOS_CUENTA (doc bancario de la persona) se extrae y mergea.
+ *
+ * Los tipos del catálogo SIN entrada aquí (PAGARE, REPORTE_BURO, etc.)
+ * se guardan pero no se extraen. La validación de membresía del
+ * catálogo completo vive en `expedienteCatalogs.ts` (esTipoDocEnCatalogo).
  */
-export const TIPOS_DOC_DRAFT = ['INE', 'CSF', 'COMPROBANTE_DOMICILIO'] as const;
-export type TipoDocDraft = (typeof TIPOS_DOC_DRAFT)[number];
+const EXTRACT_POR_TIPO_DOC: Record<string, TipoExtract> = {
+  INE: 'INE',
+  CSF: 'CSF',
+  COMPROBANTE_DOMICILIO: 'COMPROBANTE_DOMICILIO',
+  FACTURA: 'FACTURA_BIEN',
+  ACTA_CONSTITUTIVA: 'ACTA_CONSTITUTIVA',
+  SOLICITUD: 'SOLICITUD',
+  ESTADOS_CUENTA: 'ESTADO_CUENTA',
+  TABLA_AMORTIZACION: 'TABLA_AMORTIZACION',
+  CARATULA: 'CARATULA',
+  CFDI_RENTA: 'CFDI_RENTA',
+};
 
-export function esTipoDocSoportado(tipo: string): tipo is TipoDocDraft {
-  return (TIPOS_DOC_DRAFT as readonly string[]).includes(tipo);
+/** TipoExtract para un tipoDocumento del catálogo, o null si no se extrae. */
+export function extractTipoParaDoc(tipoDocumento: string): TipoExtract | null {
+  return EXTRACT_POR_TIPO_DOC[tipoDocumento] ?? null;
+}
+
+export function esTipoDocSoportado(tipo: string): boolean {
+  return tipo in EXTRACT_POR_TIPO_DOC;
 }
 
 /**
@@ -76,6 +104,19 @@ export function rolDraftToActorTipo(rol: DraftActorRol): ActorTipo {
   }
 }
 
+// Subset de campos de la sección solicitante de la SOLICITUD que se
+// mergea al actor (mismo vocabulario que datosConsolidados).
+const CAMPOS_SOLICITANTE = [
+  'nombre', 'apellidoPaterno', 'apellidoMaterno', 'razonSocial',
+  'rfc', 'curp', 'fechaNacimiento', 'lugarNacimiento', 'nacionalidad', 'sexo',
+  'estadoCivil', 'regimenMatrimonial',
+  'email', 'telefono', 'celular',
+  'fechaConstitucion', 'capitalSocial',
+  'ingresoMensual', 'ocupacion',
+  'calle', 'numExterior', 'numInterior', 'colonia', 'municipio',
+  'ciudad', 'estado', 'codigoPostal', 'pais',
+] as const;
+
 /**
  * Mapeo de campos extraídos → campos del actor consolidado.
  *
@@ -84,11 +125,22 @@ export function rolDraftToActorTipo(rol: DraftActorRol): ActorTipo {
  *   - CSF: identidad fiscal (RFC, razónSocial / nombre, régimen) +
  *          domicilio fiscal.
  *   - COMPROBANTE_DOMICILIO: domicilio (calle, colonia, CP, etc.).
+ *   - ACTA_CONSTITUTIVA: identidad corporativa (razón social, fecha
+ *     de constitución, capital social).
+ *   - ESTADO_CUENTA: datos bancarios (banco, CLABE, cuenta). Los
+ *     saldos NO van al actor — son del documento, no de la persona.
+ *   - SOLICITUD: aplana la sección del solicitante (PFAE o PM).
+ *   - FACTURA_BIEN / TABLA_AMORTIZACION / CARATULA / CFDI_RENTA:
+ *     docs de la OPERACIÓN, no de una persona → no mergean nada;
+ *     la extracción queda en el documento para consumo posterior
+ *     (v0.2 finalizar borrador, comparativos de competidores).
  *
  * El operador puede editar manualmente cualquier campo en la UI; el
  * merge automático es solo el punto de partida.
+ *
+ * Exportada para tests (lógica pura, sin Prisma).
  */
-function camposPorTipoDoc(tipo: TipoDocDraft, data: Record<string, unknown>): Record<string, unknown> {
+export function camposPorTipoDoc(tipo: TipoExtract, data: Record<string, unknown>): Record<string, unknown> {
   switch (tipo) {
     case 'INE':
       return pick(data, [
@@ -132,6 +184,30 @@ function camposPorTipoDoc(tipo: TipoDocDraft, data: Record<string, unknown>): Re
         'codigoPostal',
         'cp',
       ]);
+    case 'ACTA_CONSTITUTIVA':
+      return pick(data, ['razonSocial', 'fechaConstitucion', 'capitalSocial']);
+    case 'ESTADO_CUENTA':
+      return pick(data, ['banco', 'clabe', 'numeroCuenta']);
+    case 'SOLICITUD': {
+      // La solicitud trae secciones anidadas; al actor solo va la del
+      // solicitante (PFAE o PM, la que venga poblada).
+      const seccion = (data.solicitantePFAE ?? data.solicitantePM) as
+        | Record<string, unknown>
+        | null
+        | undefined;
+      if (!seccion || typeof seccion !== 'object') return {};
+      return pick(seccion, CAMPOS_SOLICITANTE);
+    }
+    case 'FACTURA_BIEN':
+    case 'TABLA_AMORTIZACION':
+    case 'CARATULA':
+    case 'CFDI_RENTA':
+      return {};
+    default: {
+      const _exhaustive: never = tipo;
+      void _exhaustive;
+      return {};
+    }
   }
 }
 
@@ -163,8 +239,9 @@ export async function extractAndMergeDoc(documentId: string): Promise<void> {
   });
   if (!doc) throw new Error(`Documento ${documentId} no existe`);
 
-  if (!esTipoDocSoportado(doc.tipoDocumento)) {
-    log.warn({ documentId, tipo: doc.tipoDocumento }, 'tipo de documento no soportado en v0');
+  const tipoExtract = extractTipoParaDoc(doc.tipoDocumento);
+  if (!tipoExtract) {
+    log.warn({ documentId, tipo: doc.tipoDocumento }, 'tipo de documento sin extractor — se guarda sin extraer');
     return;
   }
 
@@ -172,7 +249,7 @@ export async function extractAndMergeDoc(documentId: string): Promise<void> {
   // con sufijo .enc; resolvemos al plaintext en memoria.
   const buffer = await readDocumentBuffer(doc.archivoPath);
   const provider = getExtractProvider();
-  const result = await provider.extract(buffer, mimeTypeFor(doc.archivoPath), doc.tipoDocumento as TipoExtract);
+  const result = await provider.extract(buffer, mimeTypeFor(doc.archivoPath), tipoExtract);
 
   if (!result.ok) {
     await prisma.operationDraftDocument.update({
@@ -220,7 +297,7 @@ export async function extractAndMergeDoc(documentId: string): Promise<void> {
   // Si todavía no hay actor asignado, intentamos auto-match.
   let actorId = doc.actorId;
   if (!actorId) {
-    actorId = await autoMatchActor(doc.draftId, doc.tipoDocumento as TipoDocDraft, result.data);
+    actorId = await autoMatchActor(doc.draftId, tipoExtract, result.data);
     if (actorId) {
       await prisma.operationDraftDocument.update({
         where: { id: documentId },
@@ -231,7 +308,7 @@ export async function extractAndMergeDoc(documentId: string): Promise<void> {
   }
 
   if (actorId) {
-    await mergeIntoActor(actorId, doc.tipoDocumento as TipoDocDraft, result.data);
+    await mergeIntoActor(actorId, tipoExtract, result.data);
   }
 }
 
@@ -245,7 +322,7 @@ export async function extractAndMergeDoc(documentId: string): Promise<void> {
  */
 async function autoMatchActor(
   draftId: string,
-  _tipoDoc: TipoDocDraft,
+  _tipoDoc: TipoExtract,
   data: Record<string, unknown>,
 ): Promise<string | null> {
   const curp = stringValue(data.curp).toUpperCase();
@@ -279,7 +356,7 @@ async function autoMatchActor(
  */
 async function mergeIntoActor(
   actorId: string,
-  tipoDoc: TipoDocDraft,
+  tipoDoc: TipoExtract,
   data: Record<string, unknown>,
 ): Promise<void> {
   const actor = await prisma.operationDraftActor.findUnique({
