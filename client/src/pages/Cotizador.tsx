@@ -739,6 +739,10 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
     .replace(/^-|-$/g, '')
     .slice(0, 40) || 'cotizacion';
 
+  // Sufijo con producto y plazo para que el archivo se identifique solo:
+  // ej. "cotizacion-juan-perez-financiero-36-meses.pdf"
+  const fileSufijo = `${form.producto.toLowerCase()}-${form.plazo}-meses`;
+
   return (
     <div className="max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-6">
@@ -1466,7 +1470,7 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                     tasaAnual={form.tasaAnual}
                   />
                 }
-                fileName={`cotizacion-${fileSlug}.pdf`}
+                fileName={`cotizacion-${fileSlug}-${fileSufijo}.pdf`}
                 className="w-full bg-inyecta-700 hover:bg-inyecta-800 text-white py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
               >
                 {({ loading: pdfLoading }) => (
@@ -1486,7 +1490,7 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                     filasFinanciero={pdfData.filasFinanciero}
                   />
                 }
-                fileName={`amortizacion-${fileSlug}.pdf`}
+                fileName={`amortizacion-${fileSlug}-${fileSufijo}.pdf`}
                 className="w-full bg-accent hover:bg-accent-dark text-white py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
               >
                 {({ loading: pdfLoading }) => (
