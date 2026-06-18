@@ -48,7 +48,7 @@ export interface CatalogPayload {
 
 const DEFAULT_CATALOG: CatalogConfig = {
   clave: 'default',
-  tasaAnualDefault: 0.36,
+  tasaAnualDefault: 0.30,
   tasaAnualMin: 0.18,
   tasaAnualMax: 0.60,
   comisionAperturaDefault: 0.05,
