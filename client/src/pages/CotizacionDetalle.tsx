@@ -179,6 +179,81 @@ export default function CotizacionDetalle() {
     }
   };
 
+  // ── PDFs (cotización + amortización) ────────────────────────────
+  // Reconstruimos los inputs canónicos a partir de los campos guardados
+  // y los pasamos por el motor verificado al centavo (lib/cotizacion/*).
+  // El servidor ya conserva los parámetros — aquí sólo derivamos lo que
+  // el PDF necesita.
+  //
+  // IMPORTANTE: este useMemo va ANTES de los `return` condicionales de
+  // abajo. Un hook NUNCA debe llamarse después de un return condicional
+  // (Reglas de Hooks de React); hacerlo provoca React error #310
+  // ("Rendered more hooks than during the previous render") al cargar
+  // los datos → la pantalla truena. Por eso guardamos el caso nulo
+  // adentro en vez de retornar antes del hook.
+  const pdfData = useMemo(() => {
+    if (!quotation) return null;
+    const q = quotation;
+    const valorBien = Number(q.valorBien);
+    const valorBienConIVA = Number(q.valorBienIVA) || valorBien * 1.16;
+    const tasaAnual = Number(q.tasaAnual);
+    const nombreBien =
+      q.bienDescripcion ||
+      [q.bienMarca, q.bienModelo, q.bienAnio].filter(Boolean).join(' ') ||
+      'Bien arrendado';
+    const enganchePct = Number(q.enganchePorcentaje);
+
+    const cotData = calcularCotizacion({
+      valorBienConIVA,
+      tasaIVA: 0.16,
+      producto: q.producto as 'PURO' | 'FINANCIERO',
+      plazo: q.plazo,
+      tasaAnual,
+      tasaComisionApertura: Number(q.comisionAperturaPct),
+      comisionAperturaEsContado: !q.comisionAperturaFinanciada,
+      porcentajeDeposito: Number(q.depositoGarantiaPct ?? q.valorResidualPct),
+      valorResidual: Number(q.valorResidualPct),
+      valorResidualEsDeposito: Boolean(q.valorResidualEsDeposito),
+      gpsMonto: Number(q.gpsInstalacion),
+      gpsEsContado: !q.gpsFinanciado,
+      seguroAnual: Number(q.seguroAnual),
+      seguroPendiente: Boolean(q.seguroPendiente),
+      seguroEsContado: !q.seguroFinanciado,
+      engancheMonto: valorBien * enganchePct,
+      nombreBien,
+      estadoBien: q.bienNuevo === false ? 'Seminuevo' : 'Nuevo',
+      seguroEstado: q.seguroFinanciado ? 'Contratado' : 'Pendiente',
+      nombreCliente: q.nombreCliente || 'Sin nombre',
+      fecha: new Date(q.createdAt),
+    });
+
+    const base = new Date(q.createdAt);
+    const fechaPrimerPago = new Date(
+      base.getFullYear(),
+      base.getMonth() + 1,
+      base.getDate(),
+      12, 0, 0,
+    );
+
+    const filasPuro =
+      q.producto === 'PURO'
+        ? calcAmortPuro(cotData.rentaMensual.montoNeto, q.plazo, fechaPrimerPago)
+        : undefined;
+
+    const filasFinanciero =
+      q.producto === 'FINANCIERO'
+        ? calcAmortFinanciero(
+            cotData.montoFinanciadoReal,
+            tasaAnual,
+            q.plazo,
+            cotData.fvAmortizacion,
+            fechaPrimerPago,
+          )
+        : undefined;
+
+    return { cotData, tasaAnual, filasPuro, filasFinanciero };
+  }, [quotation]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -208,85 +283,16 @@ export default function CotizacionDetalle() {
     );
   }
 
+  // Aquí quotation ya no es null (guarda de arriba) → pdfData tampoco.
+  // El `return null` es solo para que TypeScript estreche el tipo; no
+  // se alcanza en la práctica.
+  if (!pdfData) return null;
+
   const q = quotation;
   const canConvert = q.estado === 'VIGENTE' || q.estado === 'APROBADA';
   const canMarkApproved = q.estado === 'VIGENTE';
   const canReject = q.estado === 'VIGENTE' || q.estado === 'APROBADA';
   const badgeClass = estadoBadgeColors[q.estado] || 'bg-gray-100 text-gray-700 border-gray-200';
-
-  // ── PDFs (cotización + amortización) ────────────────────────────
-  // Reconstruimos los inputs canónicos a partir de los campos guardados
-  // y los pasamos por el motor verificado al centavo
-  // (lib/cotizacion/*). El servidor ya conserva los parámetros — aquí
-  // sólo derivamos lo que el PDF necesita y nada más.
-  const pdfData = useMemo(() => {
-    const valorBien = Number(q.valorBien);
-    const valorBienConIVA = Number(q.valorBienIVA) || valorBien * 1.16;
-    const tasaAnual = Number(q.tasaAnual);
-    const nombreBien =
-      q.bienDescripcion ||
-      [q.bienMarca, q.bienModelo, q.bienAnio].filter(Boolean).join(' ') ||
-      'Bien arrendado';
-    const enganchePct = Number(q.enganchePorcentaje);
-
-    const cotData = calcularCotizacion({
-      valorBienConIVA,
-      tasaIVA: 0.16,
-      producto: q.producto as 'PURO' | 'FINANCIERO',
-      plazo: q.plazo,
-      tasaAnual,
-      tasaComisionApertura: Number(q.comisionAperturaPct),
-      comisionAperturaEsContado: !q.comisionAperturaFinanciada,
-      // §4.12: depósito y residual son conceptos separados.
-      // El schema persiste ambos por separado desde el commit que
-      // separó depositoGarantia de valorResidual; aquí los usamos
-      // tal cual de la BD.
-      porcentajeDeposito: Number(q.depositoGarantiaPct ?? q.valorResidualPct),
-      valorResidual: Number(q.valorResidualPct),
-      valorResidualEsDeposito: Boolean(q.valorResidualEsDeposito),
-      gpsMonto: Number(q.gpsInstalacion),
-      gpsEsContado: !q.gpsFinanciado,
-      seguroAnual: Number(q.seguroAnual),
-      seguroPendiente: Boolean(q.seguroPendiente),
-      seguroEsContado: !q.seguroFinanciado,
-      // §4.2: el enganche siempre es de contado (entra al "Pago inicial"
-      // y reduce baseBien sobre valorSinIVA — no conIVA).
-      engancheMonto: valorBien * enganchePct,
-      nombreBien,
-      estadoBien: q.bienNuevo === false ? 'Seminuevo' : 'Nuevo',
-      seguroEstado: q.seguroFinanciado ? 'Contratado' : 'Pendiente',
-      nombreCliente: q.nombreCliente || 'Sin nombre',
-      fecha: new Date(q.createdAt),
-    });
-
-    // Para la amortización usamos createdAt + 1 mes como aproximación de
-    // fecha de primer pago (el esquema de cotización aún no la persiste).
-    const base = new Date(q.createdAt);
-    const fechaPrimerPago = new Date(
-      base.getFullYear(),
-      base.getMonth() + 1,
-      base.getDate(),
-      12, 0, 0,
-    );
-
-    const filasPuro =
-      q.producto === 'PURO'
-        ? calcAmortPuro(cotData.rentaMensual.montoNeto, q.plazo, fechaPrimerPago)
-        : undefined;
-
-    const filasFinanciero =
-      q.producto === 'FINANCIERO'
-        ? calcAmortFinanciero(
-            cotData.montoFinanciadoReal,
-            tasaAnual,
-            q.plazo,
-            cotData.fvAmortizacion,
-            fechaPrimerPago,
-          )
-        : undefined;
-
-    return { cotData, tasaAnual, filasPuro, filasFinanciero };
-  }, [q]);
 
   /** Slug seguro para nombres de archivo */
   const fileSlug = (q.folio || q.nombreCliente || 'cotizacion')
