@@ -5,10 +5,11 @@
 // clientId se guarda en el form via setValue('clientId', id).
 
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { useFormContext } from 'react-hook-form';
-import { Building2, Search, User } from 'lucide-react';
+import { Building2, Search, User, UserPlus } from 'lucide-react';
 import api from '@/lib/api';
+import { ClienteNuevoModal } from './ClienteNuevoModal';
+import type { SavedClient } from '../clienteNuevo/ClienteWizardForm';
 
 export interface ClientOption {
   id: string;
@@ -33,11 +34,34 @@ interface Props {
   onSelect: (c: ClientOption | null) => void;
 }
 
+/** Convierte el cliente recién creado (API) al shape del selector. */
+function toOption(c: SavedClient): ClientOption {
+  return {
+    id: c.id,
+    tipo: (c.tipo as 'PFAE' | 'PM') ?? 'PFAE',
+    nombre: c.nombre ?? null,
+    apellidoPaterno: c.apellidoPaterno ?? null,
+    razonSocial: c.razonSocial ?? null,
+    rfc: c.rfc ?? null,
+  };
+}
+
 export function ClienteSelector({ selected, onSelect }: Props) {
   const { formState } = useFormContext();
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [search, setSearch] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
+  // Modal de alta de cliente embebido (Fase 1): crear sin salir del wizard.
+  const [showModal, setShowModal] = useState(false);
+
+  // Tras crear: lo metemos a la lista cacheada y lo auto-seleccionamos.
+  const handleCreated = (c: SavedClient) => {
+    const opt = toOption(c);
+    setClients((prev) => [opt, ...prev]);
+    onSelect(opt);
+    setSearch('');
+    setShowDropdown(false);
+  };
   // Inicia en true: el loading nace vivo y sólo se apaga cuando la
   // promise resuelve. Así evitamos setState síncrono dentro del effect.
   const [loading, setLoading] = useState(true);
@@ -141,12 +165,13 @@ export function ClienteSelector({ selected, onSelect }: Props) {
             ) : filtered.length === 0 ? (
               <div className="p-3 text-sm text-gray-400 text-center">
                 Sin resultados.{' '}
-                <Link
-                  to="/clientes/nuevo"
+                <button
+                  type="button"
+                  onClick={() => setShowModal(true)}
                   className="text-inyecta-600 hover:underline"
                 >
-                  Crear cliente
-                </Link>
+                  Crear cliente nuevo
+                </button>
               </div>
             ) : (
               filtered.map((c) => (
@@ -178,6 +203,23 @@ export function ClienteSelector({ selected, onSelect }: Props) {
         )}
       </div>
       {errMsg && <p className="mt-1 text-xs text-red-600">{errMsg}</p>}
+
+      {/* Alta de cliente sin salir del wizard (Fase 1). */}
+      <button
+        type="button"
+        onClick={() => setShowModal(true)}
+        className="mt-2 inline-flex items-center gap-1.5 text-sm text-inyecta-600 hover:text-inyecta-700 hover:underline"
+      >
+        <UserPlus size={15} />
+        Crear cliente nuevo
+      </button>
+
+      {showModal && (
+        <ClienteNuevoModal
+          onClose={() => setShowModal(false)}
+          onCreated={handleCreated}
+        />
+      )}
     </div>
   );
 }
