@@ -12,6 +12,7 @@
 import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import ErrorBoundary from '@/components/ErrorBoundary';
 import {
   ChevronRight,
   LogOut,
@@ -436,9 +437,12 @@ export default function Layout() {
         </div>
         <CommandPalette />
 
-        {/* Contenido */}
+        {/* Contenido. ErrorBoundary atrapa crashes de render de la página
+            sin tumbar la barra lateral; se resetea al cambiar de ruta. */}
         <main style={{ flex: 1, background: '#FFFFFF', overflowY: 'auto' }} className="p-4 lg:p-6">
-          <Outlet />
+          <ErrorBoundary resetKey={location.pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </main>
 
         {/* Footer legacy */}
