@@ -25,8 +25,9 @@ import {
 } from 'react-router-dom';
 import { FormProvider, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { ArrowLeft, FileText } from 'lucide-react';
+import { ArrowLeft, FileText, CheckCircle2 } from 'lucide-react';
 import api from '@/lib/api';
+import ExpedienteTab from '@/components/ExpedienteTab';
 import {
   WizardShell,
   type WizardStep,
@@ -110,6 +111,12 @@ export default function ContratoNuevo() {
   const [submitting, setSubmitting] = useState(false);
   const [cliente, setCliente] = useState<ClientOption | null>(null);
   const [prefillFolio, setPrefillFolio] = useState<string>('');
+  // Fase 2: al crear el contrato, en vez de navegar mostramos el paso
+  // final de Documentación (expediente del contrato recién creado).
+  const [createdContract, setCreatedContract] = useState<{
+    id: string;
+    folio?: string;
+  } | null>(null);
 
   const methods = useForm<WizardFormShape>({
     resolver: zodResolver(createContractWizardSchema) as never,
@@ -240,7 +247,11 @@ export default function ContratoNuevo() {
       try {
         const payload = stripInternal(values);
         const res = await api.post('/contracts', payload);
-        navigate(`/contratos/${res.data.id}`);
+        // No navegamos: pasamos al paso final de Documentación con el
+        // expediente del contrato recién creado (Fase 2 del módulo único).
+        setCreatedContract({ id: res.data.id, folio: res.data.folio });
+        setSubmitting(false);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       } catch (err: unknown) {
         setSubmitError(extractApiError(err));
         setSubmitting(false);
@@ -258,6 +269,48 @@ export default function ContratoNuevo() {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
   );
+
+  // ── Paso final: Documentación (tras crear el contrato) ───────────
+  // El operador que tecleó los datos llega aquí; sube lo que falte del
+  // expediente. El catálogo marca subido vs faltante (no bloquea: puede
+  // completarse después desde el detalle del contrato).
+  if (createdContract) {
+    return (
+      <div>
+        <div className="max-w-5xl mx-auto mb-5">
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
+            <CheckCircle2 className="text-green-600 mt-0.5 shrink-0" size={22} />
+            <div className="flex-1">
+              <h1 className="text-lg font-semibold text-gray-900">
+                Operación creada
+                {createdContract.folio ? (
+                  <span className="font-mono text-inyecta-700"> · {createdContract.folio}</span>
+                ) : null}
+              </h1>
+              <p className="text-sm text-gray-600">
+                Sube la documentación del expediente. Lo que falte lo puedes
+                completar después; no bloquea la operación.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="max-w-5xl mx-auto">
+          <ExpedienteTab contractId={createdContract.id} />
+        </div>
+
+        <div className="max-w-5xl mx-auto mt-6 flex justify-end">
+          <button
+            type="button"
+            onClick={() => navigate(`/contratos/${createdContract.id}`)}
+            className="px-5 py-2.5 rounded-lg bg-inyecta-700 text-white text-sm font-medium hover:bg-inyecta-800"
+          >
+            Terminar e ir al contrato
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
