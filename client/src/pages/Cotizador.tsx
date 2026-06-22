@@ -411,6 +411,26 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
     [capitalInvertido, form.plazo],
   );
 
+  // TIR anual (arrendamiento vs crédito) MEMOIZADA. Antes se calculaba
+  // inline en el JSX del panel, así que las 2 bisecciones corrían en
+  // CADA render —incluso en renders no relacionados— y producían lag al
+  // arrastrar sliders ("la TIR se traba", 09-06-2026). Mismo valor; solo
+  // se recomputa cuando cambian sus entradas reales.
+  const { tirArr, tirCred } = useMemo(() => {
+    if (!cotLive) return { tirArr: NaN, tirCred: NaN };
+    return {
+      tirArr: calcTIRArrendamiento({
+        capital: capitalInvertido,
+        rentaNeta: cotLive.rentaMensual.montoNeto,
+        residual: cotLive.residual.monto,
+        deposito: cotLive.pagoInicial.depositoGarantia,
+        comisionContado: cotLive.pagoInicial.comisionAperturaContado,
+        parcialidades: form.plazo,
+      }),
+      tirCred: calcTIRCredito(capitalInvertido, form.plazo),
+    };
+  }, [cotLive, capitalInvertido, form.plazo]);
+
   // ROI sobre el mismo capital invertido. Dos vistas:
   //   total = ganancia / capital (retorno de TODO el periodo)
   //   anual = (1 + total)^(1/años) − 1  (retorno por año; deja comparar
@@ -1383,18 +1403,8 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                       const gArr = cotLive.ganancia.total;
                       const roiArrAnual = roiAnualPct(gArr);
                       const roiCredAnual = roiAnualPct(gananciaCredito);
-                      // TIR anual del flujo neto sin IVA. Todo en vivo
-                      // (renta/residual/depósito/plazo del mismo cotLive),
-                      // así no hay descuadre al cambiar el plazo.
-                      const tirArr = calcTIRArrendamiento({
-                        capital: capitalInvertido,
-                        rentaNeta: cotLive.rentaMensual.montoNeto,
-                        residual: cotLive.residual.monto,
-                        deposito: cotLive.pagoInicial.depositoGarantia,
-                        comisionContado: cotLive.pagoInicial.comisionAperturaContado,
-                        parcialidades: form.plazo,
-                      });
-                      const tirCred = calcTIRCredito(capitalInvertido, form.plazo);
+                      // TIR (arrend. vs crédito) viene memoizada arriba —
+                      // ya no se recalcula en cada render del panel.
                       const fmtPct = (v: number) => (Number.isFinite(v) ? `${v.toFixed(1)}%` : '—');
                       const arrGana = Number.isFinite(tirArr) && Number.isFinite(tirCred)
                         ? tirArr >= tirCred

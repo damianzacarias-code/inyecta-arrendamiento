@@ -721,8 +721,22 @@ export function tirAnualDeFlujos(flujos: number[]): number {
  * IVA — un proxy del rendimiento real, NO el CAT regulatorio (el CAT
  * incluye IVA y todos los cargos).
  */
+// Cota superior de plazos para las funciones de TIR. El negocio nunca
+// pasa de 60 meses; 600 (50 años) es un margen absurdo que NO afecta
+// ningún caso real, pero corta de inmediato un `parcialidades` sin
+// clamp (test, servidor o un input libre futuro) antes de construir una
+// tabla de amortización gigante que bloquearía el hilo (medido hasta
+// 67 s con 1e308). Devuelve NaN, igual que cualquier input inválido.
+const MAX_PARCIALIDADES_TIR = 600;
+
 export function calcTIRCredito(capital: number, parcialidades: number): number {
-  if (!Number.isFinite(capital) || !Number.isFinite(parcialidades) || capital <= 0 || parcialidades <= 0) {
+  if (
+    !Number.isFinite(capital) ||
+    !Number.isFinite(parcialidades) ||
+    capital <= 0 ||
+    parcialidades <= 0 ||
+    parcialidades > MAX_PARCIALIDADES_TIR
+  ) {
     return NaN;
   }
   const n = Math.floor(parcialidades);
@@ -763,7 +777,8 @@ export function calcTIRArrendamiento(p: {
   if (
     ![capital, rentaNeta, residual, deposito, comisionContado, parcialidades].every(Number.isFinite) ||
     capital <= 0 ||
-    parcialidades <= 0
+    parcialidades <= 0 ||
+    parcialidades > MAX_PARCIALIDADES_TIR
   ) {
     return NaN;
   }

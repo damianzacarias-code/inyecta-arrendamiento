@@ -779,6 +779,43 @@ describe('calcularCotizacion — ganancia', () => {
       });
       expect(conResidual).toBeGreaterThan(sinResidual);
     });
+
+    // ── Robustez / blindaje (bug "la TIR se traba", 09-06-2026) ──────
+    // El solver está acotado a 300 iter, pero calcTIRCredito/
+    // calcTIRArrendamiento construían una tabla de amortización de
+    // longitud `parcialidades` sin cota superior: medido ~600 ms con
+    // 1e6 y hasta 67 s con 1e308 (bloqueo del hilo de UI). Hoy la UI no
+    // lo alcanza (plazo es un <select> 12..60), pero un caller sin clamp
+    // (test/servidor/futuro input libre) sí. La cota corta de inmediato.
+    it('crédito: parcialidades absurdas → NaN sin colgar (cota superior)', () => {
+      const t0 = performance.now();
+      expect(Number.isNaN(calcTIRCredito(900_000, 1_000_000))).toBe(true);
+      expect(performance.now() - t0).toBeLessThan(50);
+    });
+
+    it('arrendamiento: parcialidades absurdas → NaN sin colgar (cota superior)', () => {
+      const t0 = performance.now();
+      expect(
+        Number.isNaN(
+          calcTIRArrendamiento({
+            capital: 900_000, rentaNeta: 30_000, residual: 180_000,
+            deposito: 30_000, comisionContado: 45_000, parcialidades: 1_000_000,
+          }),
+        ),
+      ).toBe(true);
+      expect(performance.now() - t0).toBeLessThan(50);
+    });
+
+    it('plazos de negocio (≤60) siguen dando TIR finita; la cota no los afecta', () => {
+      expect(
+        calcTIRArrendamiento({
+          capital: 900_000, rentaNeta: 30_000, residual: 180_000,
+          deposito: 30_000, comisionContado: 45_000, parcialidades: 36,
+        }),
+      ).toBeCloseTo(28.1698, 3);
+      expect(calcTIRCredito(900_000, 36)).toBeCloseTo(48.3630, 3);
+      expect(calcTIRCredito(900_000, 60)).toBeGreaterThan(0);
+    });
   });
 
   describe('PURO con valor residual MAYOR al depósito → opción aporta el exceso', () => {
