@@ -816,6 +816,47 @@ describe('calcularCotizacion — ganancia', () => {
       expect(calcTIRCredito(900_000, 36)).toBeCloseTo(48.3630, 3);
       expect(calcTIRCredito(900_000, 60)).toBeGreaterThan(0);
     });
+
+    // ── Bug "la TIR se queda en — (NaN)" (Vercel, 23-06-2026) ─────────
+    // Causa raíz: cuando el depósito devuelto en el mes n supera
+    // renta+residual de ese mes, el último flujo es NEGATIVO → la serie
+    // es NO convencional (−,+…+,−). El solver solo miraba los extremos
+    // del bracket [−0.99, 10]; con el último flujo negativo, vpn(−0.99)
+    // queda dominado por ese término y AMBOS extremos dan el mismo signo
+    // → "sin cambio de signo" → NaN → "—". El fix elige el sub-bracket
+    // con cambio de signo prefiriendo la raíz POSITIVA cuando la
+    // operación es rentable (vpn(0) > 0), que es la económicamente real.
+    it('arrendamiento: depósito > renta+residual del último mes NO da "—" (raíz positiva real)', () => {
+      // Params reales del reporte: capital 1.645M, renta 68k, residual
+      // 33k, depósito 181k (>101k) → último flujo negativo (no convenc.).
+      const tir = calcTIRArrendamiento({
+        capital: 1_645_310.34, rentaNeta: 68_048.02, residual: 32_906.21,
+        deposito: 181_034.48, comisionContado: 0, parcialidades: 48,
+      });
+      expect(Number.isNaN(tir)).toBe(false); // antes del fix: NaN ("—")
+      expect(tir).toBeCloseTo(56.66, 1); // raíz positiva, estable y única
+    });
+
+    it('flujos NO convencionales rentables: tirAnualDeFlujos toma la raíz positiva (antes NaN)', () => {
+      // −,+,+,− con ganancia neta > 0. Bracket [−0.99,10] daba NaN porque
+      // vpn(−0.99) lo dominaba el último flujo negativo.
+      const tir = tirAnualDeFlujos([-1000, 700, 700, -300]);
+      expect(Number.isNaN(tir)).toBe(false);
+      expect(tir).toBeGreaterThan(0);
+    });
+
+    it('no regresión: operación CONVENCIONAL poco rentable conserva su TIR negativa (no "—")', () => {
+      // −1000 y devuelve 800: TIR negativa pero FINITA. El fix no debe
+      // volverla "—" (la raíz negativa en i<0 sigue siendo válida aquí).
+      const tir = tirAnualDeFlujos([-1000, 200, 200, 200, 200]);
+      expect(Number.isNaN(tir)).toBe(false);
+      expect(tir).toBeLessThan(0);
+    });
+
+    it('break-even exacto (VPN nulo a tasa 0) → TIR 0%, no "—"', () => {
+      // Suma de flujos = 0 ⇒ la raíz es i=0. El guard f0===0 lo blinda.
+      expect(tirAnualDeFlujos([-100, 50, 50])).toBe(0);
+    });
   });
 
   describe('PURO con valor residual MAYOR al depósito → opción aporta el exceso', () => {

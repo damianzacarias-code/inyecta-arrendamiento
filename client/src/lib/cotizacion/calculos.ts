@@ -680,12 +680,38 @@ function tirMensual(flujos: number[]): number {
   const vpn = (i: number) =>
     flujos.reduce((acc, cf, t) => acc + cf / Math.pow(1 + i, t), 0);
 
-  let lo = LO;
-  let hi = HI;
-  let fLo = vpn(lo);
-  const fHi = vpn(hi);
-  if (!Number.isFinite(fLo) || !Number.isFinite(fHi) || fLo * fHi > 0) {
-    return NaN; // sin cambio de signo → no hay raíz en el rango
+  // Elegimos el sub-bracket con cambio de signo. Los flujos del
+  // arrendamiento pueden ser NO convencionales: el depósito en garantía
+  // entra en t0 y se DEVUELVE en el mes n; si ese depósito supera
+  // renta+residual del último mes, el flujo final es negativo y la serie
+  // tiene dos cambios de signo (−,+…+,−) → dos raíces. Preferimos la
+  // raíz POSITIVA (lado i>0) cuando la operación es rentable (vpn(0)>0):
+  // es la TIR económicamente real. La otra raíz, en i<0, es un artefacto
+  // del flotante del depósito. Mirar solo los extremos [LO,HI] devolvía
+  // NaN ("—") porque vpn(LO) quedaba dominado por ese flujo final
+  // negativo y ambos extremos compartían signo.
+  const fLoEnd = vpn(LO);
+  const f0 = vpn(0);
+  const fHiEnd = vpn(HI);
+  if (![fLoEnd, f0, fHiEnd].every(Number.isFinite)) return NaN;
+  // VPN nulo a tasa 0 ⇒ la raíz es exactamente i=0 (TIR 0%). Sin esto,
+  // la selección de sub-bracket de abajo no detecta el cambio de signo
+  // (ambos productos dan 0) y devolvería NaN para una TIR válida de 0%.
+  if (f0 === 0) return 0;
+
+  let lo: number;
+  let hi: number;
+  let fLo: number;
+  if (f0 * fHiEnd < 0) {
+    lo = 0; // raíz en i>0 (operación rentable) — preferida
+    hi = HI;
+    fLo = f0;
+  } else if (fLoEnd * f0 < 0) {
+    lo = LO; // raíz en i<0 (operación poco rentable)
+    hi = 0;
+    fLo = fLoEnd;
+  } else {
+    return NaN; // sin cambio de signo en [LO, HI] → no hay raíz
   }
   for (let k = 0; k < 300; k++) {
     const mid = (lo + hi) / 2;
