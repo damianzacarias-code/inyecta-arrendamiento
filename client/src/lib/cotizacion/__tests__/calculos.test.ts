@@ -905,6 +905,23 @@ describe('calcularCotizacion — ganancia', () => {
     });
   });
 
+  describe('Comparativa de plazos — invariantes (PDF comparativo 24/36/48)', () => {
+    // Fija las 3 afirmaciones de la nota del PDF comparativo: a mayor
+    // plazo la renta baja, el total sube y el pago inicial no cambia.
+    const mk = (plazo: number) =>
+      calcularCotizacion({ ...baseInputs, producto: 'FINANCIERO', plazo });
+
+    it('a mayor plazo: la renta mensual BAJA', () => {
+      expect(mk(48).rentaMensual.total).toBeLessThan(mk(24).rentaMensual.total);
+    });
+    it('a mayor plazo: el Total a Pagar SUBE (más meses de interés)', () => {
+      expect(mk(48).totalPagar).toBeGreaterThan(mk(24).totalPagar);
+    });
+    it('el Pago inicial NO cambia con el plazo', () => {
+      expect(mk(48).pagoInicial.total).toBeCloseTo(mk(24).pagoInicial.total, 2);
+    });
+  });
+
   describe('PURO con valor residual MAYOR al depósito → opción aporta el exceso', () => {
     // Depósito 10%, residual 20% (absoluto vía dual ≥2 no; usamos %).
     // El FV del PMT = valorResidualResuelto = residual (20%), y el

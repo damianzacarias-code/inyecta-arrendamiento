@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { PDFDownloadLink } from '@react-pdf/renderer';
 import api from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
-import { Calculator, Save, RotateCcw, ChevronDown, ChevronUp, FileText, Table, Plus, X, Sparkles } from 'lucide-react';
+import { Calculator, Save, RotateCcw, ChevronDown, ChevronUp, FileText, Table, Plus, X, Sparkles, Columns3 } from 'lucide-react';
 import { calcularCotizacion, calcGananciaCredito, calcTIRCredito, calcTIRArrendamiento } from '@/lib/cotizacion/calculos';
 import { valorBienTecleadoASinIVA, valorBienSinIVAATecleado } from '@/lib/cotizacion/valorBienIVA';
 import {
@@ -29,6 +29,7 @@ import {
 } from '@/lib/cotizacion/amortizacion';
 import { CotizacionPDF } from '@/lib/pdf/CotizacionPDF';
 import { AmortizacionPDF } from '@/lib/pdf/AmortizacionPDF';
+import { ComparativaPDF } from '@/lib/pdf/ComparativaPDF';
 import { getCatalog } from '@/lib/catalog';
 
 /** Forma del payload de error del backend cuando la validación Zod
@@ -218,6 +219,8 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
   const [showAmortization, setShowAmortization] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [error, setError] = useState('');
+  // Plazos de la cotización comparativa (3 columnas, el operador los elige).
+  const [comparativaPlazos, setComparativaPlazos] = useState<[number, number, number]>([24, 36, 48]);
 
   // Valor del bien: input de TEXTO con formato en vivo (1,000,000.00).
   // `form.valorBien` sigue siendo el número fuente de verdad; este string
@@ -603,25 +606,19 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
   // ── Datos para los PDFs (cliente, sin pasar por servidor) ─────────
   // Usamos el motor de cálculo verificado al centavo y derivamos los
   // campos descriptivos del formulario actual.
-  const pdfData = useMemo(() => {
-    if (!result) return null;
-
-    const fechaPrimerPagoDate = (() => {
-      const [y, m, d] = form.fechaPrimerPago.split('-').map(Number);
-      return new Date(y, (m || 1) - 1, d || 1, 12, 0, 0);
-    })();
-
+  // Input del motor SIN plazo — fuente única que comparten el PDF
+  // individual (pdfData) y la comparativa (comparativaData), para que la
+  // columna de N meses coincida EXACTO con la cotización individual a N.
+  const cotizacionInputBase = useMemo(() => {
     const valorBienConIVA = form.valorBien * 1.16;
     const nombreBien =
       form.bienDescripcion ||
       [form.bienMarca, form.bienModelo, form.bienAnio].filter(Boolean).join(' ') ||
       'Bien arrendado';
-
-    const cotData = calcularCotizacion({
+    return {
       valorBienConIVA,
       tasaIVA: 0.16,
       producto: form.producto,
-      plazo: form.plazo,
       tasaAnual: form.tasaAnual,
       tasaComisionApertura: form.comisionAperturaPct,
       comisionAperturaEsContado: !form.comisionAperturaFinanciada,
@@ -642,7 +639,25 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
       seguroEstado: form.seguroEstado,
       nombreCliente: form.nombreCliente || 'Sin nombre',
       fecha: new Date(),
-    });
+    };
+  }, [
+    form.valorBien, form.producto, form.tasaAnual, form.comisionAperturaPct,
+    form.comisionAperturaFinanciada, form.depositoGarantiaPct, form.valorResidualPct,
+    form.valorResidualEsDeposito, form.gpsInstalacion, form.gpsFinanciado,
+    form.seguroAnual, form.seguroPendiente, form.seguroFinanciado, form.enganchePct,
+    form.bienDescripcion, form.bienMarca, form.bienModelo, form.bienAnio,
+    form.bienNuevo, form.seguroEstado, form.nombreCliente,
+  ]);
+
+  const pdfData = useMemo(() => {
+    if (!result) return null;
+
+    const fechaPrimerPagoDate = (() => {
+      const [y, m, d] = form.fechaPrimerPago.split('-').map(Number);
+      return new Date(y, (m || 1) - 1, d || 1, 12, 0, 0);
+    })();
+
+    const cotData = calcularCotizacion({ ...cotizacionInputBase, plazo: form.plazo });
 
     const filasPuro =
       form.producto === 'PURO'
@@ -661,32 +676,19 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
         : undefined;
 
     return { cotData, filasPuro, filasFinanciero };
-  }, [
-    result,
-    form.valorBien,
-    form.producto,
-    form.plazo,
-    form.tasaAnual,
-    form.comisionAperturaPct,
-    form.comisionAperturaFinanciada,
-    form.depositoGarantiaPct,
-    form.valorResidualPct,
-    form.valorResidualEsDeposito,
-    form.gpsInstalacion,
-    form.gpsFinanciado,
-    form.seguroAnual,
-    form.seguroPendiente,
-    form.seguroFinanciado,
-    form.enganchePct,
-    form.bienDescripcion,
-    form.bienMarca,
-    form.bienModelo,
-    form.bienAnio,
-    form.bienNuevo,
-    form.seguroEstado,
-    form.fechaPrimerPago,
-    form.nombreCliente,
-  ]);
+  }, [result, cotizacionInputBase, form.plazo, form.producto, form.tasaAnual, form.fechaPrimerPago]);
+
+  // ── Comparativa de plazos (PDF lado a lado) ──────────────────────
+  // Mismo bien/producto/tasa, 3 plazos que elige el operador (default
+  // 24/36/48). Reusa cotizacionInputBase → cada columna == la cotización
+  // individual a ese plazo. No pasa por el servidor.
+  const comparativaData = useMemo(() => {
+    if (form.valorBien <= 0) return null;
+    return comparativaPlazos.map((plazo) => ({
+      plazo,
+      cot: calcularCotizacion({ ...cotizacionInputBase, plazo }),
+    }));
+  }, [cotizacionInputBase, comparativaPlazos, form.valorBien]);
 
   // ── Simulación de pagos adicionales (CLAUDE.md §4.10) ────────────
   // Aplica los pagos en orden ascendente de período sobre la tabla
@@ -1599,6 +1601,53 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                   </>
                 )}
               </PDFDownloadLink>
+
+              {comparativaData && (
+                <div className="border-t border-gray-100 pt-3 mt-1">
+                  <p className="text-xs font-medium text-gray-600 mb-2">
+                    Comparativa de plazos (mismo bien, 3 columnas)
+                  </p>
+                  <div className="flex gap-2 mb-2">
+                    {comparativaPlazos.map((p, i) => (
+                      <select
+                        key={i}
+                        value={p}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          setComparativaPlazos((prev) => {
+                            const next = [...prev] as [number, number, number];
+                            next[i] = v;
+                            return next;
+                          });
+                        }}
+                        className="flex-1 px-2 py-1.5 border border-gray-300 rounded-lg text-xs focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none"
+                      >
+                        {[12, 18, 24, 30, 36, 42, 48, 54, 60].map((m) => (
+                          <option key={m} value={m}>{m} meses</option>
+                        ))}
+                      </select>
+                    ))}
+                  </div>
+                  <PDFDownloadLink
+                    document={
+                      <ComparativaPDF
+                        cotizaciones={comparativaData}
+                        tasaAnual={form.tasaAnual}
+                        enganchePct={form.enganchePct}
+                      />
+                    }
+                    fileName={`comparativa-${fileSlug}-${comparativaPlazos.join('-')}m.pdf`}
+                    className="w-full bg-gray-700 hover:bg-gray-800 text-white py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+                  >
+                    {({ loading: pdfLoading }) => (
+                      <>
+                        <Columns3 size={15} />
+                        {pdfLoading ? 'Generando...' : 'Descargar Comparativa'}
+                      </>
+                    )}
+                  </PDFDownloadLink>
+                </div>
+              )}
 
               <p className="text-[10px] text-gray-400 leading-relaxed">
                 Tip: usa "Guardar Cotización" si quieres persistirla en el sistema y volver
