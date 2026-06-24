@@ -1429,7 +1429,7 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
             {cotLive ? (
               <div className="space-y-3">
                 <ResultRow label="Valor del Bien + IVA" value={formatCurrency(cotLive.valorBienConIVA)} />
-                <ResultRow label="Enganche" value={formatCurrency(cotLive.pagoInicial.engancheContado)} />
+                <ResultRow label="Enganche (con IVA)" value={formatCurrency(cotLive.pagoInicial.engancheContado + cotLive.pagoInicial.ivaEnganche)} />
                 <ResultRow label="Deposito Garantia" value={formatCurrency(cotLive.pagoInicial.depositoGarantia)} />
                 <ResultRow label="Comision Apertura" value={formatCurrency(cotLive.pagoInicial.comisionAperturaContado + cotLive.monto.comisionAperturaFinanciada)} />
                 <ResultRow label="Monto a Financiar" value={formatCurrency(cotLive.montoFinanciadoReal)} highlight />

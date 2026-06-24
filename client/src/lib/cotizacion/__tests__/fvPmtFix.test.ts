@@ -65,8 +65,11 @@ describe('fix fvPMT — caso oficial verificado contra Excel', () => {
     expect(r.pagoInicial.depositoGarantia).toBeCloseTo(45_182.00, 2);
   });
 
-  it('pagoInicial.total = 90,182.00', () => {
-    expect(r.pagoInicial.total).toBeCloseTo(90_182.00, 2);
+  it('pagoInicial.total = 97,382.00 (incluye IVA del enganche $7,200 — §4.16)', () => {
+    // 90,182.00 (enganche 45,000 sin IVA + depósito 45,182) + 7,200 de
+    // IVA del enganche (45,000 × 16%, regla Damián 23-06-2026 §4.16).
+    expect(r.pagoInicial.ivaEnganche).toBeCloseTo(7_200, 2);
+    expect(r.pagoInicial.total).toBeCloseTo(97_382.00, 2);
   });
 
   it('rentaMensual.montoNeto = 20,587.35  (antes daba 21,015.78 con bug)', () => {

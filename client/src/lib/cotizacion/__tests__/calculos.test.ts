@@ -399,6 +399,52 @@ describe('calcularCotizacion PURO — enganche > 0 (§4.2 B17)', () => {
   });
 });
 
+describe('IVA del enganche en el pago inicial (Damián 23-06-2026)', () => {
+  // Regla nueva (diverge del Excel §4.2 actual): el cliente paga el IVA
+  // del enganche de contado porque va DIRECTO a la compra del bien. El
+  // enganche que reduce baseBien sigue SIN IVA (no cambia rentas,
+  // comisión, depósito ni ganancia); solo se SUMA su IVA (16%) al pago
+  // inicial / desembolso / Total a Pagar. Aplica a PURO y FINANCIERO.
+  // Es pass-through al SAT, no es utilidad de Inyecta.
+
+  it('enganche = 0 → ivaEnganche = 0 (sin cambio)', () => {
+    const cot = calcularCotizacion({ ...baseInputs, producto: 'PURO' });
+    expect(cot.pagoInicial.ivaEnganche).toBe(0);
+  });
+
+  it('PURO enganche $200,000 → ivaEnganche $32,000 entra al pago inicial', () => {
+    const cot = calcularCotizacion({
+      ...baseInputs, producto: 'PURO', engancheMonto: 200_000,
+    });
+    expect(cot.pagoInicial.ivaEnganche).toBeCloseTo(32_000, 2);
+    // baseBien NO cambia: enganche sigue SIN IVA, depósito 260,215.17.
+    expect(cot.pagoInicial.engancheContado).toBe(200_000);
+    expect(cot.pagoInicial.depositoGarantia).toBeCloseTo(260_215.17, 2);
+    // El pago inicial y el desembolso AHORA incluyen el IVA del enganche.
+    expect(cot.pagoInicial.total).toBeCloseTo(492_215.17, 2); // 460,215.17 + 32,000
+    expect(cot.desembolsoInicial).toBeCloseTo(492_215.17, 2);
+  });
+
+  it('FINANCIERO enganche 10% → ivaEnganche = enganche × 16%', () => {
+    const enganche = 181_034.48; // 10% de valorSinIVA 1,810,344.83
+    const cot = calcularCotizacion({
+      ...baseInputs, producto: 'FINANCIERO', engancheMonto: enganche,
+    });
+    expect(cot.pagoInicial.ivaEnganche).toBeCloseTo(enganche * 0.16, 2);
+  });
+
+  it('invariante: pago inicial total = suma de partes INCLUYENDO ivaEnganche', () => {
+    const { pagoInicial: p } = calcularCotizacion({
+      ...baseInputs, producto: 'PURO', engancheMonto: 200_000,
+    });
+    expect(p.total).toBeCloseTo(
+      p.engancheContado + p.ivaEnganche + p.comisionAperturaContado +
+        p.aperturaSeguros + p.depositoGarantia + p.gpsContado,
+      2,
+    );
+  });
+});
+
 describe('calcularCotizacion PURO — valorResidual como MONTO ABSOLUTO (§4.15)', () => {
   // CLAUDE.md §4.15: input < 2 ⇒ porcentaje, input ≥ 2 ⇒ monto absoluto.
   // $100,000 está muy por encima de 2 → se interpreta como pesos.

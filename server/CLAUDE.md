@@ -360,6 +360,36 @@ function resolverDual(input: Decimal, base: Decimal): Decimal {
 
 Replica del Excel: `IF(H4<2, E6*H4, H4)`.
 
+### 4.16 IVA del enganche en el pago inicial (Damián 23-06-2026)
+
+> ⚠️ **DIVERGE del Excel oficial.** El Excel verificado en §4.2 mete el
+> enganche al pago inicial SIN IVA. Damián decidió el 23-06-2026 que el
+> cliente debe pagar el IVA del enganche, porque ese IVA va **directo a
+> la compra del bien**. A partir de esta fecha el **sistema es la fuente
+> de verdad** de esta regla (el Excel deberá actualizarse para coincidir).
+
+```
+ivaEnganche      = enganche × 0.16          ← enganche SIN IVA (E17)
+pago inicial / desembolso / Total a Pagar  +=  ivaEnganche
+```
+
+Reglas:
+- El **enganche que reduce baseBien (B17) sigue SIN IVA** — NO cambia
+  comisión, depósito, PV del PMT, rentas ni ganancia.
+- Solo se **suma** `ivaEnganche` al pago inicial (E.. de contado) y por
+  ende al desembolso inicial y al Total a Pagar.
+- Es **pass-through al SAT** (IVA del bien), NO es utilidad de Inyecta:
+  no entra en la descomposición de ganancia.
+- Aplica a **PURO y FINANCIERO** por igual.
+- Reconciliación: `ivaEnganche` + IVA de las rentas sobre la parte
+  financiada = IVA total del bien (16% × valorSinIVA).
+- **Display:** una sola línea "Pago anticipado (con IVA)" =
+  `enganche + ivaEnganche` (sin desglosar el IVA por separado).
+
+Implementado al centavo en `calculos.ts` (cliente) y `leaseCalculator.ts`
+(servidor) con tests de paridad. No requiere migración de BD: el campo
+persistido `totalPagar` ya refleja el IVA; `ivaEnganche` se deriva.
+
 ---
 
 ## 5. ESTRUCTURA DE ARCHIVOS DEL PROYECTO

@@ -84,6 +84,9 @@ export interface AmortizationRow {
 export interface LeaseResult {
   valorBienIVA: number;
   enganche: number;
+  /** IVA (16%) del enganche — se paga de contado, va a la compra del
+   *  bien (Damián 23-06-2026). Incluido en desembolsoInicial/totalPagar. */
+  ivaEnganche: number;
   depositoGarantia: number;
   comisionApertura: number;
   valorResidual: number;
@@ -253,9 +256,18 @@ export function calcularArrendamiento(params: LeaseParams): LeaseResult {
   const rentaMensualIVA = rentaNeta.plus(ivaRenta);
   const totalRentas     = rentaMensualIVA.times(plazo);
 
+  // ── IVA del enganche (Damián 23-06-2026) ─────────────────────────
+  // El cliente paga el IVA (16%) del enganche de contado: ese IVA va
+  // DIRECTO a la compra del bien. El enganche que reduce baseBien sigue
+  // SIN IVA (no cambia rentas/comisión/depósito/ganancia); solo se SUMA
+  // su IVA al pago inicial. Pass-through al SAT, no es utilidad.
+  // NOTA: regla nueva que DIVERGE del Excel §4.2 (espejo del cliente).
+  const ivaEnganche = enganche.times(IVA_RATE);
+
   // ── Desembolso inicial ────────────────────────────────────────────
   // El seguro contado entra como anualidad (no como total prorrateado).
   const desembolsoInicial = enganche
+    .plus(ivaEnganche)
     .plus(depositoGarantia)
     .plus(comisionContado)
     .plus(gpsFinanciado ? 0 : gps)
@@ -295,6 +307,7 @@ export function calcularArrendamiento(params: LeaseParams): LeaseResult {
   return {
     valorBienIVA:     r2(valorConIVA),
     enganche:         r2(enganche),
+    ivaEnganche:      r2(ivaEnganche),
     depositoGarantia: r2(depositoGarantia),
     comisionApertura: r2(comisionApertura),
     valorResidual:    r2(valorResidual), // §4.12: separado del depósito

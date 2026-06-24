@@ -290,7 +290,7 @@ export function CotizacionPDF({
         {/* ── Sección 2: Pago inicial ──────────────────────── */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>Pago inicial</Text>
-          <TableLine label="Pago anticipado"                amount={data.pagoInicial.engancheContado}         alt />
+          <TableLine label="Pago anticipado (con IVA)"     amount={data.pagoInicial.engancheContado + data.pagoInicial.ivaEnganche} alt />
           <TableLine label="Comisión por apertura contado"  amount={data.pagoInicial.comisionAperturaContado} alt={false} />
           <TableLine label="Apertura de seguro"             amount={data.pagoInicial.aperturaSeguros}         alt />
           <TableLine label="Depósito en garantía"           amount={data.pagoInicial.depositoGarantia}        alt={false} />

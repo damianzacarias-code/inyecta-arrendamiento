@@ -208,6 +208,9 @@ export interface ResultadoCotizacion {
   // ── Sección 2: Pago inicial ──────────────────────────────────────
   pagoInicial: {
     engancheContado: number;
+    /** IVA (16%) del enganche — se paga de contado, va a la compra del
+     *  bien (Damián 23-06-2026). Incluido en `total`. */
+    ivaEnganche: number;
     comisionAperturaContado: number;
     aperturaSeguros: number;
     depositoGarantia: number;  // resolverDual(porcentajeDeposito, baseBien) — §4.12
@@ -459,8 +462,17 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
     residualPorcentaje = 0.02;
   }
 
+  // ── IVA del enganche (Damián 23-06-2026) ─────────────────────────
+  // El cliente paga el IVA (16%) del enganche de contado: ese IVA va
+  // DIRECTO a la compra del bien. El enganche que reduce baseBien sigue
+  // SIN IVA (no cambia rentas/comisión/depósito/ganancia); solo se SUMA
+  // su IVA al pago inicial. Es pass-through al SAT, no es utilidad.
+  // NOTA: regla nueva que DIVERGE del Excel §4.2 (ver server/CLAUDE.md).
+  const ivaEnganche = engancheContado.times(IVA);
+
   // ── Pago inicial total ──────────────────────────────────────────
   const pagoInicialTotal = engancheContado
+    .plus(ivaEnganche)
     .plus(comisionContado)
     .plus(seguroContado)
     .plus(depositoGarantia)
@@ -535,6 +547,7 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
 
     pagoInicial: {
       engancheContado:         r2(engancheContado),
+      ivaEnganche:             r2(ivaEnganche),
       comisionAperturaContado: r2(comisionContado),
       aperturaSeguros:         r2(seguroContado),
       depositoGarantia:        r2(depositoGarantia),

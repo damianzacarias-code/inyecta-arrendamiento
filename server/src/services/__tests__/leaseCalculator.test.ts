@@ -369,3 +369,29 @@ describe('calcularMoratorios', () => {
     expect(b.moratorio).toBeCloseTo(a.moratorio * 2, 2);
   });
 });
+
+describe('IVA del enganche en el desembolso (Damián 23-06-2026, paridad cliente)', () => {
+  // El cliente paga el IVA (16%) del enganche de contado; va a la compra
+  // del bien. El enganche que reduce baseBien sigue SIN IVA; solo se SUMA
+  // su IVA al desembolso / Total a Pagar. Diverge del Excel §4.2.
+  it('enganche = 0 → ivaEnganche = 0 (sin cambio)', () => {
+    const r = calcularArrendamiento({ ...baseParams, enganchePct: 0 });
+    expect(r.ivaEnganche).toBe(0);
+  });
+
+  it('enganche 10% → ivaEnganche = enganche × 16% y entra al desembolso', () => {
+    const r = calcularArrendamiento({ ...baseParams, enganchePct: 0.10 });
+    expect(r.enganche).toBeCloseTo(181_034.48, 2); // sin IVA, no se mueve
+    expect(r.ivaEnganche).toBeCloseTo(181_034.48 * 0.16, 2); // 28,965.52
+    // desembolso y totalPagar incluyen el IVA del enganche.
+    const sinIva = calcularArrendamiento({ ...baseParams, enganchePct: 0.10 });
+    expect(r.desembolsoInicial - r.ivaEnganche).toBeCloseTo(
+      sinIva.enganche + sinIva.depositoGarantia, 2,
+    ); // el resto del desembolso (depósito) no cambió
+  });
+
+  it('totalPagar = totalRentas + desembolso (con IVA del enganche dentro)', () => {
+    const r = calcularArrendamiento({ ...baseParams, enganchePct: 0.10 });
+    expect(r.totalPagar).toBeCloseTo(r.totalRentas + r.desembolsoInicial, 2);
+  });
+});
