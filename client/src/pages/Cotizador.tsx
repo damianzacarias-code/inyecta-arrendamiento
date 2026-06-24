@@ -5,6 +5,7 @@ import api from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import { Calculator, Save, RotateCcw, ChevronDown, ChevronUp, FileText, Table, Plus, X, Sparkles } from 'lucide-react';
 import { calcularCotizacion, calcGananciaCredito, calcTIRCredito, calcTIRArrendamiento } from '@/lib/cotizacion/calculos';
+import { valorBienTecleadoASinIVA, valorBienSinIVAATecleado } from '@/lib/cotizacion/valorBienIVA';
 import {
   distribuirAporte,
   lemaOpcionBajo,
@@ -133,7 +134,12 @@ function formatMiles(clean: string): string {
 const defaultForm = {
   nombreCliente: '',
   producto: 'PURO' as 'PURO' | 'FINANCIERO',
+  // `valorBien` es SIEMPRE el valor SIN IVA (verdad interna que consume el
+  // motor). `valorBienIncluyeIVA` solo dice cómo INTERPRETAR/MOSTRAR el
+  // número que teclea el operador (según se lo cotizó el proveedor). El
+  // toggle no cambia ningún cálculo aguas abajo. Default: con IVA.
   valorBien: 500000,
+  valorBienIncluyeIVA: true,
   plazo: 36,
   tasaAnual: 0.36,
   // Nivel default: B (Medio) — política comercial estándar (Damián 27-04-2026).
@@ -218,7 +224,14 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
   // es solo la presentación. Ref de foco para no pisar lo que el usuario
   // escribe cuando el número cambia desde afuera (ej. Reset).
   const [valorBienInput, setValorBienInput] = useState(() =>
-    formatMiles(String(defaultForm.valorBien)),
+    formatMiles(
+      String(
+        valorBienSinIVAATecleado(
+          defaultForm.valorBien,
+          defaultForm.valorBienIncluyeIVA,
+        ),
+      ),
+    ),
   );
   const valorBienFocusedRef = useRef(false);
 
@@ -307,7 +320,14 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
 
     const formatted = formatMiles(clean);
     setValorBienInput(formatted);
-    updateField('valorBien', clean === '' ? 0 : Number(clean));
+    // Lo tecleado se interpreta según el modo (con/sin IVA) y se guarda
+    // SIEMPRE como valor sin IVA — la verdad interna del motor.
+    updateField(
+      'valorBien',
+      clean === ''
+        ? 0
+        : valorBienTecleadoASinIVA(Number(clean), form.valorBienIncluyeIVA),
+    );
 
     // Restaurar cursor: avanzar hasta haber pasado `digitosIzq` dígitos.
     requestAnimationFrame(() => {
@@ -324,7 +344,8 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
   // onBlur: normaliza a 2 decimales con comas (1,000,000.00).
   const handleValorBienBlur = () => {
     valorBienFocusedRef.current = false;
-    const num = form.valorBien;
+    // Muestra el valor en el modo activo (con IVA = sin IVA × 1.16).
+    const num = valorBienSinIVAATecleado(form.valorBien, form.valorBienIncluyeIVA);
     setValorBienInput(
       !num || num <= 0
         ? ''
@@ -335,20 +356,53 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
     );
   };
 
+  // Cambia el modo IVA del campo SIN mover el número que el operador ve
+  // (typed-preserving): el número se queda, solo cambia su interpretación
+  // y `form.valorBien` (sin IVA) se recalcula. Ej.: si muestras 2,100,000
+  // en "Con IVA" y pasas a "Sin IVA", sigues viendo 2,100,000 pero ahora
+  // el bien vale 2,100,000 sin IVA (era 1,810,344.83).
+  const handleModoIVAChange = (incluyeIVA: boolean) => {
+    if (incluyeIVA === form.valorBienIncluyeIVA) return;
+    const mostrado = valorBienSinIVAATecleado(
+      form.valorBien,
+      form.valorBienIncluyeIVA,
+    );
+    const nuevoSinIVA = valorBienTecleadoASinIVA(mostrado, incluyeIVA);
+    setForm((prev) => ({
+      ...prev,
+      valorBienIncluyeIVA: incluyeIVA,
+      valorBien: nuevoSinIVA,
+    }));
+    if (!valorBienFocusedRef.current) {
+      setValorBienInput(
+        mostrado > 0
+          ? mostrado.toLocaleString('es-MX', {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })
+          : '',
+      );
+    }
+  };
+
   // Resincroniza el display cuando `form.valorBien` cambia desde afuera
   // (ej. Reset) y el campo NO está enfocado — para no pisar lo que el
   // usuario está escribiendo.
   useEffect(() => {
     if (valorBienFocusedRef.current) return;
+    const display = valorBienSinIVAATecleado(
+      form.valorBien,
+      form.valorBienIncluyeIVA,
+    );
     setValorBienInput(
-      form.valorBien > 0
-        ? form.valorBien.toLocaleString('es-MX', {
+      display > 0
+        ? display.toLocaleString('es-MX', {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
           })
         : '',
     );
-  }, [form.valorBien]);
+  }, [form.valorBien, form.valorBienIncluyeIVA]);
 
   // Capital NETO que invierte Inyecta en el arrendamiento (Damián
   // 26-05-2026): valor del bien sin IVA − aportes del cliente al inicio
@@ -913,7 +967,38 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-600 mb-1">Valor del Bien (sin IVA)</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-sm font-medium text-gray-600">Valor del Bien</label>
+                  {/* Modo IVA: el operador captura el valor según se lo
+                      cotizó el proveedor. No cambia ningún cálculo: solo
+                      cómo se interpreta/muestra el número. */}
+                  <div className="inline-flex rounded-md border border-gray-200 overflow-hidden text-xs">
+                    <button
+                      type="button"
+                      onClick={() => handleModoIVAChange(false)}
+                      className={
+                        'px-2.5 py-1 font-medium transition-colors ' +
+                        (!form.valorBienIncluyeIVA
+                          ? 'bg-inyecta-600 text-white'
+                          : 'bg-white text-gray-500 hover:bg-gray-50')
+                      }
+                    >
+                      Sin IVA
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleModoIVAChange(true)}
+                      className={
+                        'px-2.5 py-1 font-medium transition-colors ' +
+                        (form.valorBienIncluyeIVA
+                          ? 'bg-inyecta-600 text-white'
+                          : 'bg-white text-gray-500 hover:bg-gray-50')
+                      }
+                    >
+                      Con IVA
+                    </button>
+                  </div>
+                </div>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
                   <input
@@ -927,7 +1012,11 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                     className="w-full pl-7 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-inyecta-500 focus:border-inyecta-500 outline-none"
                   />
                 </div>
-                <p className="text-xs text-gray-400 mt-1">Min: $150,000 - Max: $3,000,000</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {form.valorBienIncluyeIVA ? 'Valor con IVA' : 'Valor sin IVA'} · Min: $
+                  {valorBienSinIVAATecleado(150000, form.valorBienIncluyeIVA).toLocaleString('es-MX')} - Max: $
+                  {valorBienSinIVAATecleado(3000000, form.valorBienIncluyeIVA).toLocaleString('es-MX')}
+                </p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-600 mb-1">Plazo (meses)</label>
