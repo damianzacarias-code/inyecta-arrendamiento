@@ -402,7 +402,7 @@ export class ClaudeProvider implements IExtractProvider {
       throw new Error('ClaudeProvider requiere ANTHROPIC_API_KEY');
     }
     this.client = new Anthropic({ apiKey: opts.apiKey });
-    this.model = opts.model || 'claude-fable-5';
+    this.model = opts.model || 'claude-opus-4-8';
   }
 
   async extract(file: Buffer, mimeType: string, tipo: TipoExtract): Promise<ExtractResult> {

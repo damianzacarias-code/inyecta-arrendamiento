@@ -97,10 +97,12 @@ const EnvSchema = z
     // EXTRACT_PROVIDER=MOCK devuelve datos hardcoded para tests/demos.
     EXTRACT_PROVIDER: extractProviderEnum.default('MOCK'),
     ANTHROPIC_API_KEY: z.string().optional(),
-    // Modelo a usar (override opcional). Default: claude-fable-5 —
-    // visión estado-del-arte para INEs giradas/borrosas y tablas
-    // (decisión Damián 10-06-2026; antes claude-sonnet-4-5-20250929).
-    ANTHROPIC_MODEL: z.string().default('claude-fable-5'),
+    // Modelo a usar (override opcional). Default: claude-opus-4-8 —
+    // Opus 4.8 tiene visión de alta resolución (INEs giradas/borrosas y
+    // tablas) y SÍ está disponible. Antes claude-fable-5, que requiere
+    // acceso especial y devolvía 404 "Please use Opus 4.8" (Damián
+    // 24-06-2026; el 10-06 era claude-sonnet-4-5-20250929).
+    ANTHROPIC_MODEL: z.string().default('claude-opus-4-8'),
 
     // ── Círculo de Crédito ────────────────────────────────
     // Clave de Otorgante asignada por Buró de Crédito / Círculo
