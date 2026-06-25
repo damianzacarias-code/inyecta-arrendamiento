@@ -291,7 +291,7 @@ export function CotizacionPDF({
         <View style={s.section}>
           <Text style={s.sectionTitle}>Pago inicial</Text>
           <TableLine label="Pago anticipado (con IVA)"     amount={data.pagoInicial.engancheContado + data.pagoInicial.ivaEnganche} alt />
-          <TableLine label="Comisión por apertura contado"  amount={data.pagoInicial.comisionAperturaContado} alt={false} />
+          <TableLine label="Comisión por apertura contado (con IVA)"  amount={data.pagoInicial.comisionAperturaContado + data.pagoInicial.ivaComisionContado} alt={false} />
           <TableLine label="Apertura de seguro"             amount={data.pagoInicial.aperturaSeguros}         alt />
           <TableLine label="Depósito en garantía"           amount={data.pagoInicial.depositoGarantia}        alt={false} />
           <TableLine label="Instalación del GPS"            amount={data.pagoInicial.gpsContado}              alt />

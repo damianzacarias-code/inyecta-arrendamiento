@@ -212,6 +212,9 @@ export interface ResultadoCotizacion {
      *  bien (Damián 23-06-2026). Incluido en `total`. */
     ivaEnganche: number;
     comisionAperturaContado: number;
+    /** IVA (16%) de la comisión cuando es de CONTADO — se paga al inicio
+     *  (Damián 24-06-2026). 0 si la comisión es financiada. Incluido en `total`. */
+    ivaComisionContado: number;
     aperturaSeguros: number;
     depositoGarantia: number;  // resolverDual(porcentajeDeposito, baseBien) — §4.12
     gpsContado: number;
@@ -262,7 +265,11 @@ export interface ResultadoCotizacion {
   totalRentas: number;
   /** Pago inicial + renta anticipada (= server desembolsoInicial). */
   desembolsoInicial: number;
-  /** totalRentas + desembolsoInicial. */
+  /** Costo de financiar el IVA de la comisión cuando es FINANCIADA:
+   *  interés del IVA adelantado (capitalizado al plazo) + IVA de ese
+   *  interés (Damián 24-06-2026). 0 si la comisión es de contado. */
+  financiamientoIvaComision: number;
+  /** totalRentas + desembolsoInicial + financiamientoIvaComision. */
   totalPagar: number;
 
   // ── Campos técnicos para la tabla de amortización ────────────────
@@ -470,10 +477,30 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
   // NOTA: regla nueva que DIVERGE del Excel §4.2 (ver server/CLAUDE.md).
   const ivaEnganche = engancheContado.times(IVA);
 
+  // ── IVA de la comisión de apertura (Damián 24-06-2026) ───────────
+  // CxA de CONTADO: el cliente paga el IVA de la comisión de contado
+  //   (igual que el enganche) → se SUMA al pago inicial.
+  // CxA FINANCIADA: Inyecta entera el IVA de la comisión al SAT el mes
+  //   siguiente —antes de cobrarlo— así que lo ADELANTA. Le cobra al
+  //   cliente el COSTO de fondear ese adelanto: el interés de capitalizar
+  //   ese IVA al plazo + el IVA de ese interés (Art. 18-A). El capital del
+  //   IVA se sigue recaudando dentro del IVA de las rentas (no se duplica);
+  //   aquí SOLO se agrega el costo de financiarlo. Modelo del abogado;
+  //   regla nueva que DIVERGE del Excel (ver server/CLAUDE.md §4.17).
+  const ivaComisionMonto   = comisionMonto.times(IVA);
+  const ivaComisionContado = inp.comisionAperturaEsContado ? ivaComisionMonto : new Decimal(0);
+  const ivaComisionFinanc  = inp.comisionAperturaEsContado ? new Decimal(0) : ivaComisionMonto;
+  const pmtIvaComision     = ivaComisionFinanc.isZero()
+    ? new Decimal(0)
+    : new Decimal(calcPMT(inp.tasaAnual, inp.plazo, ivaComisionFinanc.toNumber(), 0));
+  const interesIvaComision = pmtIvaComision.times(plazoMeses).minus(ivaComisionFinanc);
+  const financiamientoIvaComision = interesIvaComision.times(IVA.plus(1)); // interés + IVA del interés
+
   // ── Pago inicial total ──────────────────────────────────────────
   const pagoInicialTotal = engancheContado
     .plus(ivaEnganche)
     .plus(comisionContado)
+    .plus(ivaComisionContado)
     .plus(seguroContado)
     .plus(depositoGarantia)
     .plus(gpsContado);
@@ -489,7 +516,9 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
   // desembolsoInicial = ... + rentaInicial). totalPagar suma ambos.
   const totalRentasDec       = rentaNetaFull.times(IVA.plus(1)).times(plazoMeses);
   const desembolsoInicialDec = pagoInicialTotal.plus(inp.rentaInicial || 0);
-  const totalPagarDec        = totalRentasDec.plus(desembolsoInicialDec);
+  // El financiamiento del IVA de comisión (financiada) se cobra a lo largo
+  // del plazo → entra al Total a Pagar.
+  const totalPagarDec        = totalRentasDec.plus(desembolsoInicialDec).plus(financiamientoIvaComision);
 
   // ── Ganancia (visible en calculadora, NO en PDF) ─────────────────
   // Ver doc de ResultadoCotizacion.ganancia. Flujo de caja nominal sin
@@ -549,6 +578,7 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
       engancheContado:         r2(engancheContado),
       ivaEnganche:             r2(ivaEnganche),
       comisionAperturaContado: r2(comisionContado),
+      ivaComisionContado:      r2(ivaComisionContado),
       aperturaSeguros:         r2(seguroContado),
       depositoGarantia:        r2(depositoGarantia),
       gpsContado:              r2(gpsContado),
@@ -582,6 +612,7 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
     totalRentas:         r2(totalRentasDec),
     desembolsoInicial:   r2(desembolsoInicialDec),
     totalPagar:          r2(totalPagarDec),
+    financiamientoIvaComision: r2(financiamientoIvaComision),
 
     montoFinanciadoReal: r2(montoFinanciadoReal),
     fvAmortizacion:      r2(fvPMT),

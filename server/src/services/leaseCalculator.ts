@@ -89,6 +89,9 @@ export interface LeaseResult {
   ivaEnganche: number;
   depositoGarantia: number;
   comisionApertura: number;
+  /** IVA (16%) de la comisión cuando es de CONTADO — se paga al inicio
+   *  (Damián 24-06-2026). 0 si la comisión es financiada. */
+  ivaComisionContado: number;
   valorResidual: number;
   montoFinanciar: number;
   rentaMensual: number;
@@ -96,6 +99,10 @@ export interface LeaseResult {
   rentaMensualIVA: number;
   totalRentas: number;
   desembolsoInicial: number;
+  /** Costo de financiar el IVA de la comisión cuando es FINANCIADA:
+   *  interés del IVA adelantado + IVA de ese interés (Damián 24-06-2026).
+   *  0 si la comisión es de contado. Incluido en totalPagar. */
+  financiamientoIvaComision: number;
   totalPagar: number;
   /**
    * Ganancia NOMINAL de la financiera, SIN IVA (definición Damián
@@ -264,17 +271,36 @@ export function calcularArrendamiento(params: LeaseParams): LeaseResult {
   // NOTA: regla nueva que DIVERGE del Excel §4.2 (espejo del cliente).
   const ivaEnganche = enganche.times(IVA_RATE);
 
+  // ── IVA de la comisión de apertura (Damián 24-06-2026) ───────────
+  // CxA de CONTADO: el cliente paga el IVA de la comisión de contado
+  //   (igual que el enganche) → se SUMA al desembolso.
+  // CxA FINANCIADA: Inyecta entera ese IVA al SAT el mes siguiente —antes
+  //   de cobrarlo— y le cobra al cliente el COSTO de fondear el adelanto:
+  //   interés de capitalizar el IVA al plazo + IVA de ese interés. El
+  //   capital del IVA se recauda dentro del IVA de las rentas; aquí solo se
+  //   agrega el costo de financiarlo. Modelo del abogado (espejo del cliente).
+  const ivaComisionMonto   = comisionApertura.times(IVA_RATE);
+  const ivaComisionContado = comisionAperturaFinanciada ? new Decimal(0) : ivaComisionMonto;
+  const ivaComisionFinanc  = comisionAperturaFinanciada ? ivaComisionMonto : new Decimal(0);
+  const pmtIvaComision     = ivaComisionFinanc.isZero()
+    ? new Decimal(0)
+    : calcPMT(ivaComisionFinanc, tasaMensual, plazo, new Decimal(0))
+        .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+  const interesIvaComision = pmtIvaComision.times(plazo).minus(ivaComisionFinanc);
+  const financiamientoIvaComision = interesIvaComision.times(1 + IVA_RATE);
+
   // ── Desembolso inicial ────────────────────────────────────────────
   // El seguro contado entra como anualidad (no como total prorrateado).
   const desembolsoInicial = enganche
     .plus(ivaEnganche)
     .plus(depositoGarantia)
     .plus(comisionContado)
+    .plus(ivaComisionContado)
     .plus(gpsFinanciado ? 0 : gps)
     .plus(seguroFinanciado ? 0 : seguro)
     .plus(rentaInicial || 0);
 
-  const totalPagar = totalRentas.plus(desembolsoInicial);
+  const totalPagar = totalRentas.plus(desembolsoInicial).plus(financiamientoIvaComision);
 
   // ── Ganancia (SIN IVA, nominal) — definición Damián 26-05-2026 ───
   // Descomposición = comisión apertura + intereses ganados + opción de
@@ -310,6 +336,7 @@ export function calcularArrendamiento(params: LeaseParams): LeaseResult {
     ivaEnganche:      r2(ivaEnganche),
     depositoGarantia: r2(depositoGarantia),
     comisionApertura: r2(comisionApertura),
+    ivaComisionContado: r2(ivaComisionContado),
     valorResidual:    r2(valorResidual), // §4.12: separado del depósito
     montoFinanciar:   r2(montoFinanciado),
     rentaMensual:     r2(rentaNeta),
@@ -317,6 +344,7 @@ export function calcularArrendamiento(params: LeaseParams): LeaseResult {
     rentaMensualIVA:  r2(rentaMensualIVA),
     totalRentas:      r2(totalRentas),
     desembolsoInicial: r2(desembolsoInicial),
+    financiamientoIvaComision: r2(financiamientoIvaComision),
     totalPagar:       r2(totalPagar),
     ganancia:         r2(ganancia),
     gananciaDesglose: {

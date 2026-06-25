@@ -131,9 +131,10 @@ describe('calcularCotizacion — totales (espejo servidor)', () => {
     expect(cot.desembolsoInicial).toBeCloseTo(292_215.17, 2);
   });
 
-  it('totalPagar = totalRentas + desembolsoInicial = $4,362,313.19', () => {
-    // totalRentas (full) + depósito (full, 292,215.1724…), igual que el servidor.
-    expect(cot.totalPagar).toBeCloseTo(4_362_313.19, 2);
+  it('totalPagar = rentas + desembolso + financiamiento IVA comisión = $4,377,562.23', () => {
+    // 4,362,313.19 (rentas full + depósito) + 15,249.04 (financiamiento del
+    // IVA de la comisión financiada, §4.16) = 4,377,562.23.
+    expect(cot.totalPagar).toBeCloseTo(4_377_562.23, 2);
   });
 
   it('rentaInicial anticipada se suma al desembolso y al total a pagar (no a totalRentas)', () => {
@@ -143,7 +144,7 @@ describe('calcularCotizacion — totales (espejo servidor)', () => {
       rentaInicial: 73_098.02,
     });
     expect(conRenta.desembolsoInicial).toBeCloseTo(365_313.19, 2); // 292,215.17 + 73,098.02
-    expect(conRenta.totalPagar).toBeCloseTo(4_435_411.21, 2);      // totalPagar base + 73,098.02
+    expect(conRenta.totalPagar).toBeCloseTo(4_450_660.25, 2);      // base (con financiamiento) + 73,098.02
     expect(conRenta.totalRentas).toBeCloseTo(cot.totalRentas, 2);  // no cambia
   });
 });
@@ -439,8 +440,51 @@ describe('IVA del enganche en el pago inicial (Damián 23-06-2026)', () => {
     });
     expect(p.total).toBeCloseTo(
       p.engancheContado + p.ivaEnganche + p.comisionAperturaContado +
-        p.aperturaSeguros + p.depositoGarantia + p.gpsContado,
+        p.ivaComisionContado + p.aperturaSeguros + p.depositoGarantia + p.gpsContado,
       2,
+    );
+  });
+});
+
+describe('IVA de la comisión de apertura (Damián 24-06-2026, modelo del abogado)', () => {
+  // CxA de CONTADO: el cliente paga el IVA de la comisión de contado
+  //   (igual que el enganche) → se suma al pago inicial.
+  // CxA FINANCIADA: Inyecta entera ese IVA al SAT el mes siguiente, antes
+  //   de cobrarlo → lo ADELANTA. Le cobra al cliente el COSTO de fondearlo:
+  //   el interés de capitalizar ese IVA al plazo + el IVA de ese interés.
+  //   El capital del IVA se sigue recaudando dentro del IVA de las rentas;
+  //   aquí solo se agrega el costo de financiarlo (no se duplica).
+
+  it('CxA de contado: IVA de comisión = comisión × 16% al pago inicial, sin financiamiento', () => {
+    const cot = calcularCotizacion({ ...baseInputs, producto: 'FINANCIERO', comisionAperturaEsContado: true });
+    expect(cot.pagoInicial.comisionAperturaContado).toBeGreaterThan(0);
+    expect(cot.pagoInicial.ivaComisionContado).toBeCloseTo(
+      cot.pagoInicial.comisionAperturaContado * 0.16, 2,
+    );
+    expect(cot.financiamientoIvaComision).toBe(0);
+  });
+
+  it('CxA financiada: financiamiento = (PMT(ivaComision) × plazo − ivaComision) × 1.16', () => {
+    const cot = calcularCotizacion({ ...baseInputs, producto: 'FINANCIERO', comisionAperturaEsContado: false });
+    const ivaComision = cot.monto.comisionAperturaFinanciada * 0.16;
+    const pmt = calcPMT(baseInputs.tasaAnual, baseInputs.plazo, ivaComision, 0);
+    const esperado = (pmt * baseInputs.plazo - ivaComision) * 1.16;
+    expect(cot.financiamientoIvaComision).toBeCloseTo(esperado, 0);
+    expect(cot.pagoInicial.ivaComisionContado).toBe(0); // no aplica de contado
+  });
+
+  it('caso del abogado: IVA comisión $13,162.48 · 36m · 36% → financiamiento ≈ $9,908', () => {
+    // comisión $82,265.52 → IVA $13,162.48; capitalizado a 36m al 3%/mes.
+    const ivaComision = 13_162.48;
+    const pmt = calcPMT(0.36, 36, ivaComision, 0);
+    const financiamiento = (pmt * 36 - ivaComision) * 1.16; // interés + IVA del interés
+    expect(financiamiento).toBeCloseTo(9_908.21, 0);
+  });
+
+  it('el financiamiento entra al Total a Pagar', () => {
+    const cot = calcularCotizacion({ ...baseInputs, producto: 'FINANCIERO', comisionAperturaEsContado: false });
+    expect(cot.totalPagar).toBeCloseTo(
+      cot.totalRentas + cot.desembolsoInicial + cot.financiamientoIvaComision, 2,
     );
   });
 });

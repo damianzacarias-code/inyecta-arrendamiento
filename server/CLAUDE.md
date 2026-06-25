@@ -390,6 +390,73 @@ Implementado al centavo en `calculos.ts` (cliente) y `leaseCalculator.ts`
 (servidor) con tests de paridad. No requiere migración de BD: el campo
 persistido `totalPagar` ya refleja el IVA; `ivaEnganche` se deriva.
 
+### 4.17 IVA de la comisión de apertura (Damián 24-06-2026, modelo del abogado)
+
+> ⚠️ **DIVERGE del Excel oficial** (igual que §4.16). Regla nueva: el
+> cliente paga el IVA de la comisión de apertura (16% sobre B18). A
+> partir de esta fecha el **sistema es la fuente de verdad**. El
+> tratamiento difiere según la comisión sea de contado o financiada.
+
+**(a) Comisión de CONTADO** — idéntico al patrón del enganche (§4.16):
+
+```
+ivaComisionContado = comisionApertura × 0.16
+pago inicial / desembolso / Total a Pagar  +=  ivaComisionContado
+```
+
+Pass-through al SAT, no es utilidad. Se paga al inicio, sin interés.
+
+**(b) Comisión FINANCIADA** — Inyecta entera ese IVA al SAT el mes
+siguiente a cobrar la comisión, **antes** de recuperarlo del cliente:
+lo **adelanta**. Per el abogado, "ya no es un IVA, es un monto que se
+prestó y se paga a lo largo del plazo; por la recuperación tardía le
+agregamos intereses, y ese interés por consecuencia tiene IVA" (Art.
+18-A LIVA). Se le cobra al cliente el **costo de fondear ese adelanto**:
+
+```
+ivaComision        = comisionApertura × 0.16          ← IVA adelantado
+pmtIvaComision     = PMT(tasaAnual/12, plazo, ivaComision, 0)   ← redondeado 2 dec
+interesIvaComision = pmtIvaComision × plazo − ivaComision        ← interés del adelanto
+financiamientoIvaComision = interesIvaComision × 1.16            ← interés + IVA del interés
+Total a Pagar  +=  financiamientoIvaComision
+```
+
+Reglas:
+- El **capital** del IVA de la comisión (`ivaComision`) se sigue
+  recaudando dentro del IVA de las rentas (la comisión está en el PV);
+  por eso aquí **sólo se agrega el costo de financiarlo** (interés +
+  IVA del interés), NO el capital — para no cobrarlo dos veces.
+- `financiamientoIvaComision` entra al **Total a Pagar** (se cobra a lo
+  largo del plazo), NO al desembolso inicial.
+- Aplica a **PURO y FINANCIERO**. En contado `financiamientoIvaComision
+  = 0`; en financiada `ivaComisionContado = 0`.
+- Paridad cliente/servidor: ambos motores redondean el PMT del IVA a 2
+  decimales antes de derivar el interés (mismo centavo).
+
+**Ejemplo del abogado** (comisión $82,265.52 → IVA $13,162.48, 36 m,
+36% = 3%/mes): PMT $602.89 · interés total $8,541.56 · IVA del interés
+$1,366.65 · `financiamientoIvaComision` ≈ **$9,908.21** sobre el Total
+a Pagar de hoy.
+
+> **Nota fiscal pendiente con contador:** para la calculadora el TOTAL
+> que paga el cliente queda correcto. La categorización exacta en CFDI
+> (cuánto del $13,162.48 se factura como IVA de renta vs. capital de
+> préstamo) es un detalle contable a afinar en la facturación — NO
+> cambia lo que paga el cliente.
+
+> **TODO (ganancia):** el interés del IVA adelantado
+> (`interesIvaComision`, $8,541.56 en el ejemplo) es ingreso financiero
+> real de Inyecta pero AÚN NO se suma a la descomposición de ganancia
+> (`comisión + intereses + opción`) — el apartado interno de Utilidad
+> SUBESTIMA por ese monto cuando la comisión es financiada. No afecta lo
+> que paga el cliente. Pendiente: sumar `interesIvaComision` a
+> `gananciaDesglose.intereses` con su propio test.
+
+Implementado en `calculos.ts` (cliente) y `leaseCalculator.ts`
+(servidor) con tests. Campos derivados `pagoInicial.ivaComisionContado`
+y `financiamientoIvaComision`; sin migración de BD (`totalPagar`
+persistido ya los refleja).
+
 ---
 
 ## 5. ESTRUCTURA DE ARCHIVOS DEL PROYECTO

@@ -1434,6 +1434,9 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                 <ResultRow label="Enganche (con IVA)" value={formatCurrency(cotLive.pagoInicial.engancheContado + cotLive.pagoInicial.ivaEnganche)} />
                 <ResultRow label="Deposito Garantia" value={formatCurrency(cotLive.pagoInicial.depositoGarantia)} />
                 <ResultRow label="Comision Apertura" value={formatCurrency(cotLive.pagoInicial.comisionAperturaContado + cotLive.monto.comisionAperturaFinanciada)} />
+                {cotLive.pagoInicial.ivaComisionContado > 0 && (
+                  <ResultRow label="IVA Comisión (contado)" value={formatCurrency(cotLive.pagoInicial.ivaComisionContado)} />
+                )}
                 <ResultRow label="Monto a Financiar" value={formatCurrency(cotLive.montoFinanciadoReal)} highlight />
                 <div className="border-t border-gray-100 pt-3">
                   <ResultRow label="Renta Mensual" value={formatCurrency(cotLive.rentaMensual.montoNeto)} />
@@ -1442,6 +1445,9 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                 </div>
                 <div className="border-t border-gray-100 pt-3">
                   <ResultRow label="Total Rentas" value={formatCurrency(cotLive.totalRentas)} />
+                  {cotLive.financiamientoIvaComision > 0 && (
+                    <ResultRow label="Financiamiento IVA Comisión" value={formatCurrency(cotLive.financiamientoIvaComision)} />
+                  )}
                   <ResultRow label="Total a Pagar" value={formatCurrency(cotLive.totalPagar)} />
                 </div>
 

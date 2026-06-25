@@ -390,8 +390,28 @@ describe('IVA del enganche en el desembolso (Damián 23-06-2026, paridad cliente
     ); // el resto del desembolso (depósito) no cambió
   });
 
-  it('totalPagar = totalRentas + desembolso (con IVA del enganche dentro)', () => {
+  it('totalPagar = totalRentas + desembolso + financiamiento IVA comisión', () => {
     const r = calcularArrendamiento({ ...baseParams, enganchePct: 0.10 });
-    expect(r.totalPagar).toBeCloseTo(r.totalRentas + r.desembolsoInicial, 2);
+    expect(r.totalPagar).toBeCloseTo(
+      r.totalRentas + r.desembolsoInicial + r.financiamientoIvaComision, 2,
+    );
+  });
+});
+
+describe('IVA de la comisión de apertura (Damián 24-06-2026, paridad cliente)', () => {
+  it('CxA de contado: IVA de comisión = comisión × 16% en el desembolso, sin financiamiento', () => {
+    const r = calcularArrendamiento({ ...baseParams, comisionAperturaFinanciada: false });
+    expect(r.ivaComisionContado).toBeCloseTo(r.comisionApertura * 0.16, 2);
+    expect(r.financiamientoIvaComision).toBe(0);
+  });
+
+  it('CxA financiada: financiamiento > 0 e ivaComisionContado = 0', () => {
+    const r = calcularArrendamiento({ ...baseParams, comisionAperturaFinanciada: true });
+    expect(r.ivaComisionContado).toBe(0);
+    expect(r.financiamientoIvaComision).toBeGreaterThan(0);
+    // = (PMT(ivaComision, 3%/mes, plazo) × plazo − ivaComision) × 1.16
+    expect(r.totalPagar).toBeCloseTo(
+      r.totalRentas + r.desembolsoInicial + r.financiamientoIvaComision, 2,
+    );
   });
 });
