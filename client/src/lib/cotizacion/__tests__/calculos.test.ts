@@ -487,6 +487,26 @@ describe('IVA de la comisión de apertura (Damián 24-06-2026, modelo del abogad
       cot.totalRentas + cot.desembolsoInicial + cot.financiamientoIvaComision, 2,
     );
   });
+
+  it('financiada: el interés del IVA adelantado SÍ entra en la ganancia (§4.17)', () => {
+    // El interés de fondear el IVA adelantado ($8,541.56 en el ejemplo del
+    // abogado) es ingreso financiero real → debe sumarse a ganancia.intereses.
+    // El IVA de ese interés es pass-through y NO entra (de ahí el /1.16).
+    const cot = calcularCotizacion({ ...baseInputs, producto: 'FINANCIERO', comisionAperturaEsContado: false });
+    const interesIvaComision = cot.financiamientoIvaComision / 1.16;
+    expect(interesIvaComision).toBeGreaterThan(0);
+    const sumaRentasNetas   = cot.rentaMensual.montoNeto * baseInputs.plazo;
+    const capitalRecuperado = cot.montoFinanciadoReal; // FV=0 en FINANCIERO
+    const esperado = sumaRentasNetas - capitalRecuperado + interesIvaComision;
+    expect(cot.ganancia.intereses).toBeCloseTo(esperado, 0);
+  });
+
+  it('contado: la ganancia NO se infla (financiamiento=0, sin interés extra)', () => {
+    const cot = calcularCotizacion({ ...baseInputs, producto: 'FINANCIERO', comisionAperturaEsContado: true });
+    expect(cot.financiamientoIvaComision).toBe(0);
+    const esperado = cot.rentaMensual.montoNeto * baseInputs.plazo - cot.montoFinanciadoReal;
+    expect(cot.ganancia.intereses).toBeCloseTo(esperado, 0);
+  });
 });
 
 describe('calcularCotizacion PURO — valorResidual como MONTO ABSOLUTO (§4.15)', () => {
@@ -705,9 +725,11 @@ describe('calcularCotizacion — ganancia', () => {
       expect(cot.ganancia.total).toBeCloseTo(suma, 2);
     });
 
-    it('intereses = Σ rentas netas − capital recuperado (PV − FV)', () => {
+    it('intereses = Σ rentas netas − capital recuperado (PV − FV) + interés del IVA comisión', () => {
       // FIN: FV=0, capital recuperado = montoFinanciadoReal.
-      const esperado = cot.rentaMensual.montoNeto * cot.plazo - cot.montoFinanciadoReal;
+      // §4.17: + interés del IVA de comisión adelantado (comisión financiada).
+      const interesIvaComision = cot.financiamientoIvaComision / 1.16;
+      const esperado = cot.rentaMensual.montoNeto * cot.plazo - cot.montoFinanciadoReal + interesIvaComision;
       expect(cot.ganancia.intereses).toBeCloseTo(esperado, 0);
     });
 
@@ -720,8 +742,10 @@ describe('calcularCotizacion — ganancia', () => {
       expect(cot.ganancia.comisionApertura).toBeCloseTo(91_317.24, 2);
     });
 
-    it('ganancia total ≈ $1,853,228 (comisión + intereses + opción)', () => {
-      expect(cot.ganancia.total).toBeCloseTo(1_853_228.47, 0);
+    it('ganancia total ≈ $1,866,374 (comisión + intereses + opción + interés IVA comisión)', () => {
+      // = 1,853,228.47 base + ~13,145.72 de interés del IVA de comisión
+      // adelantado (§4.17, comisión financiada en baseInputs).
+      expect(cot.ganancia.total).toBeCloseTo(1_866_374.19, 0);
     });
   });
 
@@ -736,7 +760,9 @@ describe('calcularCotizacion — ganancia', () => {
 
     it('ganancia = comisión + intereses (sin aporte del residual)', () => {
       const suma = cot.ganancia.comisionApertura + cot.ganancia.intereses;
-      expect(cot.ganancia.total).toBeCloseTo(suma, 2);
+      // Tolerancia 1 (±$0.05): suma de 2 componentes redondeados a 2 dec
+      // vs total redondeado independiente ⇒ jitter de hasta ~1.5 centavos.
+      expect(cot.ganancia.total).toBeCloseTo(suma, 1);
     });
 
     it('ganancia total positiva', () => {

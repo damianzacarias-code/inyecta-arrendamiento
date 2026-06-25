@@ -311,11 +311,14 @@ export function calcularArrendamiento(params: LeaseParams): LeaseResult {
   //                = 2% en FIN porque FV=0)
   // GPS y seguro NO entran: pass-through (cobrado = costo) → se cancelan.
   // El IVA es de paso (rentas→SAT, bien→acreditable) → no afecta.
+  // §4.17: el interés de fondear el IVA de comisión adelantado al SAT
+  //   (`interesIvaComision`, 0 si es de contado) es ingreso financiero
+  //   real → se suma a los intereses. El IVA de ese interés es de paso.
   // NOTA: la fórmula anterior (totalPagar − valorConIVA) mezclaba IVA en
   // ambos lados y usaba la renta CON IVA truncada — daba un número que
   // no era la utilidad real. Reemplazada por la descomposición correcta.
   const capitalRecuperado = montoFinanciado.minus(fvPMT);
-  const gananciaIntereses = rentaNeta.times(plazo).minus(capitalRecuperado);
+  const gananciaIntereses = rentaNeta.times(plazo).minus(capitalRecuperado).plus(interesIvaComision);
   const gananciaOpcion    = valorResidual.minus(fvPMT);
   const ganancia          = comisionApertura.plus(gananciaIntereses).plus(gananciaOpcion);
 

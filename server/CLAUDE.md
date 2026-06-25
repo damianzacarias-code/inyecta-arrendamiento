@@ -444,13 +444,12 @@ a Pagar de hoy.
 > préstamo) es un detalle contable a afinar en la facturación — NO
 > cambia lo que paga el cliente.
 
-> **TODO (ganancia):** el interés del IVA adelantado
+> **Ganancia (resuelto 24-06-2026):** el interés del IVA adelantado
 > (`interesIvaComision`, $8,541.56 en el ejemplo) es ingreso financiero
-> real de Inyecta pero AÚN NO se suma a la descomposición de ganancia
-> (`comisión + intereses + opción`) — el apartado interno de Utilidad
-> SUBESTIMA por ese monto cuando la comisión es financiada. No afecta lo
-> que paga el cliente. Pendiente: sumar `interesIvaComision` a
-> `gananciaDesglose.intereses` con su propio test.
+> real de Inyecta → **se suma a `gananciaDesglose.intereses`** en ambos
+> motores (el IVA de ese interés es pass-through y NO entra). En contado
+> `interesIvaComision = 0`, así que la ganancia de contado no cambia.
+> Verificado con tests propios y revisado por quotations-guardian.
 
 Implementado en `calculos.ts` (cliente) y `leaseCalculator.ts`
 (servidor) con tests. Campos derivados `pagoInicial.ivaComisionContado`

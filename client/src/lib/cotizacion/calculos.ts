@@ -529,9 +529,12 @@ export function calcularCotizacion(inp: InputsCotizacion): ResultadoCotizacion {
   //   comisión     = comisión apertura total (contado + financiada)
   // GPS y seguro NO aparecen: son pass-through (lo cobrado = el costo
   // que Inyecta paga al proveedor/aseguradora) → se cancelan.
+  // §4.17: el interés de fondear el IVA de comisión adelantado al SAT
+  //   (`interesIvaComision`, 0 si es de contado) es ingreso financiero
+  //   real → se suma a los intereses. El IVA de ese interés es de paso.
   const sumaRentasNetas    = rentaDecimal.times(plazoMeses);
   const capitalRecuperado  = montoFinanciadoReal.minus(fvPMT);
-  const gananciaIntereses  = sumaRentasNetas.minus(capitalRecuperado);
+  const gananciaIntereses  = sumaRentasNetas.minus(capitalRecuperado).plus(interesIvaComision);
   const gananciaOpcion     = residualDisplay.minus(fvPMT);
   const gananciaComision   = comisionMonto;
   const gananciaTotal      = gananciaComision.plus(gananciaIntereses).plus(gananciaOpcion);

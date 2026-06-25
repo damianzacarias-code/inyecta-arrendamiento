@@ -159,8 +159,10 @@ describe('calcularArrendamiento — ganancia (sin IVA)', () => {
       expect(r.gananciaDesglose.comisionApertura).toBeCloseTo(91_317.24, 2);
     });
 
-    it('intereses = Σ rentas netas − montoFinanciado (FV=0)', () => {
-      const esperado = r.rentaMensual * 48 - r.montoFinanciar;
+    it('intereses = Σ rentas netas − montoFinanciado (FV=0) + interés del IVA comisión', () => {
+      // §4.17: + interés del IVA de comisión adelantado (comisión financiada).
+      const interesIvaComision = r.financiamientoIvaComision / 1.16;
+      const esperado = r.rentaMensual * 48 - r.montoFinanciar + interesIvaComision;
       expect(r.gananciaDesglose.intereses).toBeCloseTo(esperado, 0);
     });
 
@@ -168,8 +170,9 @@ describe('calcularArrendamiento — ganancia (sin IVA)', () => {
       expect(r.gananciaDesglose.opcionCompra).toBeCloseTo(36_526.90, 2);
     });
 
-    it('ganancia total ≈ 1,853,228 (coincide con el motor del cliente)', () => {
-      expect(r.ganancia).toBeCloseTo(1_853_228.47, 0);
+    it('ganancia total ≈ 1,866,374 (coincide con el motor del cliente)', () => {
+      // 1,853,228.47 base + ~13,145.7 de interés del IVA de comisión (§4.17).
+      expect(r.ganancia).toBeCloseTo(1_866_374.19, 0);
     });
   });
 
@@ -413,5 +416,23 @@ describe('IVA de la comisión de apertura (Damián 24-06-2026, paridad cliente)'
     expect(r.totalPagar).toBeCloseTo(
       r.totalRentas + r.desembolsoInicial + r.financiamientoIvaComision, 2,
     );
+  });
+
+  it('financiada: el interés del IVA adelantado SÍ entra en la ganancia (§4.17)', () => {
+    // El interés de fondear el IVA adelantado es ingreso financiero real →
+    // se suma a gananciaDesglose.intereses. El IVA de ese interés es
+    // pass-through y NO entra (de ahí el /1.16). FINANCIERO ⇒ FV=0.
+    const r = calcularArrendamiento({ ...baseParams, producto: 'FINANCIERO', comisionAperturaFinanciada: true });
+    const interesIvaComision = r.financiamientoIvaComision / 1.16;
+    expect(interesIvaComision).toBeGreaterThan(0);
+    const esperado = r.rentaMensual * baseParams.plazo - r.montoFinanciar + interesIvaComision;
+    expect(r.gananciaDesglose.intereses).toBeCloseTo(esperado, 0);
+  });
+
+  it('contado: la ganancia NO se infla (financiamiento=0)', () => {
+    const r = calcularArrendamiento({ ...baseParams, producto: 'FINANCIERO', comisionAperturaFinanciada: false });
+    expect(r.financiamientoIvaComision).toBe(0);
+    const esperado = r.rentaMensual * baseParams.plazo - r.montoFinanciar;
+    expect(r.gananciaDesglose.intereses).toBeCloseTo(esperado, 0);
   });
 });
