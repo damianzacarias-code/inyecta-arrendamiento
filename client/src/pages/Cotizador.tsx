@@ -30,6 +30,7 @@ import {
 import { CotizacionPDF } from '@/lib/pdf/CotizacionPDF';
 import { AmortizacionPDF } from '@/lib/pdf/AmortizacionPDF';
 import { ComparativaPDF } from '@/lib/pdf/ComparativaPDF';
+import DesgloseOperacion from '@/components/DesgloseOperacion';
 import { getCatalog } from '@/lib/catalog';
 
 /** Forma del payload de error del backend cuando la validación Zod
@@ -1561,6 +1562,9 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
               </p>
             )}
           </div>
+
+          {/* Desglose de la operación: cargos y abonos (informativo) */}
+          {cotLive && <DesgloseOperacion cot={cotLive} tasaAnual={form.tasaAnual} />}
 
           {/* PDFs (cotización + amortización) */}
           {pdfData && (
