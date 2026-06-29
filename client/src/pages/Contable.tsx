@@ -122,20 +122,51 @@ function Resultado({ cot, tasaAnual, producto }: { cot: ReturnType<typeof calcul
   const esFin = producto === 'FINANCIERO';
   const sec4 = esFin ? 'Opción de compra' : 'Valor de rescate';
 
-  // Derivaciones (Decimal, espejo del motor)
+  // ── Derivaciones (Decimal, espejo del motor) ──────────────────────
+  const r2 = (d: Decimal) => d.toDecimalPlaces(2).toNumber();
   const interes1 = new Decimal(cot.montoFinanciadoReal).times(new Decimal(tasaAnual).div(12));
   const capital1 = new Decimal(cot.rentaMensual.montoNeto).minus(interes1);
   const i1 = interes1.toNumber();
   const c1 = capital1.toNumber();
   const iva1 = cot.rentaMensual.iva;
-
-  const ivaBien = new Decimal(cot.valorBienConIVA).minus(cot.valorBienSinIVA).toNumber();
-  const ivaEnganche = cot.pagoInicial.ivaEnganche;
-  const ivaBienEnRentas = new Decimal(ivaBien).minus(ivaEnganche).toNumber();
-  const comisionFinanc = cot.monto.comisionAperturaFinanciada;
-  const ivaComisionFinanc = new Decimal(comisionFinanc).times(0.16).toNumber();
-  const interesIvaComision = new Decimal(cot.financiamientoIvaComision).div(1.16).toNumber();
   const p = cot.pagoInicial;
+
+  const ivaBien = r2(new Decimal(cot.valorBienConIVA).minus(cot.valorBienSinIVA)); // 16% × valor sin IVA
+  const ivaEnganche = p.ivaEnganche;
+  const comisionFinanc = cot.monto.comisionAperturaFinanciada;
+  const ivaComisionFinanc = r2(new Decimal(comisionFinanc).times(0.16));
+  const interesIvaComision = r2(new Decimal(cot.financiamientoIvaComision).div(1.16));
+  const ivaFinanc = r2(new Decimal(cot.financiamientoIvaComision).minus(interesIvaComision)); // IVA del interés §4.17
+
+  // ── Reconciliación REAL del IVA (por momento × destino) ───────────
+  // El IVA del bien NO se recupera todo en rentas: en PURO una parte queda
+  // en el saldo final del PMT y se cobra en el cierre (vía el rescate); en
+  // FINANCIERO el saldo final es 0, así que todo entra en firma + rentas.
+  // La parte bien/comisión del capital (y del saldo final) se reparte
+  // proporcional a su peso en el PV. Verificado: las columnas y los totales
+  // cuadran al centavo.
+  const PV = new Decimal(cot.montoFinanciadoReal);
+  const FV = new Decimal(cot.fvAmortizacion);              // saldo final (0 en FIN, rescate en PURO)
+  const capRentas = PV.minus(FV);                          // capital recuperado en las rentas
+  const sumaInteres = new Decimal(cot.rentaMensual.montoNeto).times(cot.plazo).minus(capRentas);
+  const ivaInteres = r2(sumaInteres.times(0.16));          // IVA del interés ordinario (ingreso real)
+  const bienFin = new Decimal(cot.valorBienSinIVA).minus(p.engancheContado); // bien financiado
+  const fracBien = PV.isZero() ? new Decimal(0) : bienFin.div(PV);
+  const fracCom  = PV.isZero() ? new Decimal(0) : new Decimal(comisionFinanc).div(PV);
+  const ivaBienRentas = r2(capRentas.times(fracBien).times(0.16));
+  const ivaBienCierre = r2(FV.times(fracBien).times(0.16));        // 0 en FINANCIERO
+  const ivaComRentas  = r2(capRentas.times(fracCom).times(0.16));
+  const ivaComCierre  = r2(FV.times(fracCom).times(0.16));
+  const ivaComisionTotal = r2(new Decimal(p.comisionAperturaContado).plus(comisionFinanc).times(0.16));
+  const ivaOpcion = esFin ? cot.residual.iva : 0;          // FIN: opción (cargo extra); PURO va en cierre bien/com
+
+  const reconFilas: ReconFila[] = [
+    { concepto: 'IVA del bien (16% × valor s/IVA)', firma: ivaEnganche,      rentas: ivaBienRentas, cierre: ivaBienCierre, total: ivaBien },
+    { concepto: 'IVA de la comisión de apertura',   firma: p.ivaComisionContado, rentas: ivaComRentas, cierre: ivaComCierre, total: ivaComisionTotal },
+    { concepto: 'IVA del interés (ingreso)',        firma: 0,                rentas: ivaInteres,    cierre: 0,             total: ivaInteres },
+    ...(esFin ? [{ concepto: 'IVA de la opción de compra', firma: 0, rentas: 0, cierre: ivaOpcion, total: ivaOpcion }] : []),
+  ];
+  const reconTot = (k: keyof Omit<ReconFila, 'concepto'>) => reconFilas.reduce((s, r) => s + r[k], 0);
 
   return (
     <div className="space-y-6">
@@ -232,35 +263,38 @@ function Resultado({ cot, tasaAnual, producto }: { cot: ReturnType<typeof calcul
             <p className="text-xs text-gray-500">Se acredita contra el IVA trasladado que Inyecta cobra.</p>
           </Bloque>
 
-          <Bloque titulo="2. IVA trasladado (lo que Inyecta cobra)">
-            <KV k="IVA del enganche (firma, de contado)" v={f(ivaEnganche)} />
-            {p.ivaComisionContado > 0 && <KV k="IVA de comisión (firma, de contado)" v={f(p.ivaComisionContado)} />}
-            <KV k="IVA de cada renta (× plazo)" v={`${f(cot.rentaMensual.iva)} mensual`} />
-            <KV k={`IVA del ${sec4.toLowerCase()} (cierre)`} v={f(cot.residual.iva)} />
+          <Bloque titulo="2. IVA trasladado — reconciliación por momento × destino">
+            <p className="text-xs text-gray-500 mb-2">
+              Cada IVA que cobra Inyecta, ubicado por CUÁNDO se cobra (firma / rentas / cierre) y por
+              QUÉ recupera (bien / comisión / interés). El IVA del bien NO entra todo en las rentas.
+            </p>
+            <ReconTabla filas={reconFilas} tot={reconTot} />
+            <p className="text-[11px] text-gray-500 mt-2 leading-snug">
+              <strong>Lectura del IVA del bien</strong> ({f(ivaBien)} = 16% × valor sin IVA): {f(ivaEnganche)} en
+              la firma (enganche) + {f(ivaBienRentas)} dentro de las rentas
+              {ivaBienCierre > 0 ? ` + ${f(ivaBienCierre)} en el cierre (vía el rescate)` : ''}.
+              {esFin
+                ? ' En FINANCIERO el saldo final del PMT es 0, así que el bien se recupera completo en firma + rentas.'
+                : ' En PURO una parte del bien queda en el saldo final del PMT (el rescate), por eso ese IVA se cobra hasta el cierre y NO en las rentas — antes la página lo sumaba todo a "rentas", que era impreciso.'}
+              {' '}La columna “En rentas” coincide con el IVA mensual ({f(cot.rentaMensual.iva)}) × {cot.plazo} meses.
+            </p>
           </Bloque>
 
           {comisionFinanc > 0 && (
             <Bloque titulo="3. IVA de comisión FINANCIADA — capitalización (§4.17)">
               <KV k="IVA de la comisión (se adelanta al SAT)" v={f(ivaComisionFinanc)} />
-              <KV k="Se recupera vía el IVA de las rentas" v="(no se cobra dos veces)" />
+              <KV k="Se recupera vía el IVA de las rentas" v="(en la fila de comisión, arriba)" />
               <KV k="Costo de fondear el adelanto = interés" v={f(interesIvaComision)} />
-              <KV k="+ IVA de ese interés = financiamiento" v={f(cot.financiamientoIvaComision)} />
+              <KV k="IVA de ese interés (adicional a la tabla)" v={f(ivaFinanc)} />
+              <KV k="= Financiamiento (se agrega al Total a Pagar)" v={f(cot.financiamientoIvaComision)} />
               <p className="text-xs text-gray-500">
-                Inyecta entera el IVA de la comisión al SAT antes de cobrarlo, así que lo "presta": se
+                Inyecta entera el IVA de la comisión al SAT antes de cobrarlo, así que lo “presta”: se
                 capitaliza al plazo y se le cobra el interés (que a su vez causa IVA).
               </p>
             </Bloque>
           )}
 
-          <Bloque titulo="4. Reconciliación del IVA del bien">
-            <KV k="IVA del enganche (de contado)" v={f(ivaEnganche)} />
-            <KV k="+ IVA del bien recuperado en rentas" v={f(ivaBienEnRentas)} />
-            <div className="border-t border-gray-200 mt-1 pt-1">
-              <KV k="= IVA total del bien" v={f(ivaBien)} bold />
-            </div>
-          </Bloque>
-
-          <Bloque titulo="5. Retención de IVA / ISR">
+          <Bloque titulo="4. Retención de IVA / ISR">
             <p className="text-xs text-amber-700">
               El sistema NO calcula retención de IVA ni de ISR. Si alguna operación la requiere
               (p. ej. según el régimen del arrendatario), debe confirmarse con el contador y manejarse
@@ -328,6 +362,38 @@ function Bloque({ titulo, children }: { titulo: string; children: React.ReactNod
     <div className="border-l-2 border-inyecta-200 pl-3">
       <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">{titulo}</div>
       {children}
+    </div>
+  );
+}
+
+interface ReconFila { concepto: string; firma: number; rentas: number; cierre: number; total: number }
+
+/** Tabla de reconciliación del IVA: destino (fila) × momento (columna). Las
+ *  columnas suman el IVA cobrado por momento; los totales de fila, por destino. */
+function ReconTabla({ filas, tot }: { filas: ReconFila[]; tot: (k: keyof Omit<ReconFila, 'concepto'>) => number }) {
+  const cell = (v: number) => (v === 0 ? '—' : f(v));
+  const head = ['Concepto', 'Firma', 'En rentas', 'Cierre', 'Total'];
+  return (
+    <div className="grid grid-cols-[1.7fr_1fr_1fr_1fr_1fr] text-xs border border-gray-100 rounded-lg overflow-hidden">
+      {head.map((h, i) => (
+        <div key={h} className={`bg-gray-50 px-3 py-1.5 font-medium text-gray-500 ${i === 0 ? '' : 'text-right'}`}>{h}</div>
+      ))}
+      {filas.map((r, i) => (
+        <div key={i} className="contents">
+          <div className="px-3 py-1.5 text-gray-700 border-t border-gray-50">{r.concepto}</div>
+          <div className="px-3 py-1.5 text-right text-gray-900 border-t border-gray-50">{cell(r.firma)}</div>
+          <div className="px-3 py-1.5 text-right text-gray-900 border-t border-gray-50">{cell(r.rentas)}</div>
+          <div className="px-3 py-1.5 text-right text-gray-900 border-t border-gray-50">{cell(r.cierre)}</div>
+          <div className="px-3 py-1.5 text-right font-medium text-gray-900 border-t border-gray-50">{f(r.total)}</div>
+        </div>
+      ))}
+      <div className="contents">
+        <div className="px-3 py-1.5 font-semibold text-gray-700 border-t border-gray-200 bg-gray-50">Total IVA trasladado</div>
+        <div className="px-3 py-1.5 text-right font-semibold text-gray-900 border-t border-gray-200 bg-gray-50">{f(tot('firma'))}</div>
+        <div className="px-3 py-1.5 text-right font-semibold text-gray-900 border-t border-gray-200 bg-gray-50">{f(tot('rentas'))}</div>
+        <div className="px-3 py-1.5 text-right font-semibold text-gray-900 border-t border-gray-200 bg-gray-50">{f(tot('cierre'))}</div>
+        <div className="px-3 py-1.5 text-right font-semibold text-gray-900 border-t border-gray-200 bg-gray-50">{f(tot('total'))}</div>
+      </div>
     </div>
   );
 }

@@ -48,7 +48,16 @@ export default function DesgloseOperacion({ cot, tasaAnual }: Props) {
   const comisionFinanc = cot.monto.comisionAperturaFinanciada;
   const ivaComisionAdelantado = new Decimal(comisionFinanc).times(0.16).toNumber(); // se entera al SAT
   const ivaBien = new Decimal(cot.valorBienConIVA).minus(cot.valorBienSinIVA).toNumber();
-  const ivaBienEnRentas = new Decimal(ivaBien).minus(cot.pagoInicial.ivaEnganche).toNumber();
+  // El IVA del bien NO entra todo en rentas: en PURO una parte queda en el
+  // saldo final (rescate) y se cobra al cierre; en FIN (FV=0) todo en
+  // firma+rentas. La parte del bien se reparte proporcional al PV.
+  const PVd = new Decimal(cot.montoFinanciadoReal);
+  const FVd = new Decimal(cot.fvAmortizacion);
+  const fracBienD = PVd.isZero()
+    ? new Decimal(0)
+    : new Decimal(cot.valorBienSinIVA).minus(cot.pagoInicial.engancheContado).dividedBy(PVd);
+  const ivaBienRentas = PVd.minus(FVd).times(fracBienD).times(0.16).toNumber();
+  const ivaBienCierre = FVd.times(fracBienD).times(0.16).toNumber();
 
   const sec4Label = esFin ? 'Opción de compra' : 'Valor de rescate';
   const i1 = interes1.toNumber();
@@ -113,9 +122,9 @@ export default function DesgloseOperacion({ cot, tasaAnual }: Props) {
 
           {/* Hilo del IVA — reconciliación, común a las 3 vistas */}
           <div className="mt-4 pt-3 border-t border-gray-100 text-[11px] text-gray-500 leading-relaxed">
-            <span className="font-semibold text-gray-600">El IVA cuadra:</span>{' '}
-            IVA del bien {f(ivaBien)} = IVA del enganche {f(cot.pagoInicial.ivaEnganche)} (de contado) +{' '}
-            {f(ivaBienEnRentas)} recuperado dentro de las rentas. El IVA es de paso al SAT; la utilidad real es sin IVA.
+            <span className="font-semibold text-gray-600">El IVA del bien cuadra:</span>{' '}
+            {f(ivaBien)} = {f(cot.pagoInicial.ivaEnganche)} del enganche + {f(ivaBienRentas)} en las rentas
+            {ivaBienCierre > 0 ? ` + ${f(ivaBienCierre)} en el cierre (rescate)` : ''}. El IVA es de paso al SAT; la utilidad real es sin IVA.
           </div>
         </div>
       )}
