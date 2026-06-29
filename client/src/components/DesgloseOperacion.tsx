@@ -144,23 +144,45 @@ function Titulo({ children }: { children: React.ReactNode }) {
 function Flujo({
   cot, esFin, ivaComisionAdelantado, sec4Label,
 }: { cot: ResultadoCotizacion; esFin: boolean; ivaComisionAdelantado: number; sec4Label: string }) {
+  const p = cot.pagoInicial;
+  const engancheConIVA = p.engancheContado + p.ivaEnganche;
+  const comisionConIVA = p.comisionAperturaContado + p.ivaComisionContado;
+  // Desembolso neto de Inyecta al inicio = lo que paga por el bien − lo que
+  // entra del cliente en la firma (enganche, depósito, etc.). El enganche
+  // NO es salida extra: ya cubre parte del bien (de ahí que se reste aquí).
+  const desembolsoNeto = cot.valorBienConIVA - p.total;
   return (
     <div>
-      <Titulo>Salidas (Inyecta desembolsa)</Titulo>
+      <Titulo>Al inicio (firma)</Titulo>
       <Linea label="Compra del bien (con IVA)" value={cot.valorBienConIVA} tone="out" />
+      <Linea label="Enganche del cliente (con IVA)" value={engancheConIVA} tone="in" />
+      {comisionConIVA > 0 && (
+        <Linea label="Comisión de apertura de contado (con IVA)" value={comisionConIVA} tone="in" />
+      )}
+      {p.aperturaSeguros > 0 && <Linea label="Apertura de seguro" value={p.aperturaSeguros} tone="in" />}
+      {p.gpsContado > 0 && <Linea label="Instalación del GPS" value={p.gpsContado} tone="in" />}
+      {p.depositoGarantia > 0 && <Linea label="Depósito en garantía" value={p.depositoGarantia} tone="in" />}
+      <div className="border-t border-gray-200 mt-1 pt-1">
+        <Linea label="Desembolso neto de Inyecta" value={desembolsoNeto} tone="out" strong />
+      </div>
+      <p className="text-[11px] text-gray-500 mt-1 leading-snug">
+        El enganche del cliente ya cubre parte del bien; Inyecta solo fondea la diferencia
+        y la recupera con las rentas.
+      </p>
+
+      <Titulo>Durante el plazo ({cot.plazo} meses)</Titulo>
+      <Linea label={`Rentas (${cot.plazo} × ${f(cot.rentaMensual.total)})`} value={cot.totalRentas} tone="in" />
       {ivaComisionAdelantado > 0 && (
         <Linea label="IVA de comisión enterado al SAT (adelantado)" value={ivaComisionAdelantado} tone="out" />
       )}
-      {esFin && cot.pagoInicial.depositoGarantia > 0 && (
-        <Linea label="Devolución del depósito (al cierre)" value={cot.pagoInicial.depositoGarantia} tone="out" />
-      )}
-
-      <Titulo>Entradas (Inyecta cobra)</Titulo>
-      <Linea label="Pago inicial (firma)" value={cot.pagoInicial.total} tone="in" />
-      <Linea label={`Rentas (${cot.plazo} × ${f(cot.rentaMensual.total)})`} value={cot.totalRentas} tone="in" />
-      <Linea label={`${sec4Label} (cierre)`} value={cot.residual.total} tone="in" />
       {cot.financiamientoIvaComision > 0 && (
         <Linea label="Financiamiento del IVA de comisión" value={cot.financiamientoIvaComision} tone="in" />
+      )}
+
+      <Titulo>Al cierre</Titulo>
+      <Linea label={sec4Label} value={cot.residual.total} tone="in" />
+      {esFin && cot.pagoInicial.depositoGarantia > 0 && (
+        <Linea label="Devolución del depósito" value={cot.pagoInicial.depositoGarantia} tone="out" />
       )}
 
       <div className="mt-3 pt-2 border-t-2 border-inyecta-200 bg-inyecta-50/40 -mx-2 px-2 py-2 rounded-lg">
