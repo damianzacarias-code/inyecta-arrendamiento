@@ -5,6 +5,7 @@ import api from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import { Calculator, Save, RotateCcw, ChevronDown, ChevronUp, FileText, Table, Plus, X, Sparkles, Columns3 } from 'lucide-react';
 import { calcularCotizacion, calcGananciaCredito, calcTIRCredito, calcTIRArrendamiento } from '@/lib/cotizacion/calculos';
+import { engancheLabel } from '@/lib/cotizacion/labels';
 import { valorBienTecleadoASinIVA, valorBienSinIVAATecleado } from '@/lib/cotizacion/valorBienIVA';
 import {
   distribuirAporte,
@@ -1082,7 +1083,7 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
                 {/* Display de la distribución (read-only cuando NO hay edición manual) */}
                 <div className="mt-3 grid grid-cols-2 gap-3 p-3 bg-gray-50 border border-gray-200 rounded-lg">
                   <div>
-                    <div className="text-xs text-gray-500 uppercase tracking-wide">Enganche</div>
+                    <div className="text-xs text-gray-500 uppercase tracking-wide">{engancheLabel(form.producto)}</div>
                     <div className="text-lg font-semibold text-gray-800">
                       {(form.enganchePct * 100).toFixed(1)}%
                       <span className="ml-2 text-xs text-gray-400 font-normal">
@@ -1432,7 +1433,7 @@ export default function Cotizador({ productoInicial }: CotizadorProps = {}) {
             {cotLive ? (
               <div className="space-y-3">
                 <ResultRow label="Valor del Bien + IVA" value={formatCurrency(cotLive.valorBienConIVA)} />
-                <ResultRow label="Enganche (con IVA)" value={formatCurrency(cotLive.pagoInicial.engancheContado + cotLive.pagoInicial.ivaEnganche)} />
+                <ResultRow label={`${engancheLabel(cotLive.producto)} (con IVA)`} value={formatCurrency(cotLive.pagoInicial.engancheContado + cotLive.pagoInicial.ivaEnganche)} />
                 <ResultRow label="Deposito Garantia" value={formatCurrency(cotLive.pagoInicial.depositoGarantia)} />
                 <ResultRow label="Comision Apertura" value={formatCurrency(cotLive.pagoInicial.comisionAperturaContado + cotLive.monto.comisionAperturaFinanciada)} />
                 {cotLive.pagoInicial.ivaComisionContado > 0 && (

@@ -16,6 +16,7 @@ import Decimal from 'decimal.js';
 import { Download } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { calcularCotizacion } from '@/lib/cotizacion/calculos';
+import { engancheLabel } from '@/lib/cotizacion/labels';
 
 const f = formatCurrency;
 
@@ -94,7 +95,7 @@ export default function Contable() {
           <Num label="Valor del bien (con IVA)" value={valorConIVA} onChange={setValorConIVA} step={10000} />
           <Num label="Plazo (meses)" value={plazo} onChange={setPlazo} step={1} />
           <Num label="Tasa anual (%)" value={tasaPct} onChange={setTasaPct} step={1} />
-          <Num label="Enganche (% s/ valor sin IVA)" value={enganchePct} onChange={setEnganchePct} step={1} />
+          <Num label={`${engancheLabel(producto)} (% s/ valor sin IVA)`} value={enganchePct} onChange={setEnganchePct} step={1} />
           <Num label="Comisión apertura (%)" value={comisionPct} onChange={setComisionPct} step={0.5} />
           <Campo label="Comisión">
             <select
@@ -144,7 +145,7 @@ function Resultado({ cot, tasaAnual, producto }: { cot: ReturnType<typeof calcul
           <KV k="Valor del bien (sin IVA)" v={f(cot.valorBienSinIVA)} />
           <KV k="IVA del bien (acreditable)" v={f(ivaBien)} />
           <KV k="Valor del bien (con IVA)" v={f(cot.valorBienConIVA)} />
-          <KV k="Enganche (neto) + su IVA" v={`${f(cot.pagoInicial.engancheContado)} + ${f(cot.pagoInicial.ivaEnganche)}`} />
+          <KV k={`${engancheLabel(producto)} (neto) + su IVA`} v={`${f(cot.pagoInicial.engancheContado)} + ${f(cot.pagoInicial.ivaEnganche)}`} />
           <KV k="Monto a financiar (PV)" v={f(cot.montoFinanciadoReal)} />
           <KV k="Renta neta + IVA" v={`${f(cot.rentaMensual.montoNeto)} + ${f(cot.rentaMensual.iva)}`} />
           <KV k="Renta total mensual" v={f(cot.rentaMensual.total)} />
@@ -168,7 +169,7 @@ function Resultado({ cot, tasaAnual, producto }: { cot: ReturnType<typeof calcul
           titulo="2) Firma — cobro del pago inicial"
           rows={[
             { c: 'Bancos', d: p.total },
-            { c: 'Anticipo de rentas (enganche)', h: p.engancheContado },
+            { c: engancheLabel(producto), h: p.engancheContado },
             { c: 'IVA trasladado (enganche)', h: p.ivaEnganche },
             ...(p.comisionAperturaContado > 0
               ? [

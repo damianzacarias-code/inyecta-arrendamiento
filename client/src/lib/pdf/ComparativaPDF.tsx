@@ -19,6 +19,7 @@
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer';
 import { colors, fmtMoney, fmtMoneySigned } from './tokens';
 import type { ResultadoCotizacion } from '../cotizacion/calculos';
+import { engancheLabel } from '../cotizacion/labels';
 import { getBranding } from '@/lib/branding';
 
 const TITULO = 'COTIZACIÓN ARRENDAMIENTO — COMPARATIVA DE PLAZOS';
@@ -256,7 +257,7 @@ export function ComparativaPDF({
         {/* ── Sección 2: Pago inicial ───────────────────────── */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>Pago inicial</Text>
-          <TableLine label="Pago anticipado (con IVA)"               values={col((c) => c.pagoInicial.engancheContado + c.pagoInicial.ivaEnganche)} alt />
+          <TableLine label={`${engancheLabel(base?.producto ?? 'FINANCIERO')} (con IVA)`}               values={col((c) => c.pagoInicial.engancheContado + c.pagoInicial.ivaEnganche)} alt />
           <TableLine label="Comisión por apertura contado (con IVA)" values={col((c) => c.pagoInicial.comisionAperturaContado + c.pagoInicial.ivaComisionContado)} alt={false} />
           <TableLine label="Apertura de seguro"                      values={col((c) => c.pagoInicial.aperturaSeguros)}  alt />
           <TableLine label="Depósito en garantía"                    values={col((c) => c.pagoInicial.depositoGarantia)} alt={false} />

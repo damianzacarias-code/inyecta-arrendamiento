@@ -21,6 +21,7 @@ import { useState } from 'react';
 import Decimal from 'decimal.js';
 import { formatCurrency } from '@/lib/utils';
 import type { ResultadoCotizacion } from '@/lib/cotizacion/calculos';
+import { engancheLabel } from '@/lib/cotizacion/labels';
 
 interface Props {
   cot: ResultadoCotizacion;
@@ -155,7 +156,7 @@ function Flujo({
     <div>
       <Titulo>Al inicio (firma)</Titulo>
       <Linea label="Compra del bien (con IVA)" value={cot.valorBienConIVA} tone="out" />
-      <Linea label="Enganche del cliente (con IVA)" value={engancheConIVA} tone="in" />
+      <Linea label={`${engancheLabel(cot.producto)} del cliente (con IVA)`} value={engancheConIVA} tone="in" />
       {comisionConIVA > 0 && (
         <Linea label="Comisión de apertura de contado (con IVA)" value={comisionConIVA} tone="in" />
       )}
@@ -208,7 +209,7 @@ function Cliente({
   return (
     <div>
       <Titulo>Cargos (lo que se le cobra)</Titulo>
-      <Linea label="Enganche + IVA (firma)" value={engancheConIVA} />
+      <Linea label={`${engancheLabel(cot.producto)} + IVA (firma)`} value={engancheConIVA} />
       {comisionContadoConIVA > 0 && (
         <Linea label="Comisión de apertura + IVA (firma)" value={comisionContadoConIVA} />
       )}
@@ -309,7 +310,7 @@ function Contable({
         titulo="2) Firma — pago inicial"
         rows={[
           { concepto: 'Bancos', debe: cot.pagoInicial.total },
-          { concepto: 'Anticipo de rentas (enganche)', haber: cot.pagoInicial.engancheContado },
+          { concepto: engancheLabel(cot.producto), haber: cot.pagoInicial.engancheContado },
           { concepto: 'IVA trasladado (enganche)', haber: cot.pagoInicial.ivaEnganche },
           ...(cot.pagoInicial.comisionAperturaContado > 0
             ? [

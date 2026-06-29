@@ -17,6 +17,7 @@
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer';
 import { colors, fmtMoney, fmtMoneySigned } from './tokens';
 import type { ResultadoCotizacion } from '../cotizacion/calculos';
+import { engancheLabel } from '../cotizacion/labels';
 import { getBranding } from '@/lib/branding';
 
 // ────────────────────────────────────────────────────────────────────
@@ -290,7 +291,7 @@ export function CotizacionPDF({
         {/* ── Sección 2: Pago inicial ──────────────────────── */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>Pago inicial</Text>
-          <TableLine label="Pago anticipado (con IVA)"     amount={data.pagoInicial.engancheContado + data.pagoInicial.ivaEnganche} alt />
+          <TableLine label={`${engancheLabel(data.producto)} (con IVA)`}     amount={data.pagoInicial.engancheContado + data.pagoInicial.ivaEnganche} alt />
           <TableLine label="Comisión por apertura contado (con IVA)"  amount={data.pagoInicial.comisionAperturaContado + data.pagoInicial.ivaComisionContado} alt={false} />
           <TableLine label="Apertura de seguro"             amount={data.pagoInicial.aperturaSeguros}         alt />
           <TableLine label="Depósito en garantía"           amount={data.pagoInicial.depositoGarantia}        alt={false} />
