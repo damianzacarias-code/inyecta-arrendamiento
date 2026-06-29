@@ -316,13 +316,6 @@ function Resultado({ cot, tasaAnual, producto }: { cot: ReturnType<typeof calcul
             </Bloque>
           )}
 
-          <Bloque titulo="4. Retención de IVA / ISR">
-            <p className="text-xs text-amber-700">
-              El sistema NO calcula retención de IVA ni de ISR. Si alguna operación la requiere
-              (p. ej. según el régimen del arrendatario), debe confirmarse con el contador y manejarse
-              en la facturación. Ver el documento de reglas de IVA.
-            </p>
-          </Bloque>
         </div>
       </Tarjeta>
 
