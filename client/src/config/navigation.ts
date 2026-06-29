@@ -98,6 +98,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: 'Caja receptora',        icon: CreditCard, path: '/cobranza'      },
       { label: 'Conciliación bancaria', icon: Banknote,   path: '/conciliacion'  },
       { label: 'Facturas',              icon: Receipt,    path: '/facturas'      },
+      { label: 'Contable / IVA',        icon: Calculator, path: '/contable'      },
     ],
   },
   {

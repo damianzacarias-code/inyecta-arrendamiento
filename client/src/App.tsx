@@ -27,6 +27,7 @@ import CirculoCredito from '@/pages/CirculoCredito';
 import Facturas from '@/pages/Facturas';
 import Portal from '@/pages/Portal';
 import Conciliacion from '@/pages/Conciliacion';
+import Contable from '@/pages/Contable';
 // ─── Reportes (antes dispersos en Estadisticas*, Reportes, Bitacora) ──
 import ReportesHub from '@/pages/reportes/Hub';
 import ReportesPortafolio from '@/pages/reportes/Portafolio';
@@ -145,6 +146,7 @@ export default function App() {
               {/* ─── Facturación ─── */}
               <Route path="facturas" element={<Facturas />} />
               <Route path="conciliacion" element={<Conciliacion />} />
+              <Route path="contable" element={<Contable />} />
             </Route>
           </Routes>
         </BrowserRouter>
