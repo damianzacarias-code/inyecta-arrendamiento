@@ -26,7 +26,7 @@ export default function Contable() {
   const [valorConIVA, setValorConIVA] = useState(1_160_000);
   const [plazo, setPlazo] = useState(36);
   const [tasaPct, setTasaPct] = useState(36);
-  const [enganche, setEnganche] = useState(200_000);
+  const [enganchePct, setEnganchePct] = useState(10);
   const [comisionPct, setComisionPct] = useState(5);
   const [comisionContado, setComisionContado] = useState(false);
   const [depositoPct, setDepositoPct] = useState(10);
@@ -48,7 +48,9 @@ export default function Contable() {
       seguroAnual: 0,
       seguroPendiente: false,
       seguroEsContado: true,
-      engancheMonto: enganche,
+      // Enganche en % sobre el valor SIN IVA (igual que el cotizador). El IVA
+      // se suma encima (modelo actual): el cliente paga neto + IVA.
+      engancheMonto: (valorConIVA / 1.16) * (enganchePct / 100),
       nombreBien: '',
       estadoBien: '',
       seguroEstado: '',
@@ -56,7 +58,7 @@ export default function Contable() {
       fecha: new Date(),
       producto,
     } as never);
-  }, [producto, valorConIVA, plazo, tasaPct, enganche, comisionPct, comisionContado, depositoPct]);
+  }, [producto, valorConIVA, plazo, tasaPct, enganchePct, comisionPct, comisionContado, depositoPct]);
 
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-6">
@@ -92,7 +94,7 @@ export default function Contable() {
           <Num label="Valor del bien (con IVA)" value={valorConIVA} onChange={setValorConIVA} step={10000} />
           <Num label="Plazo (meses)" value={plazo} onChange={setPlazo} step={1} />
           <Num label="Tasa anual (%)" value={tasaPct} onChange={setTasaPct} step={1} />
-          <Num label="Enganche (monto)" value={enganche} onChange={setEnganche} step={10000} />
+          <Num label="Enganche (% s/ valor sin IVA)" value={enganchePct} onChange={setEnganchePct} step={1} />
           <Num label="Comisión apertura (%)" value={comisionPct} onChange={setComisionPct} step={0.5} />
           <Campo label="Comisión">
             <select
@@ -142,6 +144,7 @@ function Resultado({ cot, tasaAnual, producto }: { cot: ReturnType<typeof calcul
           <KV k="Valor del bien (sin IVA)" v={f(cot.valorBienSinIVA)} />
           <KV k="IVA del bien (acreditable)" v={f(ivaBien)} />
           <KV k="Valor del bien (con IVA)" v={f(cot.valorBienConIVA)} />
+          <KV k="Enganche (neto) + su IVA" v={`${f(cot.pagoInicial.engancheContado)} + ${f(cot.pagoInicial.ivaEnganche)}`} />
           <KV k="Monto a financiar (PV)" v={f(cot.montoFinanciadoReal)} />
           <KV k="Renta neta + IVA" v={`${f(cot.rentaMensual.montoNeto)} + ${f(cot.rentaMensual.iva)}`} />
           <KV k="Renta total mensual" v={f(cot.rentaMensual.total)} />
