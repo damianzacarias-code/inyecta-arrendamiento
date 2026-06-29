@@ -119,6 +119,7 @@ export default function Contable() {
 // ── Resultado: asientos + flujo de IVA ──────────────────────────────
 
 function Resultado({ cot, tasaAnual, producto }: { cot: ReturnType<typeof calcularCotizacion>; tasaAnual: number; producto: Producto }) {
+  const [verMensual, setVerMensual] = useState(false);
   const esFin = producto === 'FINANCIERO';
   const sec4 = esFin ? 'Opción de compra' : 'Valor de rescate';
 
@@ -167,6 +168,27 @@ function Resultado({ cot, tasaAnual, producto }: { cot: ReturnType<typeof calcul
     ...(esFin ? [{ concepto: 'IVA de la opción de compra', firma: 0, rentas: 0, cierre: ivaOpcion, total: ivaOpcion }] : []),
   ];
   const reconTot = (k: keyof Omit<ReconFila, 'concepto'>) => reconFilas.reduce((s, r) => s + r[k], 0);
+
+  // ── Desglose mensual del IVA (amortización del PMT) ───────────────
+  // Interés_n = saldo × tasa/12; capital_n = renta − interés (última fila
+  // cierra en el saldo final exacto). El IVA cobrado = renta × 16% es
+  // constante; se separa en IVA s/interés (baja) + IVA s/capital (sube).
+  const rMens = new Decimal(tasaAnual).div(12);
+  const rentaNetaD = new Decimal(cot.rentaMensual.montoNeto);
+  const ivaMes = rentaNetaD.times(0.16);
+  const filasMes: { mes: number; interes: number; capital: number; ivaInt: number; ivaCap: number; iva: number }[] = [];
+  const totMes = { interes: new Decimal(0), capital: new Decimal(0), ivaInt: new Decimal(0), ivaCap: new Decimal(0), iva: new Decimal(0) };
+  let saldoM = new Decimal(cot.montoFinanciadoReal);
+  for (let m = 1; m <= cot.plazo; m++) {
+    const interesM = saldoM.times(rMens);
+    const capitalM = m === cot.plazo ? saldoM.minus(FV) : rentaNetaD.minus(interesM);
+    const ivaIntM = interesM.times(0.16);
+    const ivaCapM = capitalM.times(0.16);
+    filasMes.push({ mes: m, interes: interesM.toNumber(), capital: capitalM.toNumber(), ivaInt: ivaIntM.toNumber(), ivaCap: ivaCapM.toNumber(), iva: ivaMes.toNumber() });
+    totMes.interes = totMes.interes.plus(interesM); totMes.capital = totMes.capital.plus(capitalM);
+    totMes.ivaInt = totMes.ivaInt.plus(ivaIntM); totMes.ivaCap = totMes.ivaCap.plus(ivaCapM); totMes.iva = totMes.iva.plus(ivaMes);
+    saldoM = saldoM.minus(capitalM);
+  }
 
   return (
     <div className="space-y-6">
@@ -303,6 +325,65 @@ function Resultado({ cot, tasaAnual, producto }: { cot: ReturnType<typeof calcul
           </Bloque>
         </div>
       </Tarjeta>
+
+      {/* Desglose mensual del IVA (colapsable) */}
+      <div className="bg-white rounded-xl border border-gray-200">
+        <button
+          type="button"
+          onClick={() => setVerMensual((v) => !v)}
+          className="w-full flex items-center justify-between p-6 text-left"
+        >
+          <div>
+            <h2 className="font-semibold text-gray-900">Desglose mensual del IVA cobrado</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Cómo se separa el IVA de cada renta (interés vs capital), mes a mes · {cot.plazo} meses
+            </p>
+          </div>
+          <span className="text-gray-400 text-lg">{verMensual ? '−' : '+'}</span>
+        </button>
+        {verMensual && (
+          <div className="px-6 pb-6">
+            <div className="max-h-[32rem] overflow-auto border border-gray-100 rounded-lg">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr>
+                    {['Mes', 'Interés', 'Capital', 'IVA s/ interés', 'IVA s/ capital', 'IVA cobrado'].map((h, i) => (
+                      <th key={h} className={`sticky top-0 bg-gray-50 px-3 py-2 font-medium text-gray-500 ${i === 0 ? 'text-left' : 'text-right'}`}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filasMes.map((r) => (
+                    <tr key={r.mes} className="border-t border-gray-50">
+                      <td className="px-3 py-1.5 text-gray-700">{r.mes}</td>
+                      <td className="px-3 py-1.5 text-right text-gray-900">{f(r.interes)}</td>
+                      <td className="px-3 py-1.5 text-right text-gray-900">{f(r.capital)}</td>
+                      <td className="px-3 py-1.5 text-right text-gray-900">{f(r.ivaInt)}</td>
+                      <td className="px-3 py-1.5 text-right text-gray-900">{f(r.ivaCap)}</td>
+                      <td className="px-3 py-1.5 text-right text-gray-900">{f(r.iva)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="font-semibold">
+                    <td className="sticky bottom-0 bg-gray-50 px-3 py-2 text-gray-700 border-t border-gray-300">Σ</td>
+                    <td className="sticky bottom-0 bg-gray-50 px-3 py-2 text-right border-t border-gray-300">{f(totMes.interes.toNumber())}</td>
+                    <td className="sticky bottom-0 bg-gray-50 px-3 py-2 text-right border-t border-gray-300">{f(totMes.capital.toNumber())}</td>
+                    <td className="sticky bottom-0 bg-gray-50 px-3 py-2 text-right border-t border-gray-300">{f(totMes.ivaInt.toNumber())}</td>
+                    <td className="sticky bottom-0 bg-gray-50 px-3 py-2 text-right border-t border-gray-300">{f(totMes.ivaCap.toNumber())}</td>
+                    <td className="sticky bottom-0 bg-gray-50 px-3 py-2 text-right border-t border-gray-300">{f(totMes.iva.toNumber())}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            <p className="text-[11px] text-gray-500 mt-2 leading-snug">
+              IVA cobrado = renta neta ({f(cot.rentaMensual.montoNeto)}) × 16%, constante todos los meses.
+              Se separa en IVA sobre el interés (tu ingreso, baja con el tiempo) + IVA sobre el capital
+              (recupera el IVA del bien y de la comisión, sube). Σ IVA cobrado = {f(totMes.iva.toNumber())}.
+            </p>
+          </div>
+        )}
+      </div>
 
       <p className="text-xs text-amber-700 leading-snug">
         ⚠️ Los asientos son la lógica cargo/abono informativa. La clasificación formal NIF D-5 / IFRS-16
